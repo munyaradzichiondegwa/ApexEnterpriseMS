@@ -2,6 +2,20 @@
   "name": "apexerp-frontend",
   "version": "1.0.0",
   "private": true,
+  "author": {
+    "name": "Munyaradzi Chiondegwa",
+    "email": "chiondegwabm@gmail.com",
+    "url": "https://github.com/munyaradzichiondegwa"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/munyaradzichiondegwa/ApexEnterpriseMS.git"
+  },
+  "homepage": "https://github.com/munyaradzichiondegwa/ApexEnterpriseMS",
+  "bugs": {
+    "url": "https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/issues"
+  },
+  "license": "MIT",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
