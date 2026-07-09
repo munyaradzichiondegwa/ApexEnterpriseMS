@@ -361,9 +361,9 @@ ApexEnterpriseMS was architected and developed by **Munyaradzi Chiondegwa**, a m
 
 ### Connect
 - GitHub: [munyaradzichiondegwa](https://github.com/munyaradzichiondegwa)
-- Portfolio: *(Add your portfolio URL)*
-- LinkedIn: *(Add your LinkedIn profile URL)*
-- Email: *(Add your preferred email address)*
+- Portfolio: https://munyaradzichiondegwa.netlify.app/
+- LinkedIn: https://www.linkedin.com/in/munyaradzi-chiondegwa/
+- Email: chiondegwabm@gmail.com
 
 ---
 
