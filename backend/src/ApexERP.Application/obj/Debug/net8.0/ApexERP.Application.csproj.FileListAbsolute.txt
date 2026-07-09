@@ -1,0 +1,17 @@
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\bin\Debug\net8.0\ApexERP.Application.deps.json
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\bin\Debug\net8.0\ApexERP.Application.dll
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\bin\Debug\net8.0\ApexERP.Application.pdb
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\bin\Debug\net8.0\ApexERP.Domain.dll
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\bin\Debug\net8.0\ApexERP.Infrastructure.dll
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\bin\Debug\net8.0\ApexERP.Domain.pdb
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\bin\Debug\net8.0\ApexERP.Infrastructure.pdb
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\ApexERP.Application.csproj.AssemblyReference.cache
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\ApexERP.Application.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\ApexERP.Application.AssemblyInfoInputs.cache
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\ApexERP.Application.AssemblyInfo.cs
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\ApexERP.Application.csproj.CoreCompileInputs.cache
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\ApexERP..0F0395CC.Up2Date
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\ApexERP.Application.dll
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\refint\ApexERP.Application.dll
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\ApexERP.Application.pdb
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Application\obj\Debug\net8.0\ref\ApexERP.Application.dll

@@ -1,0 +1,11 @@
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\bin\Debug\net8.0\ApexERP.Domain.deps.json
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\bin\Debug\net8.0\ApexERP.Domain.dll
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\bin\Debug\net8.0\ApexERP.Domain.pdb
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\obj\Debug\net8.0\ApexERP.Domain.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\obj\Debug\net8.0\ApexERP.Domain.AssemblyInfoInputs.cache
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\obj\Debug\net8.0\ApexERP.Domain.AssemblyInfo.cs
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\obj\Debug\net8.0\ApexERP.Domain.csproj.CoreCompileInputs.cache
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\obj\Debug\net8.0\ApexERP.Domain.dll
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\obj\Debug\net8.0\refint\ApexERP.Domain.dll
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\obj\Debug\net8.0\ApexERP.Domain.pdb
+C:\Users\TechCharities\Desktop\ApexERP\backend\src\ApexERP.Domain\obj\Debug\net8.0\ref\ApexERP.Domain.dll

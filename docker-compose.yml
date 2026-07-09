@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: apexerp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: apexerp
+      POSTGRES_USER: apexerp
+      POSTGRES_PASSWORD: apexerp_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - apexerp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apexerp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: src/ApexERP.API/Dockerfile
+    container_name: apexerp-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=apexerp;Username=apexerp;Password=apexerp_dev_password"
+      Jwt__Secret: "${JWT_SECRET:-CHANGE_ME_IN_PRODUCTION_use_a_long_random_secret_at_least_32_chars}"
+      Jwt__Issuer: "ApexERP"
+      Frontend__Origin: "http://localhost:3000"
+      ASPNETCORE_ENVIRONMENT: "Development"
+    ports:
+      - "8080:8080"
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: apexerp-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8080"
+    ports:
+      - "3000:3000"
+
+volumes:
+  apexerp_pgdata:

@@ -1,0 +1,68 @@
+{
+  "format": 1,
+  "restore": {
+    "C:\\Users\\TechCharities\\Desktop\\ApexERP\\backend\\src\\ApexERP.Domain\\ApexERP.Domain.csproj": {}
+  },
+  "projects": {
+    "C:\\Users\\TechCharities\\Desktop\\ApexERP\\backend\\src\\ApexERP.Domain\\ApexERP.Domain.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "C:\\Users\\TechCharities\\Desktop\\ApexERP\\backend\\src\\ApexERP.Domain\\ApexERP.Domain.csproj",
+        "projectName": "ApexERP.Domain",
+        "projectPath": "C:\\Users\\TechCharities\\Desktop\\ApexERP\\backend\\src\\ApexERP.Domain\\ApexERP.Domain.csproj",
+        "packagesPath": "C:\\Users\\TechCharities\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\TechCharities\\Desktop\\ApexERP\\backend\\src\\ApexERP.Domain\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\TechCharities\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "C:\\Program Files\\dotnet\\library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.103/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}
