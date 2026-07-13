@@ -342,7 +342,7 @@ This project is licensed under the MIT License.
 **Munyaradzi (Bloodshed) Chiondegwa**
 Full-Stack Software Developer · Fintech, Governance & Business Systems Specialist · Deaf Community Advocate
 
-Munyaradzi holds an MBA and BAcc (Hons) from Zimbabwe Open University and is completing a BSc in Software Development at BYU-Idaho. His work sits at the intersection of financial governance, regulatory compliance, and software engineering — building systems like ApexERP that combine accounting rigour with modern application architecture.
+Munyaradzi holds an MBA and BAcc (Hons) from Zimbabwe Open University and a BSc in Software Development at BYU-Idaho. His work sits at the intersection of financial governance, regulatory compliance, and software engineering — building systems like ApexERP that combine accounting rigour with modern application architecture.
 
 [![Portfolio](https://img.shields.io/badge/Portfolio-Visit-00C7B7?style=flat-square&logo=netlify&logoColor=white)](https://munyaradzichiondegwa.netlify.app/)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/munyaradzi-chiondegwa/)
