@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ApexERP.Infrastructure")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b28b4c2fb944778ea7e7ac0ab9212d26c84b4680")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+80b5ab39523c897778fb0fdb4901aab3f190aacd")]
 [assembly: System.Reflection.AssemblyProductAttribute("ApexERP.Infrastructure")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ApexERP.Infrastructure")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
