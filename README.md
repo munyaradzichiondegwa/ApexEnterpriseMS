@@ -1,4 +1,4 @@
-# ApexEnterpriseMS
+# ApexEnterpriseMS Enterprise Resource Planning System
 
 > **ApexERP is a multi-tenant, IFRS-compliant ERP platform for businesses, NGOs, and public sector institutions across Zimbabwe and the region.**
 
