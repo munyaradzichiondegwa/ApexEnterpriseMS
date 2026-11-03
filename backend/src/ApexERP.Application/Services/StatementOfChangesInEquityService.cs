@@ -30,6 +30,7 @@ namespace ApexERP.Application.Services
 
         public async Task<StatementOfChangesInEquityResult> GetStatementAsync(Guid companyId, DateTime periodStart, DateTime periodEnd, CancellationToken ct = default)
         {
+            var periodEndExclusive = ReportingDates.EndExclusive(periodEnd);
             var equityAccounts = await _db.GlAccounts
                 .Where(a => a.CompanyId == companyId && a.Type == GlAccountType.Equity)
                 .ToListAsync(ct);
@@ -42,8 +43,8 @@ namespace ApexERP.Application.Services
             var movements = await _db.JournalLines
                 .Where(l => equityAccounts.Select(a => a.Id).Contains(l.GlAccountId)
                             && l.JournalEntry!.CompanyId == companyId
-                            && l.JournalEntry.Status == JournalStatus.Posted
-                            && l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate <= periodEnd)
+                            && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed)
+                            && l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate < periodEndExclusive)
                 .Select(l => new { l.GlAccountId, l.BaseDebit, l.BaseCredit, Source = l.JournalEntry!.Source })
                 .ToListAsync(ct);
 

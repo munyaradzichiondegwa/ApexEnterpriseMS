@@ -1,3 +1,5 @@
+using ApexERP.Application.Security;
+using ApexERP.API.Authorization;
 using ApexERP.Application.Services;
 using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
@@ -74,6 +76,7 @@ namespace ApexERP.API.Controllers
         }
 
         [HttpPost("fund-centres/{id}/year-end-close")]
+        [HasPermission(Permissions.PublicSectorYearEndClose)]
         public async Task<IActionResult> YearEndClose(Guid id, [FromQuery] bool carryForward)
         {
             try { return Ok(await _publicSector.CloseYearEndAsync(CompanyId, id, carryForward)); }
@@ -106,6 +109,7 @@ namespace ApexERP.API.Controllers
         }
 
         [HttpPost("tenders/{id}/award")]
+        [HasPermission(Permissions.PublicSectorTendersAward)]
         public async Task<IActionResult> AwardTender(Guid id, AwardTenderRequest req) =>
             Ok(await _tender.AwardAsync(CompanyId, id, req.WinningVendorId, req.Justification));
 

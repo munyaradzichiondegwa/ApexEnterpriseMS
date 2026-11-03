@@ -1,3 +1,5 @@
+using ApexERP.Application.Security;
+using ApexERP.API.Authorization;
 using ApexERP.Application.Services;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
@@ -51,6 +53,7 @@ namespace ApexERP.API.Controllers
             Ok(await _db.PayeTaxBands.Where(b => b.CompanyId == CompanyId).OrderBy(b => b.LowerBound).ToListAsync());
 
         [HttpPost("paye-bands")]
+        [HasPermission(Permissions.PayrollConfigManage)]
         public async Task<IActionResult> CreatePayeBand([FromBody] PayeTaxBand b)
         {
             b.CompanyId = CompanyId;
@@ -84,6 +87,7 @@ namespace ApexERP.API.Controllers
         }
 
         [HttpPost("runs/{id}/approve-and-post")]
+        [HasPermission(Permissions.PayrollRunsPost)]
         public async Task<IActionResult> ApproveAndPost(Guid id, ApprovePayrollRequest req)
         {
             try

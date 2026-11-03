@@ -1,3 +1,5 @@
+using ApexERP.Application.Security;
+using ApexERP.API.Authorization;
 using ApexERP.Application.Services;
 using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -62,10 +64,12 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> GetDividends() => Ok(await _db.DividendDeclarations.Where(d => d.CompanyId == CompanyId).OrderByDescending(d => d.DeclarationDate).ToListAsync());
 
         [HttpPost("dividends/declare")]
+        [HasPermission(Permissions.EquityDividendsManage)]
         public async Task<IActionResult> Declare(DeclareDividendRequest req) =>
             Ok(await _dividends.DeclareAsync(CompanyId, req.DeclarationDate, req.Amount, req.Currency, req.RetainedEarningsAccountId, req.DividendsPayableAccountId));
 
         [HttpPost("dividends/{id}/pay")]
+        [HasPermission(Permissions.EquityDividendsManage)]
         public async Task<IActionResult> Pay(Guid id, PayDividendRequest req)
         {
             try { return Ok(await _dividends.PayAsync(CompanyId, id, req.PaymentDate, req.DividendsPayableAccountId, req.BankAccountId)); }
@@ -73,6 +77,7 @@ namespace ApexERP.API.Controllers
         }
 
         [HttpPost("assets/{id}/revalue")]
+        [HasPermission(Permissions.FixedAssetsRevalue)]
         public async Task<IActionResult> RevalueAsset(Guid id, RevalueAssetRequest req)
         {
             try { return Ok(await _assets.RevalueAsync(CompanyId, id, req.RevaluationDate, req.FairValue, req.ValuerName)); }

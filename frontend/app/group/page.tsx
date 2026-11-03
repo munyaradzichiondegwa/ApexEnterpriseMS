@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { api, extractErrorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 export default function GroupPage() {
   const [tab, setTab] = useState<"structure" | "intercompany" | "consolidated">("structure");
+  const { user, can } = useAuth();
   const [companies, setCompanies] = useState<any[]>([]);
   const [reconciliation, setReconciliation] = useState<any[]>([]);
   const [consolidated, setConsolidated] = useState<any>(null);
@@ -18,6 +20,11 @@ export default function GroupPage() {
     api.get("/group/companies").then((r) => setCompanies(r.data)).catch((e) => setError(extractErrorMessage(e)));
   }
   useEffect(load, []);
+
+  useEffect(() => {
+    if (user && !structureForm.companyId) setStructureForm((f) => ({ ...f, companyId: user.companyId }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   async function updateStructure(e: React.FormEvent) {
     e.preventDefault();
@@ -67,7 +74,7 @@ export default function GroupPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 card overflow-x-auto">
             <table className="table-base">
-              <thead><tr><th>Company</th><th>Parent</th><th>Ownership %</th></tr></thead>
+              <thead><tr><th>Company (your group)</th><th>Parent</th><th>Ownership %</th></tr></thead>
               <tbody>
                 {companies.map((c) => (
                   <tr key={c.id}>
@@ -79,6 +86,7 @@ export default function GroupPage() {
               </tbody>
             </table>
           </div>
+          {can("group.structure.manage") && (
           <form onSubmit={updateStructure} className="card space-y-3 h-fit">
             <h2 className="font-semibold">Set Parent / Ownership</h2>
             <div>
@@ -90,14 +98,21 @@ export default function GroupPage() {
             </div>
             <div>
               <label className="label">Parent Company</label>
-              <select className="input" value={structureForm.parentCompanyId} onChange={(e) => setStructureForm({ ...structureForm, parentCompanyId: e.target.value })}>
-                <option value="">None (top of group)</option>
+              <input className="input" list="group-company-options" value={structureForm.parentCompanyId}
+                placeholder="Leave empty for the top of the group"
+                onChange={(e) => setStructureForm({ ...structureForm, parentCompanyId: e.target.value.trim() })} />
+              <datalist id="group-company-options">
                 {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              </datalist>
+              <p className="text-xs text-slate-500 mt-1">
+                Choose a company in your group, or paste the ID of an outside parent. An outside parent must first register your
+                company as a linked customer or supplier, so both sides have agreed to the link.
+              </p>
             </div>
             <div><label className="label">Ownership %</label><input className="input" type="number" min={0} max={100} value={structureForm.ownershipPercentage} onChange={(e) => setStructureForm({ ...structureForm, ownershipPercentage: Number(e.target.value) })} /></div>
             <button className="btn-primary w-full">Save</button>
           </form>
+          )}
         </div>
       )}
 

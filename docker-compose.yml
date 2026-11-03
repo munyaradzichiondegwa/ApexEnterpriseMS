@@ -1,5 +1,10 @@
 version: "3.9"
 
+# Local development stack. It runs the API in the Development environment, which allows the development-only
+# configuration in appsettings.Development.json. To deploy for real: copy .env.example to .env, set every value
+# (a strong JWT_SECRET, a unique POSTGRES_PASSWORD, the real FRONTEND_ORIGIN / NEXT_PUBLIC_API_URL) and set
+# ASPNETCORE_ENVIRONMENT=Production. In Production the API REFUSES TO START with a missing, weak or placeholder secret.
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,9 +13,9 @@ services:
     environment:
       POSTGRES_DB: apexerp
       POSTGRES_USER: apexerp
-      POSTGRES_PASSWORD: apexerp_dev_password
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-apexerp_dev_password}"
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"   # reachable from this machine only, not from the network
     volumes:
       - apexerp_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -29,11 +34,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=apexerp;Username=apexerp;Password=apexerp_dev_password"
-      Jwt__Secret: "${JWT_SECRET:-CHANGE_ME_IN_PRODUCTION_use_a_long_random_secret_at_least_32_chars}"
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=apexerp;Username=apexerp;Password=${POSTGRES_PASSWORD:-apexerp_dev_password}"
+      # Local-development fallback only (>= 32 characters, clearly marked). The API rejects it outside Development.
+      Jwt__Secret: "${JWT_SECRET:-dev-only-compose-signing-key-never-use-in-production-4d8e2a6c}"
       Jwt__Issuer: "ApexERP"
-      Frontend__Origin: "http://localhost:3000"
-      ASPNETCORE_ENVIRONMENT: "Development"
+      Frontend__Origin: "${FRONTEND_ORIGIN:-http://localhost:3000}"
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Development}"
     ports:
       - "8080:8080"
 
@@ -41,12 +47,13 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* values are compiled into the browser bundle at BUILD time, so they are build arguments.
+        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8080}"
     container_name: apexerp-web
     restart: unless-stopped
     depends_on:
       - api
-    environment:
-      NEXT_PUBLIC_API_URL: "http://localhost:8080"
     ports:
       - "3000:3000"
 

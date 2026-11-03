@@ -1,3 +1,5 @@
+using ApexERP.Application.Security;
+using ApexERP.API.Authorization;
 using ApexERP.Application.Services;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
@@ -54,6 +56,7 @@ namespace ApexERP.API.Controllers
         /// <summary>Batch job: runs monthly depreciation for every active asset, grouped and posted
         /// per category as a single journal each (Hangfire scheduled job in production).</summary>
         [HttpPost("run-depreciation")]
+        [HasPermission(Permissions.FixedAssetsDepreciate)]
         public async Task<IActionResult> RunDepreciation(RunDepreciationRequest req)
         {
             var entries = await _assets.RunMonthlyDepreciationAsync(CompanyId, req.PeriodDate);
@@ -61,6 +64,7 @@ namespace ApexERP.API.Controllers
         }
 
         [HttpPost("assets/{id}/dispose")]
+        [HasPermission(Permissions.FixedAssetsDispose)]
         public async Task<IActionResult> Dispose(Guid id, DisposeAssetRequest req)
         {
             try

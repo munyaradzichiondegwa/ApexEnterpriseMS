@@ -1,19 +1,24 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { api, extractErrorMessage } from "./api";
+import { API_CONFIG_ERROR } from "./config";
+import { hasPermission } from "./permissions";
+import { AuthUser, LoginResponse, SESSION_NOTICES, clearSession, readSession, safeStorage, writeSession } from "./session";
 
-interface AuthUser {
-  userId: string;
-  companyId: string;
-  email: string;
-  role: string;
-}
+export type { AuthUser } from "./session";
 
 interface AuthContextValue {
   user: AuthUser | null;
+  /** True only while the saved session is being checked on first load; it is ALWAYS cleared, even if reading fails. */
   loading: boolean;
+  /** Why a saved session was discarded (corrupt, expired, old format), so the sign-in page can explain it. */
+  sessionNotice: string | null;
+  /** Set when the app was built without a usable API address; nothing can work until that is fixed. */
+  configError: string | null;
+  /** Does the signed-in user's role grant this permission? (UI convenience; the API enforces it for real.) */
+  can: (permission: string) => boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (companyName: string, email: string, password: string, firstName: string, lastName: string) => Promise<void>;
   logout: () => void;
@@ -21,54 +26,100 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+// setTimeout cannot take a delay above 2^31-1 ms.
+const MAX_TIMER_MS = 2_147_483_647;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const router = useRouter();
 
+  // Restore the saved session. Whatever happens (missing, corrupt, expired, blocked storage), loading ends.
   useEffect(() => {
-    const stored = typeof window !== "undefined" ? localStorage.getItem("apexerp_user") : null;
-    if (stored) setUser(JSON.parse(stored));
-    setLoading(false);
+    try {
+      const storage = safeStorage();
+      const result = readSession(storage);
+      if (result.status === "ok") {
+        setUser(result.user);
+      } else if (result.status === "invalid") {
+        clearSession(storage);
+        setSessionNotice(SESSION_NOTICES[result.reason]);
+      }
+    } catch {
+      clearSession(safeStorage());
+      setSessionNotice(SESSION_NOTICES.corrupt);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  function persistSession(tokens: any, role: string) {
-    localStorage.setItem("apexerp_access_token", tokens.accessToken);
-    localStorage.setItem("apexerp_refresh_token", tokens.refreshToken);
-    const u: AuthUser = { userId: tokens.userId, companyId: tokens.companyId, email: tokens.email ?? "", role };
-    localStorage.setItem("apexerp_user", JSON.stringify(u));
-    setUser(u);
-  }
-
-  async function login(email: string, password: string) {
-    try {
-      const { data } = await api.post("/auth/login", { email, password });
-      persistSession({ ...data, email }, data.role);
-      router.push("/dashboard");
-    } catch (err) {
-      throw new Error(extractErrorMessage(err));
-    }
-  }
-
-  async function register(companyName: string, email: string, password: string, firstName: string, lastName: string) {
-    try {
-      const { data } = await api.post("/auth/register", { companyName, email, password, firstName, lastName });
-      persistSession({ ...data, email }, data.role);
-      router.push("/dashboard");
-    } catch (err) {
-      throw new Error(extractErrorMessage(err));
-    }
-  }
-
-  function logout() {
-    localStorage.removeItem("apexerp_access_token");
-    localStorage.removeItem("apexerp_refresh_token");
-    localStorage.removeItem("apexerp_user");
+  const logout = useCallback(() => {
+    clearSession(safeStorage());
     setUser(null);
     router.push("/login");
-  }
+  }, [router]);
 
-  return <AuthContext.Provider value={{ user, loading, login, register, logout }}>{children}</AuthContext.Provider>;
+  // There is no silent refresh yet, so when the access token runs out, end the session cleanly instead of
+  // letting the next request fail with a confusing error.
+  useEffect(() => {
+    if (!user?.expiresAt) return;
+    const remaining = Date.parse(user.expiresAt) - Date.now();
+    if (Number.isNaN(remaining)) return;
+
+    const timer = setTimeout(() => {
+      clearSession(safeStorage());
+      setUser(null);
+      setSessionNotice(SESSION_NOTICES.expired);
+      router.push("/login?reason=expired");
+    }, Math.min(Math.max(remaining, 0), MAX_TIMER_MS));
+    return () => clearTimeout(timer);
+  }, [user, router]);
+
+  const startSession = useCallback(
+    (data: LoginResponse, email: string) => {
+      const storage = safeStorage();
+      if (!storage) throw new Error("This browser does not allow ApexERP to save your sign-in.");
+      const next = writeSession(storage, data, email);
+      setSessionNotice(null);
+      setUser(next);
+      router.push("/dashboard");
+    },
+    [router]
+  );
+
+  const login = useCallback(
+    async (email: string, password: string) => {
+      try {
+        const { data } = await api.post<LoginResponse>("/auth/login", { email, password });
+        startSession(data, email);
+      } catch (err) {
+        throw new Error(extractErrorMessage(err));
+      }
+    },
+    [startSession]
+  );
+
+  const register = useCallback(
+    async (companyName: string, email: string, password: string, firstName: string, lastName: string) => {
+      try {
+        const { data } = await api.post<LoginResponse>("/auth/register", { companyName, email, password, firstName, lastName });
+        startSession(data, email);
+      } catch (err) {
+        throw new Error(extractErrorMessage(err));
+      }
+    },
+    [startSession]
+  );
+
+  const can = useCallback((permission: string) => hasPermission(user?.permissions, permission), [user]);
+
+  const value = useMemo<AuthContextValue>(
+    () => ({ user, loading, sessionNotice, configError: API_CONFIG_ERROR, can, login, register, logout }),
+    [user, loading, sessionNotice, can, login, register, logout]
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

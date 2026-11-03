@@ -133,9 +133,11 @@ namespace ApexERP.Application.Services
         /// any entity in the group regardless of the current request's own tenant context.</summary>
         private async Task<List<TrialBalanceLine>> GetTrialBalanceIgnoringFiltersAsync(Guid companyId, DateTime asOfDate, CancellationToken ct)
         {
-            var accounts = await _db.GlAccounts.IgnoreQueryFilters().Where(a => a.CompanyId == companyId && a.IsActive).ToListAsync(ct);
+            // Inactive accounts are included: their historical balances still belong in the consolidation (audit finding 3).
+            var asOfExclusive = ReportingDates.EndExclusive(asOfDate);
+            var accounts = await _db.GlAccounts.IgnoreQueryFilters().Where(a => a.CompanyId == companyId).ToListAsync(ct);
             var movementsByAccount = await _db.JournalLines.IgnoreQueryFilters()
-                .Where(l => l.JournalEntry!.CompanyId == companyId && l.JournalEntry.Status == JournalStatus.Posted && l.JournalEntry.EntryDate <= asOfDate)
+                .Where(l => l.JournalEntry!.CompanyId == companyId && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed) && l.JournalEntry.EntryDate < asOfExclusive)
                 .GroupBy(l => l.GlAccountId)
                 .Select(g => new { AccountId = g.Key, Debit = g.Sum(x => x.BaseDebit), Credit = g.Sum(x => x.BaseCredit) })
                 .ToListAsync(ct);

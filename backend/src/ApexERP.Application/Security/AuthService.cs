@@ -8,7 +8,8 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace ApexERP.Application.Security
 {
-    public record LoginResult(string AccessToken, string RefreshToken, DateTime ExpiresAt, Guid UserId, Guid CompanyId, string Role);
+    public record LoginResult(string AccessToken, string RefreshToken, DateTime ExpiresAt, Guid UserId, Guid CompanyId, string Role,
+        IReadOnlyList<string> Permissions);
 
     /// <summary>
     /// Handles credential verification (BCrypt-hashed passwords) and JWT issuance carrying
@@ -18,6 +19,13 @@ namespace ApexERP.Application.Security
     /// </summary>
     public class AuthService
     {
+        /// <summary>Audience of refresh tokens. Different from the access-token audience on purpose, so a
+        /// refresh token presented as a Bearer token fails validation and can never act as an access token.</summary>
+        public static string RefreshAudience(string issuer) => issuer + ".refresh";
+
+        // Verified against when no such user exists, so unknown e-mails and wrong passwords take similar time.
+        private static readonly string DummyHash = HashPassword("apexerp-timing-equalisation-only");
+
         private readonly ApexErpDbContext _db;
         private readonly string _jwtSecret;
         private readonly string _issuer;
@@ -35,13 +43,30 @@ namespace ApexERP.Application.Security
 
         public async Task<LoginResult> LoginAsync(string email, string password, CancellationToken ct = default)
         {
-            var user = await _db.Users.IgnoreQueryFilters().Include(u => u.Role)
-                .FirstOrDefaultAsync(u => u.Email == email.ToLowerInvariant() && u.IsActive, ct)
-                ?? throw new UnauthorizedAccessException("Invalid email or password.");
+            var normalised = (email ?? string.Empty).Trim().ToLowerInvariant();
 
-            if (!VerifyPassword(password, user.PasswordHash))
+            // Sign-in is the one place that legitimately looks across tenants, so it opts out of the tenant
+            // filter explicitly. Verify the password against EVERY active user with this e-mail rather than
+            // trusting an arbitrary first match: a second account with the same e-mail in another company can
+            // then neither lock the real user out nor be mistaken for them.
+            var candidates = await _db.Users.IgnoreQueryFilters().Include(u => u.Role)
+                .Where(u => u.Email == normalised && u.IsActive)
+                .ToListAsync(ct);
+
+            if (candidates.Count == 0)
+            {
+                VerifyPassword(password ?? string.Empty, DummyHash);
                 throw new UnauthorizedAccessException("Invalid email or password.");
+            }
 
+            var matches = candidates.Where(u => VerifyPassword(password ?? string.Empty, u.PasswordHash)).ToList();
+            if (matches.Count == 0)
+                throw new UnauthorizedAccessException("Invalid email or password.");
+            if (matches.Count > 1)
+                throw new UnauthorizedAccessException(
+                    "This e-mail address is registered to more than one company. Ask your administrator to resolve the duplicate account.");
+
+            var user = matches[0];
             user.LastLogin = DateTime.UtcNow;
             await _db.SaveChangesAsync(ct);
 
@@ -68,12 +93,13 @@ namespace ApexERP.Application.Security
             // Refresh token: opaque random value; in production this is stored hashed in Redis with a
             // 7-day TTL and rotated/blacklisted on use (PRD 6.2). Simplified here to a signed long-lived JWT.
             var refreshExpiresAt = DateTime.UtcNow.AddDays(7);
-            var refreshToken = new JwtSecurityToken(_issuer, _issuer,
-                new[] { new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()), new Claim("type", "refresh") },
+            var refreshToken = new JwtSecurityToken(_issuer, RefreshAudience(_issuer),
+                new[] { new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()), new Claim("token_use", "refresh") },
                 expires: refreshExpiresAt, signingCredentials: creds);
             var refreshTokenStr = new JwtSecurityTokenHandler().WriteToken(refreshToken);
 
-            return new LoginResult(accessToken, refreshTokenStr, expiresAt, user.Id, user.CompanyId, user.Role?.Name ?? "User");
+            var permissions = PermissionEvaluator.Parse(user.Role?.PermissionsJson).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
+            return new LoginResult(accessToken, refreshTokenStr, expiresAt, user.Id, user.CompanyId, user.Role?.Name ?? "User", permissions);
         }
 
         public async Task<User> RegisterCompanyAndAdminAsync(string companyName, string email, string password,

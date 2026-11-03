@@ -1,0 +1,4 @@
+# Machine-specific build output must never be copied into the image build (restore regenerates it).
+**/bin/
+**/obj/
+tests/

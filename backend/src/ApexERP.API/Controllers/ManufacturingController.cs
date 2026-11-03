@@ -70,6 +70,8 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> CreateWorkOrder(CreateWorkOrderRequest req)
         {
             var prefix = $"WO-{DateTime.UtcNow:yyyy}-";
+            // Serialise concurrent number generation (the lock lasts until the request's transaction ends).
+            await _db.TryAcquireTransactionLockAsync($"docno:{CompanyId:N}:{prefix}");
             var count = await _db.WorkOrders.IgnoreQueryFilters().CountAsync(w => w.CompanyId == CompanyId && w.WoNo.StartsWith(prefix));
             var wo = new WorkOrder
             {

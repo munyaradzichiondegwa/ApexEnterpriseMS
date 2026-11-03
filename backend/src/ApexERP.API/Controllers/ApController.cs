@@ -1,3 +1,5 @@
+using ApexERP.Application.Security;
+using ApexERP.API.Authorization;
 using ApexERP.Application.Services;
 using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
@@ -72,6 +74,7 @@ namespace ApexERP.API.Controllers
         }
 
         [HttpPost("invoices/{id}/post")]
+        [HasPermission(Permissions.ApInvoicesPost)]
         public async Task<IActionResult> PostInvoice(Guid id, PostApInvoiceRequest req)
         {
             try
@@ -88,6 +91,7 @@ namespace ApexERP.API.Controllers
         }
 
         [HttpPost("payments")]
+        [HasPermission(Permissions.ApPaymentsCreate)]
         public async Task<IActionResult> CreatePayment(ApPaymentRequest req)
         {
             try

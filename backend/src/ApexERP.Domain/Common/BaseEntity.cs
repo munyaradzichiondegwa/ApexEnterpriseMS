@@ -59,11 +59,21 @@ namespace ApexERP.Domain.Common
         Manufacturing
     }
 
+    /// <summary>
+    /// Journal lifecycle: Draft -> Submitted -> Approved -> Posted -> Reversed, with Rejected and
+    /// Cancelled as side exits. IMPORTANT: values are persisted as integers, so the original three
+    /// members keep their numbers (Draft=0, Posted=1, Reversed=2) and new states are only ever
+    /// appended. System-generated postings (AR, AP, payroll...) are created directly as Posted.
+    /// </summary>
     public enum JournalStatus
     {
         Draft,
         Posted,
-        Reversed
+        Reversed,
+        Submitted,
+        Approved,
+        Rejected,
+        Cancelled
     }
 
     public enum InvoiceStatus
@@ -255,5 +265,23 @@ namespace ApexERP.Domain.Common
     {
         Accrual,
         Cash
+    }
+
+    /// <summary>Which business process raised an <c>ExceptionItem</c>.</summary>
+    public enum ExceptionCategory
+    {
+        InterCompanyMirror,
+        Fiscalisation,
+        Posting,
+        Reconciliation,
+        ScheduledJob,
+        Other
+    }
+
+    public enum ExceptionStatus
+    {
+        Open,
+        Resolved,
+        Dismissed
     }
 }

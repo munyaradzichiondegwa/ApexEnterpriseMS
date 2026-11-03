@@ -112,6 +112,8 @@ namespace ApexERP.Application.Services
         private async Task<string> GeneratePoNoAsync(Guid companyId, CancellationToken ct)
         {
             var prefix = $"PO-{DateTime.UtcNow:yyyy}-";
+            // Serialise concurrent number generation (the lock lasts until the request's transaction ends).
+            await _db.TryAcquireTransactionLockAsync($"docno:{companyId:N}:{prefix}", ct);
             var count = await _db.PurchaseOrders.IgnoreQueryFilters().CountAsync(p => p.CompanyId == companyId && p.PoNo.StartsWith(prefix), ct);
             return $"{prefix}{(count + 1):D5}";
         }
@@ -119,6 +121,8 @@ namespace ApexERP.Application.Services
         private async Task<string> GenerateGrnNoAsync(Guid companyId, CancellationToken ct)
         {
             var prefix = $"GRN-{DateTime.UtcNow:yyyy}-";
+            // Serialise concurrent number generation (the lock lasts until the request's transaction ends).
+            await _db.TryAcquireTransactionLockAsync($"docno:{companyId:N}:{prefix}", ct);
             var count = await _db.GoodsReceipts.IgnoreQueryFilters().CountAsync(g => g.CompanyId == companyId && g.GrnNo.StartsWith(prefix), ct);
             return $"{prefix}{(count + 1):D5}";
         }

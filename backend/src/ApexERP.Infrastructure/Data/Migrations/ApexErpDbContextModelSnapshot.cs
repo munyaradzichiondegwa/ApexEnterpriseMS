@@ -66,6 +66,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CompanyId", "Year", "PeriodNo")
+                        .IsUnique();
+
                     b.ToTable("AccountingPeriods");
                 });
 
@@ -1638,6 +1641,69 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("ExchangeRates");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.ExceptionItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("LastAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ResolvedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Status", "Category");
+
+                    b.ToTable("ExceptionItems");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.FdmsSubmission", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2298,6 +2364,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("SourceArInvoiceId")
+                        .IsUnique();
+
                     b.ToTable("IntercompanyTransactions");
                 });
 
@@ -2526,6 +2595,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("CompanyId", "EntryNo")
                         .IsUnique();
 
+                    b.HasIndex("ReversalOfId")
+                        .IsUnique();
+
                     b.ToTable("JournalEntries");
                 });
 
@@ -2588,7 +2660,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasIndex("JournalEntryId");
 
-                    b.ToTable("JournalLines");
+                    b.ToTable("JournalLines", t =>
+                        {
+                            t.HasCheckConstraint("CK_JournalLines_Amounts", "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0)");
+
+                            t.HasCheckConstraint("CK_JournalLines_ExchangeRate", "\"ExchangeRate\" > 0");
+                        });
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.LeaveRequest", b =>
