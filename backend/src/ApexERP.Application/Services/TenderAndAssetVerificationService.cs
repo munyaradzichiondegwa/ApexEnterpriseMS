@@ -24,6 +24,8 @@ namespace ApexERP.Application.Services
         public async Task<TenderNotice> CreateTenderAsync(Guid companyId, string title, string? specifications, DateTime submissionDeadline, CancellationToken ct = default)
         {
             var prefix = $"TND-{DateTime.UtcNow:yyyy}-";
+            // Serialise concurrent number generation (the lock lasts until the request's transaction ends).
+            await _db.TryAcquireTransactionLockAsync($"docno:{companyId:N}:{prefix}", ct);
             var count = await _db.TenderNotices.IgnoreQueryFilters().CountAsync(t => t.CompanyId == companyId && t.TenderNo.StartsWith(prefix), ct);
             var tender = new TenderNotice
             {
@@ -108,6 +110,8 @@ namespace ApexERP.Application.Services
         public async Task<AssetVerificationBatch> StartBatchAsync(Guid companyId, string? location, Guid performedBy, CancellationToken ct = default)
         {
             var prefix = $"AVB-{DateTime.UtcNow:yyyy}-";
+            // Serialise concurrent number generation (the lock lasts until the request's transaction ends).
+            await _db.TryAcquireTransactionLockAsync($"docno:{companyId:N}:{prefix}", ct);
             var count = await _db.AssetVerificationBatches.IgnoreQueryFilters().CountAsync(b => b.CompanyId == companyId && b.BatchNo.StartsWith(prefix), ct);
             var batch = new AssetVerificationBatch
             {

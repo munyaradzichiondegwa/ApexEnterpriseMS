@@ -1,18 +1,28 @@
 using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace ApexERP.Infrastructure.Data
 {
     /// <summary>
     /// Central EF Core context. Multi-tenancy is enforced with global query filters keyed off
-    /// CurrentCompanyId (set per-request by TenantMiddleware from the JWT's company_id claim) ---
+    /// CurrentCompanyId (set per-request by the tenant middleware from the JWT's company_id claim) ---
     /// this is the application-level equivalent of the PostgreSQL RLS policies called for in the PRD.
+    ///
+    /// The filters FAIL CLOSED: when CurrentCompanyId is null a tenant-scoped query returns no rows
+    /// (audit finding 9). Code that legitimately works across tenants (sign-in, registration,
+    /// inter-company posting, consolidation, document numbering) must opt in explicitly with
+    /// IgnoreQueryFilters() AND filter by CompanyId itself.
     /// </summary>
     public class ApexErpDbContext : DbContext
     {
         /// <summary>Resolved once per request from the authenticated user's JWT claims.</summary>
         public Guid? CurrentCompanyId { get; set; }
+
+        /// <summary>The signed-in user for this request (from the JWT "sub" claim). Used to stamp
+        /// CreatedBy/UpdatedBy on every saved row, which segregation-of-duties checks rely on.</summary>
+        public Guid? CurrentUserId { get; set; }
 
         public ApexErpDbContext(DbContextOptions<ApexErpDbContext> options) : base(options) { }
 
@@ -100,6 +110,9 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<IntercompanyTransaction> IntercompanyTransactions => Set<IntercompanyTransaction>();
         public DbSet<NettingBatch> NettingBatches => Set<NettingBatch>();
 
+        // Controls: visible exception queue (failed inter-company mirrors, etc.)
+        public DbSet<ExceptionItem> ExceptionItems => Set<ExceptionItem>();
+
         // Public Sector & Government
         public DbSet<FundCentre> FundCentres => Set<FundCentre>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
@@ -123,6 +136,9 @@ namespace ApexERP.Infrastructure.Data
             base.OnModelCreating(modelBuilder);
 
             // ---- Decimal precision: NUMERIC(20,6) everywhere per PRD Section 5 ----
+            // ---- Dates: every DateTime is stored/read as UTC. Npgsql refuses to write a DateTime whose
+            //      Kind is Unspecified (e.g. "2026-10-31" bound from JSON, or new DateTime(y, m, 1)) to a
+            //      `timestamp with time zone` column, which would otherwise fail the first posting of a month.
             foreach (var entityType in modelBuilder.Model.GetEntityTypes())
             {
                 foreach (var property in entityType.GetProperties())
@@ -130,6 +146,14 @@ namespace ApexERP.Infrastructure.Data
                     if (property.ClrType == typeof(decimal) || property.ClrType == typeof(decimal?))
                     {
                         property.SetColumnType("numeric(20,6)");
+                    }
+                    else if (property.ClrType == typeof(DateTime))
+                    {
+                        property.SetValueConverter(UtcConverter);
+                    }
+                    else if (property.ClrType == typeof(DateTime?))
+                    {
+                        property.SetValueConverter(NullableUtcConverter);
                     }
                 }
             }
@@ -144,6 +168,23 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<ArInvoice>().HasIndex(i => new { i.CompanyId, i.InvoiceNo }).IsUnique();
             modelBuilder.Entity<ApInvoice>().HasIndex(i => new { i.CompanyId, i.InvoiceNo }).IsUnique();
             modelBuilder.Entity<JournalEntry>().HasIndex(j => new { j.CompanyId, j.EntryNo }).IsUnique();
+
+            // ---- Integrity safeguards (repository audit findings 4, 5, 8; design doc "essential database safeguards") ----
+            // A journal can be reversed at most once: no two entries may reverse the same original
+            // (PostgreSQL permits many NULLs in a unique index, so ordinary entries are unaffected).
+            modelBuilder.Entity<JournalEntry>().HasIndex(j => j.ReversalOfId).IsUnique();
+            // One accounting period per company per month (guards concurrent first-posting races).
+            modelBuilder.Entity<AccountingPeriod>().HasIndex(p => new { p.CompanyId, p.Year, p.PeriodNo }).IsUnique();
+            // An AR invoice is mirrored into the counterparty's books at most once.
+            modelBuilder.Entity<IntercompanyTransaction>().HasIndex(t => t.SourceArInvoiceId).IsUnique();
+            modelBuilder.Entity<ExceptionItem>().HasIndex(e => new { e.CompanyId, e.Status, e.Category });
+            // Ledger lines: non-negative amounts, one side only, strictly positive FX rate.
+            modelBuilder.Entity<JournalLine>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_JournalLines_Amounts",
+                    "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0)");
+                t.HasCheckConstraint("CK_JournalLines_ExchangeRate", "\"ExchangeRate\" > 0");
+            });
 
             // ---- Relationships (delete behaviour Restrict to protect financial history) ----
             modelBuilder.Entity<JournalEntry>()
@@ -254,6 +295,8 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<Beneficiary>(modelBuilder);
             ApplyTenantFilter<Distribution>(modelBuilder);
             ApplyTenantFilter<GrantCloseoutChecklist>(modelBuilder);
+            ApplyTenantFilter<TenderBid>(modelBuilder);
+            ApplyTenantFilter<ExceptionItem>(modelBuilder);
 
             // ---- Additional relationships for the expanded modules ----
             modelBuilder.Entity<WorkflowRequest>()
@@ -293,21 +336,44 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<Segment>().HasIndex(s => new { s.CompanyId, s.Code }).IsUnique();
         }
 
+        /// <summary>Fail-closed: no tenant context => no rows. See the class remarks.</summary>
         private void ApplyTenantFilter<T>(ModelBuilder modelBuilder) where T : class, ITenantEntity
         {
-            modelBuilder.Entity<T>().HasQueryFilter(e => CurrentCompanyId == null || e.CompanyId == CurrentCompanyId);
+            modelBuilder.Entity<T>().HasQueryFilter(e => CurrentCompanyId != null && e.CompanyId == CurrentCompanyId);
         }
 
+        // ---------------------------------------------------------------------------------------------
+        // UTC normalisation
+        // ---------------------------------------------------------------------------------------------
+        private static readonly ValueConverter<DateTime, DateTime> UtcConverter =
+            new(v => ToUtc(v), v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+
+        private static readonly ValueConverter<DateTime?, DateTime?> NullableUtcConverter =
+            new(v => v.HasValue ? ToUtc(v.Value) : v, v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v);
+
+        /// <summary>Unspecified is taken as UTC (calendar date preserved); Local is converted.</summary>
+        private static DateTime ToUtc(DateTime value)
+        {
+            if (value.Kind == DateTimeKind.Utc) return value;
+            if (value.Kind == DateTimeKind.Local) return value.ToUniversalTime();
+            return DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        }
+
+        // ---------------------------------------------------------------------------------------------
+        // SaveChanges: audit stamping + ledger immutability
+        // ---------------------------------------------------------------------------------------------
         public override int SaveChanges()
         {
             StampAudit();
+            EnforceLedgerImmutability();
             return base.SaveChanges();
         }
 
-        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             StampAudit();
-            return base.SaveChangesAsync(cancellationToken);
+            EnforceLedgerImmutability();   // a violation surfaces through the returned Task, like any other save failure
+            return await base.SaveChangesAsync(cancellationToken);
         }
 
         private void StampAudit()
@@ -315,10 +381,60 @@ namespace ApexERP.Infrastructure.Data
             var now = DateTime.UtcNow;
             foreach (var entry in ChangeTracker.Entries<BaseEntity>())
             {
-                if (entry.State == EntityState.Modified)
+                if (entry.State == EntityState.Added && entry.Entity.CreatedBy == null && CurrentUserId != null)
+                {
+                    entry.Entity.CreatedBy = CurrentUserId;
+                }
+                else if (entry.State == EntityState.Modified)
                 {
                     entry.Entity.UpdatedAt = now;
+                    if (CurrentUserId != null) entry.Entity.UpdatedBy = CurrentUserId;
                 }
+            }
+        }
+
+        private static readonly HashSet<string> PostedJournalMutableProperties =
+            new() { nameof(JournalEntry.Status), nameof(BaseEntity.UpdatedAt), nameof(BaseEntity.UpdatedBy) };
+
+        /// <summary>
+        /// Posted history is append-only: journal lines never change once written, a posted journal may only
+        /// move Posted -> Reversed (nothing else on it may be edited or deleted), and audit-log rows are never
+        /// modified or removed. Errors in posted entries are corrected by reversal, not by editing
+        /// (design document: "no silent edits to posted records").
+        /// </summary>
+        private void EnforceLedgerImmutability()
+        {
+            foreach (var entry in ChangeTracker.Entries<JournalLine>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted)
+                    throw new InvalidOperationException("Journal lines are immutable. Correct a posted entry by reversing it.");
+            }
+
+            foreach (var entry in ChangeTracker.Entries<AuditLogEntry>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted)
+                    throw new InvalidOperationException("The audit log is append-only and cannot be changed or deleted.");
+            }
+
+            foreach (var entry in ChangeTracker.Entries<JournalEntry>())
+            {
+                if (entry.State is not (EntityState.Modified or EntityState.Deleted)) continue;
+
+                var original = entry.Property(j => j.Status).OriginalValue;
+                if (original is not (JournalStatus.Posted or JournalStatus.Reversed)) continue;
+
+                if (entry.State == EntityState.Deleted)
+                    throw new InvalidOperationException("A posted journal entry cannot be deleted. Reverse it instead.");
+
+                var changed = entry.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name).ToList();
+                if (changed.Any(name => !PostedJournalMutableProperties.Contains(name)))
+                    throw new InvalidOperationException("A posted journal entry cannot be edited. Reverse it and post a corrected entry.");
+
+                var current = entry.Property(j => j.Status).CurrentValue;
+                var statusChanged = current != original;
+                var allowed = !statusChanged || (original == JournalStatus.Posted && current == JournalStatus.Reversed);
+                if (!allowed)
+                    throw new InvalidOperationException($"A journal entry cannot move from {original} to {current}.");
             }
         }
     }

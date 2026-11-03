@@ -75,7 +75,7 @@ namespace ApexERP.Application.Services
             if (budget == 0) return false; // no budget configured for this line = unrestricted
 
             var actual = await _db.JournalLines
-                .Where(l => l.GrantId == grantId && l.GlAccountId == glAccountId && l.JournalEntry!.CompanyId == companyId && l.JournalEntry.Status == JournalStatus.Posted)
+                .Where(l => l.GrantId == grantId && l.GlAccountId == glAccountId && l.JournalEntry!.CompanyId == companyId && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
                 .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
 
             return actual + amount > budget;
@@ -92,7 +92,7 @@ namespace ApexERP.Application.Services
             {
                 var budget = budgetLines.Where(l => l.GlAccountId == accountId).Sum(l => l.BudgetAmount);
                 var actual = await _db.JournalLines
-                    .Where(l => l.GrantId == grantId && l.GlAccountId == accountId && l.JournalEntry!.CompanyId == companyId && l.JournalEntry.Status == JournalStatus.Posted)
+                    .Where(l => l.GrantId == grantId && l.GlAccountId == accountId && l.JournalEntry!.CompanyId == companyId && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
                     .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
                 var variance = budget - actual;
                 var pct = budget == 0 ? 0 : Math.Round(actual / budget * 100, 2);
@@ -110,7 +110,7 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Grant not found.");
 
             var directCosts = await _db.JournalLines
-                .Where(l => l.GrantId == grantId && l.JournalEntry!.CompanyId == companyId && l.JournalEntry.Status == JournalStatus.Posted
+                .Where(l => l.GrantId == grantId && l.JournalEntry!.CompanyId == companyId && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed)
                             && l.JournalEntry.EntryDate.Month == periodDate.Month && l.JournalEntry.EntryDate.Year == periodDate.Year)
                 .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
 
@@ -174,7 +174,7 @@ namespace ApexERP.Application.Services
             var totalActual = budgetLines.Sum(l => l.Actual);
 
             var indirectRecovered = await _db.JournalLines
-                .Where(l => l.GrantId == grantId && l.JournalEntry!.CompanyId == companyId && l.JournalEntry.Status == JournalStatus.Posted
+                .Where(l => l.GrantId == grantId && l.JournalEntry!.CompanyId == companyId && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed)
                             && l.JournalEntry.Reference == grant.GrantNo && l.JournalEntry.Description!.Contains("Indirect cost recovery"))
                 .SumAsync(l => l.BaseDebit, ct);
 

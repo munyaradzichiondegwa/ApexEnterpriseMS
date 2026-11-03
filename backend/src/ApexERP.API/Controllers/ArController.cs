@@ -1,3 +1,5 @@
+using ApexERP.Application.Security;
+using ApexERP.API.Authorization;
 using ApexERP.Application.Services;
 using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
@@ -59,27 +61,26 @@ namespace ApexERP.API.Controllers
         }
 
         /// <summary>Posts the invoice to the GL. If the customer is linked to another group company,
-        /// automatically creates the mirror AP invoice there (PRD Module 2). If FiscaliseWithFdms is
+        /// automatically creates the mirror AP invoice there (PRD Module 2); the response's interCompany.status is
+        /// NotApplicable, Completed or Failed (a Failed mirror is queued as an exception and can be retried). If FiscaliseWithFdms is
         /// set, also queues real ECDSA signing + QR generation for ZIMRA fiscalisation (Module 9) --
         /// see FdmsService for exactly what's real vs. placeholder in that step.</summary>
         [HttpPost("invoices/{id}/post")]
+        [HasPermission(Permissions.ArInvoicesPost)]
         public async Task<IActionResult> PostInvoice(Guid id, PostArInvoiceRequest req)
         {
             try
             {
                 var invoice = await _ar.PostInvoiceAsync(CompanyId, id, req.ArControlAccountId, req.VatOutputAccountId);
 
-                var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId && c.CompanyId == CompanyId);
-                if (customer?.LinkedCompanyId != null)
-                {
-                    try { await _interCompany.CreateMirrorPostingAsync(CompanyId, invoice.Id); }
-                    catch (InvalidOperationException) { /* mirror rule not configured yet -- invoice still posts locally */ }
-                }
+                // A failed inter-company mirror is NEVER swallowed: the local invoice stays posted, an exception item
+                // is raised for follow-up/retry (Controls > Exceptions), and the response says so explicitly.
+                var interCompany = await _interCompany.TryMirrorAsync(CompanyId, invoice.Id, UserId);
 
                 if (req.FiscaliseWithFdms)
                     await _fdms.FiscaliseInvoiceAsync(CompanyId, invoice.Id);
 
-                return Ok(invoice);
+                return Ok(new { invoice, interCompany });
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }

@@ -82,6 +82,29 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Workflow request not found.");
             if (request.Status != WorkflowStatus.Pending) throw new InvalidOperationException("This request has already been decided.");
 
+            // ---- Approval integrity (segregation of duties) ----
+            if (request.SubmittedBy == approverId)
+                throw new InvalidOperationException("You submitted this request, so someone else must decide it.");
+            if (request.Approvals.Any(a => a.ApproverId == approverId))
+                throw new InvalidOperationException("You have already recorded a decision on this request; a different approver must handle the next tier.");
+
+            var approvalChain = request.ApprovalChainId.HasValue
+                ? await _db.ApprovalChains.Include(c => c.Tiers).FirstOrDefaultAsync(c => c.Id == request.ApprovalChainId, ct)
+                : null;
+            var currentTier = approvalChain?.Tiers.FirstOrDefault(t => t.TierOrder == request.CurrentTier);
+            if (currentTier != null)
+            {
+                // The approver must hold the role the chain requires for this tier.
+                var approver = await _db.Users.FirstOrDefaultAsync(u => u.Id == approverId && u.CompanyId == companyId && u.IsActive, ct)
+                    ?? throw new InvalidOperationException("Approver not found.");
+                if (approver.RoleId != currentTier.ApproverRoleId)
+                    throw new InvalidOperationException($"Tier {request.CurrentTier} must be decided by a user holding the required approver role.");
+            }
+            else if (request.CurrentApproverId.HasValue && request.CurrentApproverId.Value != approverId)
+            {
+                throw new InvalidOperationException("This request is assigned to a different approver.");
+            }
+
             request.Approvals.Add(new WorkflowApproval
             {
                 WorkflowRequestId = request.Id,
@@ -99,10 +122,7 @@ namespace ApexERP.Application.Services
                 return request;
             }
 
-            var chain = request.ApprovalChainId.HasValue
-                ? await _db.ApprovalChains.Include(c => c.Tiers).FirstOrDefaultAsync(c => c.Id == request.ApprovalChainId, ct)
-                : null;
-            var maxTier = chain?.Tiers.Count ?? 1;
+            var maxTier = approvalChain?.Tiers.Count ?? 1;
 
             if (request.CurrentTier >= maxTier)
             {

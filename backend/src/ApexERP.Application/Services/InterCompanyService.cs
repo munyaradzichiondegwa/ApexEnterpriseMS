@@ -19,97 +19,186 @@ namespace ApexERP.Application.Services
     {
         private readonly ApexErpDbContext _db;
         private readonly GlPostingService _gl;
+        private readonly ExceptionQueueService _exceptions;
 
-        public InterCompanyService(ApexErpDbContext db, GlPostingService gl)
+        public InterCompanyService(ApexErpDbContext db, GlPostingService gl, ExceptionQueueService exceptions)
         {
             _db = db;
             _gl = gl;
+            _exceptions = exceptions;
         }
+
+        /// <summary>
+        /// Outcome of trying to mirror an invoice into the counterparty's books. Status is one of
+        /// NotApplicable (customer is not a group company), Completed, or Failed (an exception item was raised and
+        /// can be retried from the exception queue). Callers must surface a Failed status to the user.
+        /// </summary>
+        public record MirrorOutcome(string Status, Guid? TransactionId, Guid? ExceptionId, string? Message);
 
         /// <summary>Call immediately after ArService.PostInvoiceAsync when the invoice's customer is
         /// LinkedCompanyId-flagged. Creates the mirror AP invoice in the counterparty entity and logs
-        /// the IntercompanyTransaction. Must complete within 5 seconds per the PRD's NFR.</summary>
-        public async Task<IntercompanyTransaction> CreateMirrorPostingAsync(Guid fromCompanyId, Guid arInvoiceId, CancellationToken ct = default)
+        /// the IntercompanyTransaction. Must complete within 5 seconds per the PRD's NFR.
+        /// All-or-nothing and idempotent: the mirror invoice, its journal and the link row commit together or not
+        /// at all, and calling it again for an invoice that is already mirrored returns the existing link
+        /// instead of creating a duplicate (audit finding 8).</summary>
+        public Task<IntercompanyTransaction> CreateMirrorPostingAsync(Guid fromCompanyId, Guid arInvoiceId, CancellationToken ct = default)
         {
-            var invoice = await _db.ArInvoices.IgnoreQueryFilters().Include(i => i.Lines).Include(i => i.Customer)
+            return _db.InTransactionAsync(async token =>
+            {
+                // One mirror per invoice: serialise concurrent attempts, and make a repeat a harmless no-op.
+                await _db.TryAcquireTransactionLockAsync($"icmirror:{arInvoiceId:N}", token);
+                var already = await _db.IntercompanyTransactions.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(t => t.FromCompanyId == fromCompanyId && t.SourceArInvoiceId == arInvoiceId, token);
+                if (already != null) return already;
+
+                var invoice = await _db.ArInvoices.IgnoreQueryFilters().Include(i => i.Lines).Include(i => i.Customer)
+                    .FirstOrDefaultAsync(i => i.Id == arInvoiceId && i.CompanyId == fromCompanyId, token)
+                    ?? throw new InvalidOperationException("Source AR invoice not found.");
+
+                var toCompanyId = invoice.Customer?.LinkedCompanyId
+                    ?? throw new InvalidOperationException("Customer is not linked to a group company -- not an inter-company transaction.");
+
+                var rule = await _db.InterCompanyRules.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(r => r.CompanyId == fromCompanyId && r.FromCompanyId == fromCompanyId && r.ToCompanyId == toCompanyId && r.IsActive, token)
+                    ?? throw new InvalidOperationException("No active inter-company rule configured for this entity pair. Configure one under Group > Inter-Company Rules first.");
+
+                // Find (or require) a Supplier record in the target company representing the sending entity.
+                var mirrorSupplier = await _db.Suppliers.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(s => s.CompanyId == toCompanyId && s.LinkedCompanyId == fromCompanyId, token)
+                    ?? throw new InvalidOperationException("Target company has no Supplier record linked back to the sending company. Create one first (Supplier.LinkedCompanyId = sending company).");
+
+                var mirrorLines = invoice.Lines.Select(l => new ApInvoiceLine
+                {
+                    Description = $"Inter-company mirror: {l.Description}",
+                    Quantity = l.Quantity,
+                    UnitCost = l.UnitPrice,
+                    LineSubtotal = l.LineSubtotal,
+                    LineVat = 0, // VAT is not re-charged on inter-company mirror postings
+                    LineTotal = l.LineSubtotal,
+                    GlAccountId = rule.DefaultReceiverApAccountId
+                }).ToList();
+
+                var prefix = $"ICO-{DateTime.UtcNow:yyyy}-";
+                await _db.TryAcquireTransactionLockAsync($"docno:{toCompanyId:N}:{prefix}", token);
+                var count = await _db.ApInvoices.IgnoreQueryFilters().CountAsync(i => i.CompanyId == toCompanyId && i.InvoiceNo.StartsWith(prefix), token);
+
+                var mirrorInvoice = new ApInvoice
+                {
+                    CompanyId = toCompanyId,
+                    InvoiceNo = $"{prefix}{(count + 1):D5}",
+                    SupplierId = mirrorSupplier.Id,
+                    InvoiceDate = invoice.InvoiceDate,
+                    DueDate = invoice.DueDate,
+                    Currency = invoice.Currency,
+                    ExchangeRate = invoice.ExchangeRate,
+                    Subtotal = invoice.Subtotal,
+                    VatAmount = 0,
+                    Total = invoice.Subtotal,
+                    Outstanding = invoice.Subtotal,
+                    Status = InvoiceStatus.Draft,
+                    IsIntercompanyMirror = true,
+                    Lines = mirrorLines
+                };
+                _db.ApInvoices.Add(mirrorInvoice);
+
+                // Post the mirror invoice to Company B's GL: Dr expense/clearing, Cr Trade Creditors.
+                var glLines = new List<GlLineRequest>
+                {
+                    new(rule.DefaultReceiverApAccountId, mirrorInvoice.Subtotal, 0, mirrorInvoice.Currency, mirrorInvoice.ExchangeRate, null, "Inter-company mirror expense/clearing"),
+                    new(mirrorSupplier.ApAccountId ?? rule.DefaultReceiverApAccountId, 0, mirrorInvoice.Subtotal, mirrorInvoice.Currency, mirrorInvoice.ExchangeRate, null, $"Inter-company: {mirrorInvoice.InvoiceNo}")
+                };
+                var je = await _gl.PostAsync(toCompanyId, invoice.InvoiceDate, JournalSource.AP,
+                    $"Inter-company mirror of {invoice.InvoiceNo}", invoice.InvoiceNo, glLines, token);
+                mirrorInvoice.JournalEntryId = je.Id;
+                mirrorInvoice.Status = InvoiceStatus.Posted;
+
+                var transaction = new IntercompanyTransaction
+                {
+                    CompanyId = fromCompanyId,
+                    FromCompanyId = fromCompanyId,
+                    ToCompanyId = toCompanyId,
+                    TransactionDate = invoice.InvoiceDate,
+                    Description = $"Mirror of {invoice.InvoiceNo}",
+                    Amount = invoice.Subtotal,
+                    Currency = invoice.Currency,
+                    Status = IntercompanyStatus.Matched,
+                    SourceArInvoiceId = invoice.Id,
+                    SourceJournalEntryId = invoice.JournalEntryId,
+                    MirrorApInvoiceId = mirrorInvoice.Id,
+                    MirrorJournalEntryId = je.Id
+                };
+                _db.IntercompanyTransactions.Add(transaction);
+                await _db.SaveChangesAsync(token);
+                return transaction;
+            }, ct);
+        }
+
+        /// <summary>
+        /// Mirrors an already-posted AR invoice WITHOUT letting a failure disappear. The local invoice stays posted;
+        /// if the counterparty side cannot be posted (closed period, missing rule or supplier link, ...) that attempt
+        /// is rolled back as a unit (savepoint), an exception item is raised for follow-up, and the caller receives a
+        /// Failed outcome to show the user. Safe to call again (retry): an existing mirror is returned as Completed and
+        /// any open exception for it is closed.
+        /// </summary>
+        public async Task<MirrorOutcome> TryMirrorAsync(Guid fromCompanyId, Guid arInvoiceId, Guid? userId, CancellationToken ct = default)
+        {
+            var invoice = await _db.ArInvoices.IgnoreQueryFilters().Include(i => i.Customer)
                 .FirstOrDefaultAsync(i => i.Id == arInvoiceId && i.CompanyId == fromCompanyId, ct)
                 ?? throw new InvalidOperationException("Source AR invoice not found.");
 
-            var toCompanyId = invoice.Customer?.LinkedCompanyId
-                ?? throw new InvalidOperationException("Customer is not linked to a group company -- not an inter-company transaction.");
+            if (invoice.Customer?.LinkedCompanyId == null)
+                return new MirrorOutcome("NotApplicable", null, null, null);
 
-            var rule = await _db.InterCompanyRules.IgnoreQueryFilters()
-                .FirstOrDefaultAsync(r => r.CompanyId == fromCompanyId && r.FromCompanyId == fromCompanyId && r.ToCompanyId == toCompanyId && r.IsActive, ct)
-                ?? throw new InvalidOperationException("No active inter-company rule configured for this entity pair. Configure one under Group > Inter-Company Rules first.");
+            // Remember what is already tracked so a failed attempt can be discarded from the change tracker.
+            var trackedBefore = _db.ChangeTracker.Entries().Select(e => e.Entity)
+                .ToHashSet<object>(ReferenceEqualityComparer.Instance);
 
-            // Find (or require) a Supplier record in the target company representing the sending entity.
-            var mirrorSupplier = await _db.Suppliers.IgnoreQueryFilters()
-                .FirstOrDefaultAsync(s => s.CompanyId == toCompanyId && s.LinkedCompanyId == fromCompanyId, ct)
-                ?? throw new InvalidOperationException("Target company has no Supplier record linked back to the sending company. Create one first (Supplier.LinkedCompanyId = sending company).");
-
-            var mirrorLines = invoice.Lines.Select(l => new ApInvoiceLine
+            try
             {
-                Description = $"Inter-company mirror: {l.Description}",
-                Quantity = l.Quantity,
-                UnitCost = l.UnitPrice,
-                LineSubtotal = l.LineSubtotal,
-                LineVat = 0, // VAT is not re-charged on inter-company mirror postings
-                LineTotal = l.LineSubtotal,
-                GlAccountId = rule.DefaultReceiverApAccountId
-            }).ToList();
+                var transaction = await RunIsolatedAsync(token => CreateMirrorPostingAsync(fromCompanyId, arInvoiceId, token), ct);
 
-            var prefix = $"ICO-{DateTime.UtcNow:yyyy}-";
-            var count = await _db.ApInvoices.IgnoreQueryFilters().CountAsync(i => i.CompanyId == toCompanyId && i.InvoiceNo.StartsWith(prefix), ct);
-
-            var mirrorInvoice = new ApInvoice
+                await _exceptions.ResolveForSourceAsync(fromCompanyId, ExceptionCategory.InterCompanyMirror, nameof(ArInvoice),
+                    arInvoiceId, userId, "Inter-company mirror posted successfully.", ct);
+                await _db.SaveChangesAsync(ct);
+                return new MirrorOutcome("Completed", transaction.Id, null, null);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or DbUpdateException)
             {
-                CompanyId = toCompanyId,
-                InvoiceNo = $"{prefix}{(count + 1):D5}",
-                SupplierId = mirrorSupplier.Id,
-                InvoiceDate = invoice.InvoiceDate,
-                DueDate = invoice.DueDate,
-                Currency = invoice.Currency,
-                ExchangeRate = invoice.ExchangeRate,
-                Subtotal = invoice.Subtotal,
-                VatAmount = 0,
-                Total = invoice.Subtotal,
-                Outstanding = invoice.Subtotal,
-                Status = InvoiceStatus.Draft,
-                IsIntercompanyMirror = true,
-                Lines = mirrorLines
-            };
-            _db.ApInvoices.Add(mirrorInvoice);
-            await _db.SaveChangesAsync(ct);
+                foreach (var entry in _db.ChangeTracker.Entries().ToList())
+                    if (!trackedBefore.Contains(entry.Entity)) entry.State = EntityState.Detached;
 
-            // Post the mirror invoice to Company B's GL: Dr expense/clearing, Cr Trade Creditors.
-            var glLines = new List<GlLineRequest>
-            {
-                new(rule.DefaultReceiverApAccountId, mirrorInvoice.Subtotal, 0, mirrorInvoice.Currency, mirrorInvoice.ExchangeRate, null, "Inter-company mirror expense/clearing"),
-                new(mirrorSupplier.ApAccountId ?? rule.DefaultReceiverApAccountId, 0, mirrorInvoice.Subtotal, mirrorInvoice.Currency, mirrorInvoice.ExchangeRate, null, $"Inter-company: {mirrorInvoice.InvoiceNo}")
-            };
-            var je = await _gl.PostAsync(toCompanyId, invoice.InvoiceDate, JournalSource.AP,
-                $"Inter-company mirror of {invoice.InvoiceNo}", invoice.InvoiceNo, glLines, ct);
-            mirrorInvoice.JournalEntryId = je.Id;
-            mirrorInvoice.Status = InvoiceStatus.Posted;
+                var message = ex is DbUpdateException ? "Database error while posting the mirror: " + ex.GetBaseException().Message : ex.Message;
+                var item = await _exceptions.RaiseAsync(fromCompanyId, ExceptionCategory.InterCompanyMirror, nameof(ArInvoice),
+                    arInvoiceId, message, userId, ct);
+                await _db.SaveChangesAsync(ct);
+                return new MirrorOutcome("Failed", null, item.Id, message);
+            }
+        }
 
-            var transaction = new IntercompanyTransaction
+        /// <summary>
+        /// Runs <paramref name="attempt"/> so that, if it throws, everything it wrote is undone while the work done
+        /// earlier in the same request (the posted invoice) is kept: a savepoint inside the request transaction, or its
+        /// own transaction when none is open.
+        /// </summary>
+        private async Task<T> RunIsolatedAsync<T>(Func<CancellationToken, Task<T>> attempt, CancellationToken ct)
+        {
+            var ambient = _db.Database.CurrentTransaction;
+            if (ambient == null || !ambient.SupportsSavepoints)
+                return await _db.InTransactionAsync(attempt, ct);
+
+            const string savepoint = "intercompany_mirror";
+            await ambient.CreateSavepointAsync(savepoint, ct);
+            try
             {
-                CompanyId = fromCompanyId,
-                FromCompanyId = fromCompanyId,
-                ToCompanyId = toCompanyId,
-                TransactionDate = invoice.InvoiceDate,
-                Description = $"Mirror of {invoice.InvoiceNo}",
-                Amount = invoice.Subtotal,
-                Currency = invoice.Currency,
-                Status = IntercompanyStatus.Matched,
-                SourceArInvoiceId = invoice.Id,
-                SourceJournalEntryId = invoice.JournalEntryId,
-                MirrorApInvoiceId = mirrorInvoice.Id,
-                MirrorJournalEntryId = je.Id
-            };
-            _db.IntercompanyTransactions.Add(transaction);
-            await _db.SaveChangesAsync(ct);
-            return transaction;
+                var result = await attempt(ct);
+                await ambient.ReleaseSavepointAsync(savepoint, ct);
+                return result;
+            }
+            catch
+            {
+                await ambient.RollbackToSavepointAsync(savepoint, ct);
+                throw;
+            }
         }
 
         /// <summary>Inter-company reconciliation report: every transaction between any two group

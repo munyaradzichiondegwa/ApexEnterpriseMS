@@ -1,0 +1,4 @@
+# Dependencies are installed inside the image; never copy the host's over them.
+node_modules
+.next
+*.tsbuildinfo

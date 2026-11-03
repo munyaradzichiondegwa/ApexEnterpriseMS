@@ -3,14 +3,17 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import ConfigError from "@/components/ConfigError";
+import LoadingState from "@/components/LoadingState";
 
 export default function Home() {
-  const { user, loading } = useAuth();
+  const { user, loading, configError } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading) router.push(user ? "/dashboard" : "/login");
-  }, [loading, user, router]);
+    if (!loading && !configError) router.replace(user ? "/dashboard" : "/login");
+  }, [loading, user, configError, router]);
 
-  return <div className="min-h-screen flex items-center justify-center text-slate-400">Loading ApexERP…</div>;
+  if (configError) return <ConfigError message={configError} />;
+  return <LoadingState />;
 }

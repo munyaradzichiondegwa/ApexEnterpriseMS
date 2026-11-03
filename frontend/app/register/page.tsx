@@ -51,9 +51,10 @@ export default function RegisterPage() {
           </div>
           <div>
             <label className="label">Password</label>
-            <input className="input" type="password" required minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <input className="input" type="password" required minLength={10} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          <p className="text-xs text-slate-500 -mt-2">At least 10 characters.</p>
+          {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
           <button className="btn-primary w-full" disabled={busy}>{busy ? "Creating your workspace…" : "Create company"}</button>
           <p className="text-sm text-center text-slate-500">
             Already have an account? <Link href="/login" className="text-brand-600 font-medium">Sign in</Link>

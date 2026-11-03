@@ -1,3 +1,5 @@
+using ApexERP.Application.Security;
+using ApexERP.API.Authorization;
 using ApexERP.Application.Services;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
@@ -26,14 +28,26 @@ namespace ApexERP.API.Controllers
         }
 
         [HttpGet("trial-balance")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
         public async Task<IActionResult> GetTrialBalance([FromQuery] DateTime? asOf)
         {
             var lines = await _reports.GetTrialBalanceAsync(CompanyId, asOf ?? DateTime.UtcNow);
-            return Ok(new { asOfDate = asOf ?? DateTime.UtcNow, lines, totalDebit = lines.Sum(l => l.Debit), totalCredit = lines.Sum(l => l.Credit) });
+            var totalDebit = lines.Sum(l => l.Debit);
+            var totalCredit = lines.Sum(l => l.Credit);
+            var difference = Math.Round(totalDebit - totalCredit, 6);
+            return Ok(new { asOfDate = asOf ?? DateTime.UtcNow, lines, totalDebit, totalCredit, difference, isBalanced = difference == 0m });
         }
+
+        /// <summary>Control checks for the books (trial balance, accounting equation, unbalanced journals, journals
+        /// waiting for approval). Every difference should be zero; anything else needs investigation.</summary>
+        [HttpGet("integrity-check")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetIntegrityCheck([FromQuery] DateTime? asOf) =>
+            Ok(await _reports.GetIntegrityCheckAsync(CompanyId, asOf ?? DateTime.UtcNow));
 
         /// <summary>Necessary Financial Report #2: Statement of Profit or Loss and Other Comprehensive Income.</summary>
         [HttpGet("income-statement")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
         public async Task<IActionResult> GetIncomeStatement([FromQuery] DateTime from, [FromQuery] DateTime to)
         {
             var result = await _reports.GetIncomeStatementAsync(CompanyId, from, to);
@@ -42,6 +56,7 @@ namespace ApexERP.API.Controllers
 
         /// <summary>Necessary Financial Report #1: Statement of Financial Position.</summary>
         [HttpGet("balance-sheet")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
         public async Task<IActionResult> GetBalanceSheet([FromQuery] DateTime? asOf)
         {
             var result = await _reports.GetBalanceSheetAsync(CompanyId, asOf ?? DateTime.UtcNow);
@@ -50,6 +65,7 @@ namespace ApexERP.API.Controllers
 
         /// <summary>Necessary Financial Report #3: Statement of Changes in Equity.</summary>
         [HttpGet("statement-of-changes-in-equity")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
         public async Task<IActionResult> GetStatementOfChangesInEquity([FromQuery] DateTime from, [FromQuery] DateTime to)
         {
             var result = await _equity.GetStatementAsync(CompanyId, from, to);
@@ -58,6 +74,7 @@ namespace ApexERP.API.Controllers
 
         /// <summary>Necessary Financial Report #4: Statement of Cash Flows (indirect method).</summary>
         [HttpGet("cash-flow-statement")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
         public async Task<IActionResult> GetCashFlowStatement([FromQuery] DateTime from, [FromQuery] DateTime to)
         {
             var result = await _cashFlow.GetStatementAsync(CompanyId, from, to);
@@ -66,6 +83,7 @@ namespace ApexERP.API.Controllers
 
         /// <summary>Necessary Financial Report #5: Notes to the Financial Statements.</summary>
         [HttpGet("notes")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
         public async Task<IActionResult> GetNotes([FromQuery] DateTime from, [FromQuery] DateTime to)
         {
             var result = await _notes.GetNotesAsync(CompanyId, from, to);
@@ -83,6 +101,7 @@ namespace ApexERP.API.Controllers
 
         /// <summary>Full statutory pack in one call: all 5 necessary financial reports for a period.</summary>
         [HttpGet("full-statement-pack")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
         public async Task<IActionResult> GetFullStatementPack([FromQuery] DateTime from, [FromQuery] DateTime to)
         {
             var balanceSheet = await _reports.GetBalanceSheetAsync(CompanyId, to);

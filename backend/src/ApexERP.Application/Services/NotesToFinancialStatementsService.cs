@@ -124,14 +124,15 @@ namespace ApexERP.Application.Services
 
         private async Task<List<ShareCapitalNoteLine>> BuildShareCapitalNoteAsync(Guid companyId, DateTime periodStart, DateTime periodEnd, CancellationToken ct)
         {
+            var periodEndExclusive = ReportingDates.EndExclusive(periodEnd);
             var shareCapitalAccountIds = await _db.GlAccounts
                 .Where(a => a.CompanyId == companyId && a.Type == GlAccountType.Equity && a.Name.Contains("Share Capital"))
                 .Select(a => a.Id).ToListAsync(ct);
 
             var lines = await _db.JournalLines
                 .Where(l => shareCapitalAccountIds.Contains(l.GlAccountId) && l.JournalEntry!.CompanyId == companyId
-                            && l.JournalEntry.Status == JournalStatus.Posted
-                            && l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate <= periodEnd)
+                            && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed)
+                            && l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate < periodEndExclusive)
                 .Select(l => new ShareCapitalNoteLine(l.JournalEntry!.EntryDate, l.Narrative ?? l.JournalEntry.Description ?? "Share capital movement", l.BaseCredit - l.BaseDebit))
                 .ToListAsync(ct);
             return lines;
@@ -158,14 +159,15 @@ namespace ApexERP.Application.Services
 
         private async Task<List<SegmentNoteLine>> BuildSegmentNoteAsync(Guid companyId, DateTime periodStart, DateTime periodEnd, CancellationToken ct)
         {
+            var periodEndExclusive = ReportingDates.EndExclusive(periodEnd);
             var segments = await _db.Segments.Where(s => s.CompanyId == companyId && s.IsActive).ToListAsync(ct);
             if (!segments.Any()) return new List<SegmentNoteLine>();
 
             var costCentresBySegment = await _db.CostCentres.Where(c => c.CompanyId == companyId && c.SegmentId != null).ToListAsync(ct);
 
             var movements = await _db.JournalLines
-                .Where(l => l.JournalEntry!.CompanyId == companyId && l.JournalEntry.Status == JournalStatus.Posted
-                            && l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate <= periodEnd
+                .Where(l => l.JournalEntry!.CompanyId == companyId && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed)
+                            && l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate < periodEndExclusive
                             && l.CostCentreId != null)
                 .Select(l => new { l.CostCentreId, l.BaseDebit, l.BaseCredit, l.GlAccountId })
                 .ToListAsync(ct);

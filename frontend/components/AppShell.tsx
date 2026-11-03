@@ -4,6 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { canView } from "@/lib/permissions";
+import ConfigError from "@/components/ConfigError";
+import LoadingState from "@/components/LoadingState";
 import clsx from "clsx";
 
 const NAV = [
@@ -24,13 +27,14 @@ const NAV = [
   { href: "/group", label: "Group & Consolidation" },
   { href: "/public-sector", label: "Public Sector" },
   { href: "/grants", label: "Grants & NGO" },
+  { href: "/exceptions", label: "Exceptions" },
   { href: "/admin", label: "Admin & Settings" },
 ];
 
-function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function NavLinks({ pathname, items, onNavigate }: { pathname: string; items: typeof NAV; onNavigate?: () => void }) {
   return (
     <>
-      {NAV.map((item) => (
+      {items.map((item) => (
         <Link
           key={item.href}
           href={item.href}
@@ -49,22 +53,26 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, configError } = useAuth();
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
-    if (!loading && !user) router.push("/login");
-  }, [loading, user, router]);
+    if (!loading && !user && !configError) router.replace("/login");
+  }, [loading, user, configError, router]);
 
   // Close the mobile drawer automatically whenever the route changes.
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
 
-  if (loading || !user) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-400">Loading ApexERP…</div>;
-  }
+  if (configError) return <ConfigError message={configError} />;
+  if (loading) return <LoadingState />;
+  if (!user) return <LoadingState message="Redirecting to sign in…" />;
+
+  // Only show the modules this user's role can use. (The API enforces permissions regardless of what is shown here.)
+  const visibleNav = NAV.filter((item) => canView(item.href, user.permissions));
+  const allowed = canView(pathname, user.permissions);
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
@@ -102,7 +110,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </button>
             </div>
             <nav className="flex-1 py-3">
-              <NavLinks pathname={pathname} onNavigate={() => setDrawerOpen(false)} />
+              <NavLinks pathname={pathname} items={visibleNav} onNavigate={() => setDrawerOpen(false)} />
             </nav>
             <div className="p-4 border-t border-brand-800">
               <button onClick={logout} className="text-sm text-brand-200 hover:text-white">Sign out</button>
@@ -118,7 +126,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="text-xs text-brand-300 truncate">{user.email}</div>
         </div>
         <nav className="flex-1 overflow-y-auto py-3">
-          <NavLinks pathname={pathname} />
+          <NavLinks pathname={pathname} items={visibleNav} />
         </nav>
         <div className="p-4 border-t border-brand-800">
           <button onClick={logout} className="text-sm text-brand-200 hover:text-white">Sign out</button>
@@ -126,7 +134,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main className="flex-1 min-w-0 bg-slate-50">
-        <div className="max-w-6xl mx-auto p-4 sm:p-6 md:p-8">{children}</div>
+        <div className="max-w-6xl mx-auto p-4 sm:p-6 md:p-8">
+          {allowed ? (
+            children
+          ) : (
+            <div className="card max-w-lg" role="alert">
+              <h1 className="text-lg font-bold mb-1">You don&apos;t have access to this area</h1>
+              <p className="text-sm text-slate-600">
+                Your role ({user.role}) does not include permission to use this module. Ask an administrator if you need it.
+              </p>
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );

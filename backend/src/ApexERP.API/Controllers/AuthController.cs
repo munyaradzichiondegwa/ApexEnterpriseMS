@@ -24,6 +24,9 @@ namespace ApexERP.API.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> Register(RegisterRequest req)
         {
+            var passwordProblem = PasswordPolicy.Validate(req.Password, req.Email);
+            if (passwordProblem != null) return BadRequest(new { error = passwordProblem });
+
             try
             {
                 var user = await _auth.RegisterCompanyAndAdminAsync(req.CompanyName, req.Email, req.Password, req.FirstName, req.LastName);
@@ -55,12 +58,16 @@ namespace ApexERP.API.Controllers
         [Authorize]
         public IActionResult Me()
         {
+            var permissions = PermissionEvaluator.Parse(User.FindAll("permissions").Select(c => c.Value))
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
+
             return Ok(new
             {
-                userId = User.FindFirst("sub")?.Value,
+                userId = (User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))?.Value,
                 companyId = User.FindFirst("company_id")?.Value,
-                email = User.FindFirst("email")?.Value,
-                role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+                email = (User.FindFirst("email") ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email))?.Value,
+                role = (User.FindFirst("role") ?? User.FindFirst(System.Security.Claims.ClaimTypes.Role))?.Value,
+                permissions
             });
         }
     }

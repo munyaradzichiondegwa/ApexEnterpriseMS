@@ -186,6 +186,8 @@ namespace ApexERP.Application.Services
         private async Task<string> GenerateNoAsync(Guid companyId, string prefix, CancellationToken ct)
         {
             var yearPrefix = $"{prefix}-{DateTime.UtcNow:yyyy}-";
+            // Serialise concurrent number generation (the lock lasts until the request's transaction ends).
+            await _db.TryAcquireTransactionLockAsync($"docno:{companyId:N}:AP", ct);
             var count = await _db.ApInvoices.IgnoreQueryFilters().CountAsync(i => i.CompanyId == companyId, ct)
                         + await _db.ApPayments.IgnoreQueryFilters().CountAsync(p => p.CompanyId == companyId, ct);
             return $"{yearPrefix}{(count + 1):D5}";

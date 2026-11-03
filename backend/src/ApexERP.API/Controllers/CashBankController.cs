@@ -44,8 +44,8 @@ namespace ApexERP.API.Controllers
         [HttpPost("accounts/{bankAccountId}/import")]
         public async Task<IActionResult> ImportStatementLines(Guid bankAccountId, List<ImportBankLineRequest> lines)
         {
-            var bankAccount = await _db.BankAccounts.FirstOrDefaultAsync(b => b.Id == bankAccountId && b.CompanyId == CompanyId)
-                ?? throw new InvalidOperationException("Bank account not found.");
+            var bankAccount = await _db.BankAccounts.FirstOrDefaultAsync(b => b.Id == bankAccountId && b.CompanyId == CompanyId);
+            if (bankAccount == null) return NotFound(new { error = "Bank account not found." });
 
             var imported = new List<BankTransaction>();
             var candidateSystemTxns = await _db.BankTransactions
@@ -67,9 +67,16 @@ namespace ApexERP.API.Controllers
                 };
 
                 // Auto-match: same date (+/- 3 days) and exact amount against an unreconciled system-side movement.
-                var match = candidateSystemTxns.FirstOrDefault(s =>
-                    Math.Abs((s.TransactionDate - line.TransactionDate).TotalDays) <= 3 &&
-                    s.Debit == line.Debit && s.Credit == line.Credit);
+                // A system transaction can be matched by ONE statement line only (already-matched rows are excluded), and
+                // when two candidates are equally close the match is ambiguous, so it is left for a person to reconcile.
+                double Distance(BankTransaction s) => Math.Abs((s.TransactionDate - line.TransactionDate).TotalDays);
+                var candidates = candidateSystemTxns
+                    .Where(s => !s.IsReconciled && Distance(s) <= 3 && s.Debit == line.Debit && s.Credit == line.Credit)
+                    .OrderBy(Distance)
+                    .ToList();
+                var match = candidates.Count == 1 || (candidates.Count > 1 && Distance(candidates[0]) < Distance(candidates[1]))
+                    ? candidates[0]
+                    : null;
                 if (match != null)
                 {
                     txn.IsReconciled = true;

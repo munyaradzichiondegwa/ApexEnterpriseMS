@@ -1,33 +1,40 @@
 "use client";
 
 import axios from "axios";
+import { API_BASE_URL, API_CONFIG_ERROR } from "./config";
+import { extractErrorMessage as describeError } from "./errors";
+import { clearSession, readAccessToken, safeStorage } from "./session";
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+export { API_BASE_URL, API_CONFIG_ERROR };
 
 export const api = axios.create({
   baseURL: `${API_BASE_URL}/api/v1`,
   headers: { "Content-Type": "application/json" },
+  // Never leave a screen waiting forever on a server that is down or unreachable.
+  timeout: 20_000,
 });
 
-// Attach the JWT access token to every outgoing request.
 api.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("apexerp_access_token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-  }
+  // A build with no usable API URL cannot work; say so instead of sending requests to the wrong place.
+  if (API_CONFIG_ERROR) return Promise.reject(new Error(API_CONFIG_ERROR));
+
+  const token = readAccessToken(safeStorage());
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// On 401, clear the session and bounce to login -- the access token has expired (15 min TTL).
+// A 401 on a normal request means the saved session is no longer valid (the access token lasts 15 minutes).
+// A 401 from the auth endpoints themselves just means "wrong e-mail or password" and must not log anyone out.
 api.interceptors.response.use(
   (res) => res,
   (error) => {
-    if (typeof window !== "undefined" && error?.response?.status === 401) {
-      localStorage.removeItem("apexerp_access_token");
-      localStorage.removeItem("apexerp_refresh_token");
-      localStorage.removeItem("apexerp_user");
-      if (!window.location.pathname.startsWith("/login")) {
-        window.location.href = "/login";
+    const status = error?.response?.status;
+    const url: string = error?.config?.url ?? "";
+    if (typeof window !== "undefined" && status === 401 && !url.startsWith("/auth/")) {
+      clearSession(safeStorage());
+      const path = window.location.pathname;
+      if (!path.startsWith("/login") && !path.startsWith("/register")) {
+        window.location.href = "/login?reason=expired";
       }
     }
     return Promise.reject(error);
@@ -35,6 +42,5 @@ api.interceptors.response.use(
 );
 
 export function extractErrorMessage(err: unknown): string {
-  const anyErr = err as any;
-  return anyErr?.response?.data?.error || anyErr?.response?.data?.title || anyErr?.message || "Something went wrong";
+  return describeError(err, API_BASE_URL);
 }

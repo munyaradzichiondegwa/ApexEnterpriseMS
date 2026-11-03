@@ -40,6 +40,8 @@ namespace ApexERP.Application.Services
             }).ToList();
 
             var prefix = $"SO-{DateTime.UtcNow:yyyy}-";
+            // Serialise concurrent number generation (the lock lasts until the request's transaction ends).
+            await _db.TryAcquireTransactionLockAsync($"docno:{companyId:N}:{prefix}", ct);
             var count = await _db.SalesOrders.IgnoreQueryFilters().CountAsync(o => o.CompanyId == companyId && o.OrderNo.StartsWith(prefix), ct);
 
             var order = new SalesOrder

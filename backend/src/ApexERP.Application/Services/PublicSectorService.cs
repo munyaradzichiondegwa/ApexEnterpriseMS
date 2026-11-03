@@ -112,7 +112,7 @@ namespace ApexERP.Application.Services
                 .Where(i => i.CompanyId == companyId && i.FundCentreId == fundCentreId && i.Status != InvoiceStatus.Draft && i.Status != InvoiceStatus.Cancelled)
                 .SumAsync(i => i.Total, ct);
             var actualsFromJournals = await _db.JournalLines
-                .Where(l => l.FundCentreId == fundCentreId && l.JournalEntry!.CompanyId == companyId && l.JournalEntry.Status == JournalStatus.Posted)
+                .Where(l => l.FundCentreId == fundCentreId && l.JournalEntry!.CompanyId == companyId && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
                 .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
             var actuals = Math.Max(actualsFromInvoices, actualsFromJournals); // avoid double-counting if AP invoices already flow through JournalLine tagging
 
