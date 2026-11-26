@@ -35,6 +35,7 @@ namespace ApexERP.Infrastructure.Data
         public ApexErpDbContext(DbContextOptions<ApexErpDbContext> options) : base(options) { }
 
         // Core / tenancy
+        public DbSet<CustomerOrganisation> CustomerOrganisations => Set<CustomerOrganisation>();
         public DbSet<Company> Companies => Set<Company>();
         public DbSet<Role> Roles => Set<Role>();
         public DbSet<User> Users => Set<User>();
@@ -180,6 +181,18 @@ namespace ApexERP.Infrastructure.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            // Customer organisation (tenant) owns one or more legal entities (companies).
+            // Restrict delete so tenant removal cannot cascade into accounting records.
+            modelBuilder.Entity<CustomerOrganisation>()
+                .HasMany(t => t.Companies)
+                .WithOne(c => c.Tenant)
+                .HasForeignKey(c => c.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CustomerOrganisation>()
+                .HasIndex(t => t.RegistrationNumber);
+            modelBuilder.Entity<Company>()
+                .HasIndex(c => c.TenantId);
 
             // ---- Decimal precision: NUMERIC(20,6) everywhere per PRD Section 5 ----
             // ---- Dates: every DateTime is stored/read as UTC. Npgsql refuses to write a DateTime whose
