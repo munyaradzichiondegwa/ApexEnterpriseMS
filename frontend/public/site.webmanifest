@@ -3,11 +3,25 @@
   "short_name": "ApexERP",
   "description": "Zimbabwe-first, multi-currency, ZIMRA-compliant ERP suite.",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
   ],
-  "theme_color": "#0e2921",
-  "background_color": "#0e2921",
+  "theme_color": "#19385d",
+  "background_color": "#19385d",
   "display": "standalone",
   "start_url": "/dashboard"
 }
