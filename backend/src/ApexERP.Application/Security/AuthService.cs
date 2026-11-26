@@ -134,10 +134,19 @@ namespace ApexERP.Application.Security
             if (user.Role == null)
                 user = await _db.Users.IgnoreQueryFilters().Include(u => u.Role).FirstAsync(u => u.Id == user.Id, ct);
 
+            var tenantId = await _db.Companies.IgnoreQueryFilters()
+                .Where(c => c.Id == user.CompanyId && c.IsActive)
+                .Select(c => c.TenantId)
+                .SingleOrDefaultAsync(ct);
+            if (!tenantId.HasValue || !await _db.CustomerOrganisations.IgnoreQueryFilters()
+                    .AnyAsync(t => t.Id == tenantId.Value && t.IsActive, ct))
+                throw new InvalidOperationException("The customer's tenant is missing or inactive. Contact the platform administrator.");
+
             var expiresAt = DateTime.UtcNow.AddMinutes(15);
             var claims = new List<Claim>
             {
                 new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new("tenant_id", tenantId.Value.ToString()),
                 new("company_id", user.CompanyId.ToString()),
                 new("email", user.Email),
                 new(ClaimTypes.Role, user.Role?.Name ?? "User"),
@@ -280,7 +289,16 @@ namespace ApexERP.Application.Security
             if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == email.ToLowerInvariant(), ct))
                 throw new InvalidOperationException("A user with this email already exists.");
 
-            var company = new Company { Name = companyName, BaseCurrency = "USD", FunctionalCurrency = "USD" };
+            var tenant = new CustomerOrganisation { Name = companyName, LegalName = companyName };
+            var company = new Company
+            {
+                TenantId = tenant.Id,
+                Tenant = tenant,
+                Name = companyName,
+                BaseCurrency = "USD",
+                FunctionalCurrency = "USD"
+            };
+            _db.CustomerOrganisations.Add(tenant);
             _db.Companies.Add(company);
             var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
             _db.Roles.Add(adminRole);
