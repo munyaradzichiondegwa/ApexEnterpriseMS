@@ -150,12 +150,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var isRefresh =
                     principal?.FindFirst("token_use")?.Value == "refresh";
 
-                var hasTenant =
-                    Guid.TryParse(
-                        principal?.FindFirst("company_id")?.Value,
-                        out _);
+                var hasCompany = Guid.TryParse(principal?.FindFirst("company_id")?.Value, out _);
+                var hasTenant = Guid.TryParse(principal?.FindFirst("tenant_id")?.Value, out _);
 
-                if (isRefresh || !hasTenant)
+                if (isRefresh || !hasTenant || !hasCompany)
                 {
                     context.Fail("The token is not valid for API access.");
                 }
@@ -347,30 +345,40 @@ app.UseCors("Frontend");
 app.UseAuthentication();
 
 // ---- Tenant resolution middleware ----
-// Reads company_id and user ID from the validated JWT.
-// Every EF Core global query filter scopes data to the caller's company.
+// The signed tenant_id and company_id claims must describe a real, active
+// company belonging to an active customer organisation. Never trust a tenant
+// identifier supplied in a request header or query string.
 app.Use(async (context, next) =>
 {
     if (context.User.Identity?.IsAuthenticated == true)
     {
-        if (!Guid.TryParse(
-                context.User.FindFirst("company_id")?.Value,
-                out var companyId))
+        if (!Guid.TryParse(context.User.FindFirst("company_id")?.Value, out var companyId) ||
+            !Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
 
-        var dbContext =
-            context.RequestServices.GetRequiredService<ApexErpDbContext>();
+        var dbContext = context.RequestServices.GetRequiredService<ApexErpDbContext>();
+        var companyBelongsToTenant = await dbContext.Companies.IgnoreQueryFilters()
+            .AnyAsync(c => c.Id == companyId && c.TenantId == tenantId && c.IsActive, context.RequestAborted);
+        var tenantIsActive = companyBelongsToTenant &&
+            await dbContext.CustomerOrganisations.IgnoreQueryFilters()
+                .AnyAsync(t => t.Id == tenantId && t.IsActive, context.RequestAborted);
 
+        if (!tenantIsActive)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+
+        dbContext.CurrentTenantId = tenantId;
         dbContext.CurrentCompanyId = companyId;
         dbContext.CurrentIpAddress = context.Connection.RemoteIpAddress?.ToString();
 
         if (Guid.TryParse(
                 (context.User.FindFirst("sub") ??
-                 context.User.FindFirst(
-                     System.Security.Claims.ClaimTypes.NameIdentifier))?.Value,
+                 context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))?.Value,
                 out var userId))
         {
             dbContext.CurrentUserId = userId;
