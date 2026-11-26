@@ -46,3 +46,12 @@ const resolved = resolveApiConfig(process.env.NEXT_PUBLIC_API_URL, process.env.N
 
 export const API_BASE_URL = resolved.baseUrl;
 export const API_CONFIG_ERROR = resolved.error;
+
+/**
+ * Where the browser sends API requests. By default every call goes to this app's own origin under /backend, which Next.js proxies to
+ * NEXT_PUBLIC_API_URL (see next.config.js). That makes the API's refresh-token cookie first-party, so it works in browsers that block
+ * third-party cookies. Set NEXT_PUBLIC_DIRECT_API=true to call the API origin directly instead (the API must then use
+ * Auth:CookieSameSite=None and list this site in its CORS origins).
+ */
+export const USE_PROXY = process.env.NEXT_PUBLIC_DIRECT_API !== "true";
+export const BROWSER_API_BASE = USE_PROXY ? "/backend" : API_BASE_URL;

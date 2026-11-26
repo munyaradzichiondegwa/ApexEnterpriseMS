@@ -4,6 +4,7 @@ using ApexERP.API.Authorization;
 using ApexERP.API.Controllers;
 using ApexERP.API.Extensions;
 using ApexERP.API.Filters;
+using ApexERP.Application.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ActionConstraints;
@@ -228,6 +229,13 @@ namespace ApexERP.Tests
 
         private static bool Anonymous(ControllerActionDescriptor d) => d.EndpointMetadata.OfType<IAllowAnonymous>().Any();
 
+        /// <summary>
+        /// The one deliberate exception outside the sign-in controller: a payment provider's callback carries no user token. It is
+        /// authenticated by an HMAC signature over the body (verified before anything is read or written) and rate limited.
+        /// </summary>
+        private static bool IsSignedProviderWebhook(ControllerActionDescriptor d) =>
+            d.ControllerTypeInfo.AsType() == typeof(IntegrationsController) && d.ActionName == nameof(IntegrationsController.Webhook);
+
         [Fact]
         public void The_guard_actually_sees_the_controllers()
         {
@@ -242,6 +250,7 @@ namespace ApexERP.Tests
             var open = Descriptors()
                 .Where(d => !Policies(d).Any())                                   // not behind ANY authorize filter
                 .Where(d => !(Anonymous(d) && d.ControllerTypeInfo.AsType() == typeof(AuthController)))
+                .Where(d => !IsSignedProviderWebhook(d))
                 .Select(d => $"{d.ControllerName}.{d.ActionName}")
                 .ToList();
             Assert.True(open.Count == 0, "Actions reachable without signing in: " + string.Join(", ", open));
@@ -250,8 +259,12 @@ namespace ApexERP.Tests
         [Fact]
         public void Anonymous_access_exists_only_on_the_auth_controller()
         {
-            var anonymous = Descriptors().Where(Anonymous).Select(d => d.ControllerTypeInfo.AsType()).Distinct().ToList();
-            Assert.Equal(new[] { typeof(AuthController) }, anonymous);
+            var anonymousActions = Descriptors().Where(Anonymous).ToList();
+            var controllers = anonymousActions.Select(d => d.ControllerTypeInfo.AsType()).Distinct().OrderBy(t => t.Name).ToList();
+            Assert.Equal(new[] { typeof(AuthController), typeof(IntegrationsController) }, controllers);
+            // On the integrations controller exactly one action is open: the signature-verified provider webhook.
+            Assert.Equal(new[] { nameof(IntegrationsController.Webhook) },
+                anonymousActions.Where(d => d.ControllerTypeInfo.AsType() == typeof(IntegrationsController)).Select(d => d.ActionName).ToArray());
         }
 
         [Fact]
@@ -259,11 +272,34 @@ namespace ApexERP.Tests
         {
             var onlyLogin = Descriptors()
                 .Where(d => d.ControllerTypeInfo.AsType() != typeof(AuthController))
+                .Where(d => !IsSignedProviderWebhook(d))
                 .Where(d => !d.EndpointMetadata.OfType<AuthenticatedOnlyAttribute>().Any())
                 .Where(d => !Policies(d).Any(p => p.StartsWith(HasPermissionAttribute.PolicyPrefix, StringComparison.Ordinal)))
                 .Select(d => $"{d.ControllerName}.{d.ActionName}")
                 .ToList();
             Assert.True(onlyLogin.Count == 0, "Actions open to any signed-in user: " + string.Join(", ", onlyLogin));
+        }
+
+        [Fact]
+        public void The_new_sensitive_control_actions_name_their_own_permission()
+        {
+            Assert.Equal("ap.payments.authorise", Permission(Find(typeof(ApControlsController), nameof(ApControlsController.Authorise))));
+            Assert.Equal("ap.suppliers.verify-bank", Permission(Find(typeof(ApControlsController), nameof(ApControlsController.VerifyChange))));
+            Assert.Equal("controls.approve", Permission(Find(typeof(AutomationController), nameof(AutomationController.ApprovePrepayment))));
+            Assert.Equal("controls.reconciliation.signoff", Permission(Find(typeof(ControlsOpsController), nameof(ControlsOpsController.SignOff))));
+            Assert.Equal("controls.bank-rec.certify", Permission(Find(typeof(ControlsOpsController), nameof(ControlsOpsController.Certify))));
+            Assert.Equal("controls.governance.approve", Permission(Find(typeof(ControlsController), nameof(ControlsController.ApproveMateriality))));
+            Assert.Equal("controls.exceptions.review", Permission(Find(typeof(ControlsController), nameof(ControlsController.Review))));
+        }
+
+        [Fact]
+        public void Every_permission_named_on_an_action_exists_in_the_catalogue()
+        {
+            var unknown = Descriptors()
+                .SelectMany(d => d.EndpointMetadata.OfType<HasPermissionAttribute>().Select(a => (Action: $"{d.ControllerName}.{d.ActionName}", a.Permission)))
+                .Where(x => !Permissions.IsKnown(x.Permission))
+                .Select(x => $"{x.Action} -> {x.Permission}").ToList();
+            Assert.True(unknown.Count == 0, "Permissions not in the catalogue: " + string.Join(", ", unknown));
         }
 
         [Fact]

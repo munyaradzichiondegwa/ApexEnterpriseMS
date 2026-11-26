@@ -72,6 +72,129 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("AccountingPeriods");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.AccountingPolicyVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Area")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Area", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AccountingPolicyVersions");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.AccrualSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AccrualDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("AccruedLiabilityAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AutoReverse")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CostCentreId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ExpenseAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("MatchedApInvoiceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AccrualSchedules");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.ApInvoice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -119,8 +242,23 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("JournalEntryId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("MatchNotes")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("MatchOverriddenBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MatchStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("NotRequired");
+
                     b.Property<decimal>("Outstanding")
                         .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid?>("PurchaseOrderId")
+                        .HasColumnType("uuid");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -130,6 +268,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<Guid>("SupplierId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("SupplierInvoiceNo")
+                        .HasColumnType("text");
 
                     b.Property<decimal>("Total")
                         .HasColumnType("numeric(20,6)");
@@ -152,6 +293,10 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasIndex("CompanyId", "InvoiceNo")
                         .IsUnique();
+
+                    b.HasIndex("CompanyId", "SupplierId", "SupplierInvoiceNo")
+                        .IsUnique()
+                        .HasFilter("\"SupplierInvoiceNo\" IS NOT NULL AND \"Status\" <> 4");
 
                     b.ToTable("ApInvoices");
                 });
@@ -221,6 +366,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<decimal>("Amount")
                         .HasColumnType("numeric(20,6)");
 
+                    b.Property<DateTime?>("AuthorisedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AuthorisedBy")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("BankAccountId")
                         .HasColumnType("uuid");
 
@@ -250,6 +401,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("PaymentRunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PreparedBy")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("SupplierId")
                         .HasColumnType("uuid");
 
@@ -258,6 +415,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("WithholdingCertificateNo")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -296,6 +456,108 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("ApPaymentId");
 
                     b.ToTable("ApPaymentAllocations");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ApPaymentRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ApControlAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AuthorisedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AuthorisedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BankGlAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("PaymentDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PreparedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RunNo")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "RunNo")
+                        .IsUnique();
+
+                    b.ToTable("ApPaymentRuns");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ApPaymentRunItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid>("ApInvoiceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ApPaymentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ApPaymentRunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApPaymentRunId");
+
+                    b.ToTable("ApPaymentRunItems");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.ApprovalChain", b =>
@@ -376,6 +638,184 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("ApprovalChainId");
 
                     b.ToTable("ApprovalChainTiers");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ApprovalDelegation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DelegateUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DelegatorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EntityType")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsEmergency")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal?>("MaxAmount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ValidFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ValidTo")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "DelegateUserId", "ValidTo");
+
+                    b.ToTable("ApprovalDelegations");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ApprovalMatrixTier", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("EscalateToRoleName")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("RequiredRoleName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SlaHours")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("UpToAmount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "EntityType", "UpToAmount");
+
+                    b.ToTable("ApprovalMatrixTiers");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ArCreditNote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ArControlAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ArInvoiceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreditNoteNo")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PreparedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("RevenueReversalAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("VatOutputAccountId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "CreditNoteNo")
+                        .IsUnique();
+
+                    b.ToTable("ArCreditNotes");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.ArInvoice", b =>
@@ -779,6 +1219,66 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("AssetVerificationScans");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.AuditEvidenceReference", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("UploadedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "EntityType", "EntityId");
+
+                    b.ToTable("AuditEvidenceReferences");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.AuditLogEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -881,6 +1381,66 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("BankAccounts");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.BankReconciliation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BankAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("BookBalance")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("CertifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Difference")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("PreparedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReviewedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("StatementBalance")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime>("StatementDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("UnreconciledItemsTotal")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("BankReconciliations");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.BankTransaction", b =>
@@ -1179,6 +1739,173 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("Companies");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.CompanySetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("CompanySettings");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ControlException", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DetectorCode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("InvestigationNotes")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ResolvedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReviewedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("RiskScore")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Fingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "Status", "Severity");
+
+                    b.ToTable("ControlExceptions");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ControlTestResult", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Details")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Passed")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("RunAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TestCode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ControlTestResults");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.CostCentre", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1220,6 +1947,48 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("CostCentres");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.CreditLimitOverride", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TemporaryLimit")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("CreditLimitOverrides");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.CrmLead", b =>
@@ -1523,6 +2292,113 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("DividendDeclarations");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.EclLossRate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("FromDays")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("LossRatePct")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<int>("ToDays")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "FromDays");
+
+                    b.ToTable("EclLossRates");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.EclProvisionRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AllowanceAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AsOfDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("BadDebtExpenseAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MatrixSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("Movement")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<decimal>("PreviousAllowance")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<decimal>("RequiredAllowance")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TotalReceivables")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("EclProvisionRuns");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.Employee", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1598,49 +2474,6 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("Employees");
                 });
 
-            modelBuilder.Entity("ApexERP.Domain.Entities.ExchangeRate", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CompanyId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("FromCurrency")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<bool>("IsManualOverride")
-                        .HasColumnType("boolean");
-
-                    b.Property<decimal>("Rate")
-                        .HasColumnType("numeric(20,6)");
-
-                    b.Property<DateTime>("RateDate")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ToCurrency")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("UpdatedBy")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ExchangeRates");
-                });
-
             modelBuilder.Entity("ApexERP.Domain.Entities.ExceptionItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1702,6 +2535,49 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("CompanyId", "Status", "Category");
 
                     b.ToTable("ExceptionItems");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ExchangeRate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FromCurrency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsManualOverride")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("Rate")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime>("RateDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ToCurrency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ExchangeRates");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.FdmsSubmission", b =>
@@ -1862,6 +2738,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("ParentAssetId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("ResidualValue")
                         .HasColumnType("numeric(20,6)");
 
@@ -1948,6 +2827,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AllowedSourcesCsv")
+                        .HasColumnType("text");
+
                     b.Property<int>("CashFlowCategory")
                         .HasColumnType("integer");
 
@@ -1985,6 +2867,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<bool>("IsIntercompanyAccount")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPostable")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -2258,6 +3145,243 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("GrantCloseoutChecklists");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.IdempotencyRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ResponseBody")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ResponseStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Scope", "Key")
+                        .IsUnique();
+
+                    b.ToTable("IdempotencyRecords");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ImpairmentAssessment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AssessmentDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Assumptions")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("CarryingAmount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("DiscountRatePct")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<decimal>("FairValueLessCostsToSell")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid>("FixedAssetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("ImpairmentLoss")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid?>("ImpairmentLossAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Indicators")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("RecoverableAmount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("ValueInUse")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ImpairmentAssessments");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.IntegrationEndpoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BaseUrl")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SecretName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SettlementBankGlAccountId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("IntegrationEndpoints");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.IntegrationMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalRef")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ResultReceiptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("SignatureValid")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "NextAttemptAt");
+
+                    b.HasIndex("CompanyId", "Provider", "ExternalRef")
+                        .IsUnique();
+
+                    b.ToTable("IntegrationMessages");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.InterCompanyRule", b =>
@@ -2544,6 +3668,133 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("InventoryMovements");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.InventoryNrvAssessment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AssessmentDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("CostsToSell")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("EstimatedSellingPrice")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("NetRealisableValue")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid?>("PreparedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("WriteDownAmount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid?>("WriteDownExpenseAccountId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("InventoryNrvAssessments");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.JobExecution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempt")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("JobCode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Message")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RunKey")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "JobCode", "RunKey")
+                        .IsUnique();
+
+                    b.ToTable("JobExecutions");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.JournalEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2592,10 +3843,10 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CompanyId", "EntryNo")
+                    b.HasIndex("ReversalOfId")
                         .IsUnique();
 
-                    b.HasIndex("ReversalOfId")
+                    b.HasIndex("CompanyId", "EntryNo")
                         .IsUnique();
 
                     b.ToTable("JournalEntries");
@@ -2714,6 +3965,101 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("LeaveRequests");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.MaterialityConfiguration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("CriticalThreshold")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("HighThreshold")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("MediumThreshold")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("MaterialityConfigurations");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.MfaRecoveryCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CodeHash");
+
+                    b.ToTable("MfaRecoveryCodes");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.NettingBatch", b =>
@@ -2911,6 +4257,327 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("PayrollRuns");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PerformanceObligation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AllocatedPrice")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("EndDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Pattern")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RevenueAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RevenueContractId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SatisfactionJournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("SatisfiedOn")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("StandaloneSellingPrice")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RevenueContractId");
+
+                    b.ToTable("PerformanceObligations");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PeriodCloseTask", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AssignedTo")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CompletedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsAutomatic")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("PeriodId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "PeriodId", "Code")
+                        .IsUnique();
+
+                    b.ToTable("PeriodCloseTasks");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PettyCashFund", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CustodianUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("GlAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("ImprestAmount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PettyCashFunds");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PettyCashVoucher", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ExpenseAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PettyCashFundId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PreparedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("VoucherDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PettyCashVouchers");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PrepaymentSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CostCentreId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ExpenseAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Months")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("PrepaidAssetAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PrepaymentSchedules");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PrepaymentScheduleLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("PeriodStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PostedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PrepaymentScheduleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrepaymentScheduleId");
+
+                    b.ToTable("PrepaymentScheduleLines");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.Project", b =>
@@ -3115,6 +4782,242 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("PurchaseOrderLines");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.ReconciliationRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Area")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("AsOfDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Difference")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<string>("Explanation")
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("GlTotal")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid?>("RunBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("SignedOffAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SignedOffBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("SubledgerTotal")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Area", "AsOfDate");
+
+                    b.ToTable("ReconciliationRuns");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.RefreshToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreatedByIp")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FamilyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReplacedByTokenHash")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RevokedReason")
+                        .HasColumnType("text");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "FamilyId");
+
+                    b.ToTable("RefreshTokens");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.RevenueContract", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("BilledToDate")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<Guid?>("BillingJournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ContractAssetAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ContractLiabilityAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContractNo")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("EndDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ModificationNote")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ModifiedFromContractId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ReceivableAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TransactionPrice")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "ContractNo")
+                        .IsUnique();
+
+                    b.ToTable("RevenueContracts");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.RevenueScheduleLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PerformanceObligationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("PeriodStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RecognisedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceObligationId");
+
+                    b.ToTable("RevenueScheduleLines");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.Role", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3281,6 +5184,47 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("Segments");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.SoDConflictRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("PermissionA")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PermissionB")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SoDConflictRules");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.StatisticalAccount", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3320,6 +5264,60 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("StatisticalAccounts");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.StatutoryRate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("Ceiling")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("RatePct")
+                        .HasColumnType("numeric(20,6)");
+
+                    b.Property<string>("SourceReference")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Code", "EffectiveFrom");
+
+                    b.ToTable("StatutoryRates");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.SubAward", b =>
@@ -3424,6 +5422,15 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("ApAccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("BankAccountNo")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BankBranch")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BankName")
+                        .HasColumnType("text");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasColumnType("text");
@@ -3454,6 +5461,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool>("PaymentHold")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("PaymentTermsDays")
                         .HasColumnType("integer");
 
@@ -3481,6 +5491,59 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Suppliers");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.SupplierBankChange", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NewBankAccountNo")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("NewBankBranch")
+                        .HasColumnType("text");
+
+                    b.Property<string>("NewBankName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RequestedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("VerificationNote")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("VerifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SupplierBankChanges");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.TaxCode", b =>
@@ -3711,6 +5774,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("FailedLoginCount")
+                        .HasColumnType("integer");
+
                     b.Property<string>("FirstName")
                         .IsRequired()
                         .HasColumnType("text");
@@ -3724,6 +5790,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<string>("LastName")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTime?>("LockedUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PasswordChangedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
@@ -4052,6 +6124,15 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.ApPaymentRunItem", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.ApPaymentRun", null)
+                        .WithMany("Items")
+                        .HasForeignKey("ApPaymentRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.ApprovalChainTier", b =>
                 {
                     b.HasOne("ApexERP.Domain.Entities.ApprovalChain", null)
@@ -4157,6 +6238,24 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PerformanceObligation", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.RevenueContract", null)
+                        .WithMany("Obligations")
+                        .HasForeignKey("RevenueContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PrepaymentScheduleLine", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PrepaymentSchedule", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("PrepaymentScheduleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.ProjectTask", b =>
                 {
                     b.HasOne("ApexERP.Domain.Entities.Project", null)
@@ -4171,6 +6270,15 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasOne("ApexERP.Domain.Entities.PurchaseOrder", null)
                         .WithMany("Lines")
                         .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.RevenueScheduleLine", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PerformanceObligation", null)
+                        .WithMany("Schedule")
+                        .HasForeignKey("PerformanceObligationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
@@ -4229,6 +6337,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Navigation("Allocations");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.ApPaymentRun", b =>
+                {
+                    b.Navigation("Items");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.ApprovalChain", b =>
                 {
                     b.Navigation("Tiers");
@@ -4279,6 +6392,16 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Navigation("Lines");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PerformanceObligation", b =>
+                {
+                    b.Navigation("Schedule");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PrepaymentSchedule", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.Project", b =>
                 {
                     b.Navigation("Tasks");
@@ -4287,6 +6410,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
             modelBuilder.Entity("ApexERP.Domain.Entities.PurchaseOrder", b =>
                 {
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.RevenueContract", b =>
+                {
+                    b.Navigation("Obligations");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.Role", b =>

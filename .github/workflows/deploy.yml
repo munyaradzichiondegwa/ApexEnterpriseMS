@@ -1,0 +1,85 @@
+name: deploy
+
+# Builds and publishes the images, deploys to STAGING, smoke-tests it, then waits for a human to approve PRODUCTION.
+# Approval is enforced by GitHub, not by this file: create two Environments (Settings > Environments), "staging" and "production",
+# and add Required reviewers to "production". Put each environment's secrets on the environment itself:
+#   DEPLOY_HOST, DEPLOY_USER, DEPLOY_PATH, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, HEALTH_URL
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: ${{ github.repository_owner }}
+
+jobs:
+  images:
+    name: Build and publish images
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        run: echo "tag=${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with: { registry: "${{ env.REGISTRY }}", username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: backend/src/ApexERP.API/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER }}/apexerp-api:${{ steps.tag.outputs.tag }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            API_PROXY_TARGET=http://api:8080
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER }}/apexerp-web:${{ steps.tag.outputs.tag }}
+
+  staging:
+    name: Deploy to staging
+    needs: images
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          HEALTH_URL: ${{ secrets.HEALTH_URL }}
+          IMAGE_TAG: ${{ needs.images.outputs.tag }}
+        run: |
+          install -m 600 /dev/null key && printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > key
+          mkdir -p ~/.ssh && printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          SSH_KEY_FILE=./key bash scripts/deploy.sh
+      - name: Readiness check
+        run: curl -fsS --retry 10 --retry-delay 6 --retry-connrefused "${{ secrets.HEALTH_URL }}"
+
+  production:
+    name: Deploy to production (needs approval)
+    needs: [images, staging]
+    runs-on: ubuntu-latest
+    environment: production        # required reviewers on this environment gate the job
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          HEALTH_URL: ${{ secrets.HEALTH_URL }}
+          IMAGE_TAG: ${{ needs.images.outputs.tag }}
+        run: |
+          install -m 600 /dev/null key && printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > key
+          mkdir -p ~/.ssh && printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          SSH_KEY_FILE=./key bash scripts/deploy.sh

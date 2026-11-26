@@ -115,14 +115,22 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> GetOverdue() => Ok(await _chains.GetOverdueRequestsAsync(CompanyId));
     }
 
+    public record SetUserActiveRequest(bool IsActive);
+
     [Route("api/v1/admin")]
     public class AdminController : ApiControllerBase
     {
         private readonly ApexErpDbContext _db;
+        private readonly GovernanceService _gov;
+        private readonly AuditService _audit;
+        private readonly AuthService _auth;
 
-        public AdminController(ApexErpDbContext db)
+        public AdminController(ApexErpDbContext db, GovernanceService gov, AuditService audit, AuthService auth)
         {
             _db = db;
+            _gov = gov;
+            _audit = audit;
+            _auth = auth;
         }
 
         [HttpGet("roles")]
@@ -154,6 +162,18 @@ namespace ApexERP.API.Controllers
             if (await _db.Roles.AnyAsync(r => r.CompanyId == CompanyId && r.Name == name))
                 return Conflict(new { error = $"A role named '{name}' already exists." });
 
+            // Segregation of duties (spec 7.3): a role that combines incompatible permissions is refused unless the creator
+            // records why in the X-Accept-SoD-Risk header; that justification goes into the audit trail.
+            var conflicts = await _gov.DetectConflictsAsync(CompanyId, requested);
+            var acceptance = Request.Headers["X-Accept-SoD-Risk"].ToString();
+            if (conflicts.Count > 0 && acceptance.Trim().Length < 15)
+                return BadRequest(new
+                {
+                    error = "This role combines permissions that should be held by different people.",
+                    conflicts,
+                    howToProceed = "If this is a deliberate, compensated exception, resend with an X-Accept-SoD-Risk header explaining why (at least 15 characters)."
+                });
+
             var created = new Role
             {
                 CompanyId = CompanyId,
@@ -162,6 +182,8 @@ namespace ApexERP.API.Controllers
                 PermissionsJson = JsonSerializer.Serialize(requested.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
             };
             _db.Roles.Add(created);
+            if (conflicts.Count > 0)
+                _audit.Record(CompanyId, UserId, "Role.SoDRiskAccepted", "Admin", nameof(Role), created.Id, null, new { name, conflicts, justification = acceptance.Trim() });
             await _db.SaveChangesAsync();
             return Ok(created);
         }
@@ -178,8 +200,36 @@ namespace ApexERP.API.Controllers
         [HttpGet("users")]
         public async Task<IActionResult> GetUsers() =>
             Ok(await _db.Users.Where(u => u.CompanyId == CompanyId)
-                .Select(u => new { u.Id, u.Email, u.FirstName, u.LastName, u.RoleId, u.IsActive, u.LastLogin })
+                .Select(u => new { u.Id, u.Email, u.FirstName, u.LastName, u.RoleId, u.IsActive, u.LastLogin, u.TotpEnabled, u.LockedUntil, u.FailedLoginCount })
                 .ToListAsync());
+
+        /// <summary>Clears a lockout after sign-in failures. Audited.</summary>
+        [HttpPost("users/{id:guid}/unlock")]
+        [HasPermission(Permissions.AdminUsersManage)]
+        public async Task<IActionResult> UnlockUser(Guid id)
+        {
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id && u.CompanyId == CompanyId);
+            if (user == null) return NotFound();
+            user.FailedLoginCount = 0; user.LockedUntil = null;
+            _audit.Record(CompanyId, UserId, "User.Unlocked", "Admin", nameof(User), user.Id, null, new { user.Email });
+            await _db.SaveChangesAsync();
+            return Ok(new { unlocked = true });
+        }
+
+        /// <summary>Deactivating a user also ends every session they have (their refresh tokens are revoked).</summary>
+        [HttpPost("users/{id:guid}/active")]
+        [HasPermission(Permissions.AdminUsersManage)]
+        public async Task<IActionResult> SetUserActive(Guid id, [FromBody] SetUserActiveRequest req)
+        {
+            if (id == UserId && !req.IsActive) return BadRequest(new { error = "You cannot deactivate your own account." });
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id && u.CompanyId == CompanyId);
+            if (user == null) return NotFound();
+            user.IsActive = req.IsActive;
+            _audit.Record(CompanyId, UserId, req.IsActive ? "User.Activated" : "User.Deactivated", "Admin", nameof(User), user.Id, null, new { user.Email });
+            await _db.SaveChangesAsync();
+            if (!req.IsActive) await _auth.RevokeAllForUserAsync(user.Id, "user deactivated");
+            return Ok(new { isActive = user.IsActive });
+        }
 
         [HttpPost("users")]
         [HasPermission(Permissions.AdminUsersManage)]
@@ -203,8 +253,11 @@ namespace ApexERP.API.Controllers
                     new { error = "You cannot assign a role that carries permissions you do not hold yourself." });
 
             // E-mail addresses are unique across the whole system (sign-in looks users up by e-mail alone).
-            if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == email))
-                return Conflict(new { error = "A user with this e-mail address already exists." });
+            using (_db.CrossTenantScope())   // uniqueness is checked across every company on purpose
+            {
+                if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == email))
+                    return Conflict(new { error = "A user with this e-mail address already exists." });
+            }
 
             var user = new User
             {

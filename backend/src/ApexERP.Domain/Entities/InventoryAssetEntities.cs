@@ -89,6 +89,9 @@ namespace ApexERP.Domain.Entities
         public Guid? CostCentreId { get; set; }
 
         /// <summary>Public Sector (Module 16): barcode or RFID tag value for physical verification audits.</summary>
+        /// <summary>Component accounting (IAS 16): a component of a larger asset is depreciated on its own life.</summary>
+        public Guid? ParentAssetId { get; set; }
+
         public string? AssetTagValue { get; set; }
         /// <summary>IAS 16 revaluation model: cumulative revaluation surplus recognised in OCI/equity
         /// for this asset (as opposed to the cost model's accumulated depreciation).</summary>

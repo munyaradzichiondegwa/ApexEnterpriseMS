@@ -63,6 +63,19 @@ namespace ApexERP.Application.Security
         public const string AdminRolesManage = "admin.roles.manage";
         public const string AdminAuditRead = "admin.audit.read";
 
+        // ---- Controls, automation and integrations ----------------------------------------------
+        public const string ApPaymentsAuthorise = "ap.payments.authorise";           // independent authorisation of a payment / payment run
+        public const string ApSuppliersVerifyBank = "ap.suppliers.verify-bank";      // verify a supplier bank-detail change
+        public const string ControlsApprove = "controls.approve";                    // approve accruals, prepayments, contracts, impairments, NRV, ECL, credit notes, petty cash
+        public const string ControlsGovernanceManage = "controls.governance.manage"; // settings, SoD rules, delegations, approval matrix, propose materiality/policy
+        public const string ControlsGovernanceApprove = "controls.governance.approve"; // approve materiality, policy versions, statutory rates
+        public const string ControlsExceptionsReview = "controls.exceptions.review";   // independent review of a resolved exception
+        public const string ControlsReconciliationSignoff = "controls.reconciliation.signoff";
+        public const string ControlsBankRecCertify = "controls.bank-rec.certify";
+        public const string ControlsPeriodCertify = "controls.period.certify";
+        public const string ControlsEvidenceManage = "controls.evidence.manage";
+        public const string IntegrationsManage = "integrations.manage";
+
         /// <summary>Explicit (non-default) permission keys, for the role editor and documentation.</summary>
         public static readonly IReadOnlyList<string> Catalogue = new[]
         {
@@ -73,7 +86,9 @@ namespace ApexERP.Application.Security
             FixedAssetsDepreciate, FixedAssetsDispose, FixedAssetsRevalue,
             GroupStructureManage, GroupConsolidationRead, GroupNettingExecute,
             ExceptionsRead, ExceptionsManage, WorkflowDecide,
-            AdminCompanyManage, AdminUsersManage, AdminRolesManage, AdminAuditRead
+            AdminCompanyManage, AdminUsersManage, AdminRolesManage, AdminAuditRead,
+            ApPaymentsAuthorise, ApSuppliersVerifyBank, ControlsApprove, ControlsGovernanceManage, ControlsGovernanceApprove,
+            ControlsExceptionsReview, ControlsReconciliationSignoff, ControlsBankRecCertify, ControlsPeriodCertify, ControlsEvidenceManage, IntegrationsManage
         };
 
         /// <summary>
@@ -103,7 +118,7 @@ namespace ApexERP.Application.Security
         {
             "gl", "ar", "ap", "cashbank", "inventory", "fixed-assets", "payroll", "tax", "reports", "crm",
             "projects", "supply-chain", "manufacturing", "fdms", "equity", "grants", "public-sector",
-            "group", "workflow", "admin", "exceptions"
+            "group", "workflow", "admin", "exceptions", "automation", "controls", "integrations"
         };
     }
 

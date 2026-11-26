@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using ApexERP.API.Authorization;
 using ApexERP.API.Extensions;
 using ApexERP.API.Filters;
@@ -8,6 +9,7 @@ using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -34,7 +36,9 @@ if (configProblems.Count > 0)
 }
 
 // ---- Database ----
-builder.Services.AddDbContext<ApexErpDbContext>(opts => opts.UseNpgsql(connectionString!));
+// Optional PostgreSQL row-level security: see backend/database/hardening/002_row_level_security.sql and docs/OPERATIONS.md.
+TenantSession.Enabled = builder.Configuration.GetValue<bool>("Security:RowLevelSecurity:Enabled");
+builder.Services.AddDbContext<ApexErpDbContext>(opts => opts.UseNpgsql(connectionString!).AddInterceptors(new TenantSessionInterceptor()));
 
 // ---- Controls (manual journal approval policy) ----
 builder.Services.AddSingleton(new JournalControlOptions
@@ -80,6 +84,26 @@ builder.Services.AddScoped<GrantService>();
 
 // ZW Tax Compliance & E-Invoicing / FDMS (Module 9)
 builder.Services.AddScoped<FdmsService>();
+
+// ---- Controls, automation and integrations (APEXERP spec) ----
+builder.Services.AddScoped<SettingsService>();
+builder.Services.AddScoped<GovernanceService>();
+builder.Services.AddScoped<ControlMonitoringService>();
+builder.Services.AddScoped<AccrualService>();
+builder.Services.AddScoped<PrepaymentService>();
+builder.Services.AddScoped<RevenueService>();
+builder.Services.AddScoped<ImpairmentService>();
+builder.Services.AddScoped<InventoryValuationService>();
+builder.Services.AddScoped<ReceivablesControlService>();
+builder.Services.AddScoped<ApMatchService>();
+builder.Services.AddScoped<ApControlsService>();
+builder.Services.AddScoped<ReconciliationService>();
+builder.Services.AddScoped<PeriodCloseService>();
+builder.Services.AddScoped<EvidenceService>();
+builder.Services.AddScoped<DashboardService>();
+builder.Services.AddScoped<StatutoryRateService>();
+builder.Services.AddScoped<IntegrationService>();
+builder.Services.AddHostedService<ApexERP.API.Jobs.ScheduledJobRunner>();
 
 builder.Services.AddScoped(sp =>
     new AuthService(
@@ -165,6 +189,27 @@ builder.Services.AddCors(opts =>
               .AllowAnyMethod()
               .AllowCredentials()));
 
+// ---- Rate limiting (APEXERP spec 11 brute-force protection, 27 API rate limiting) ----
+// "auth" is applied to sign-in and registration (per client IP). Everything else shares a generous global
+// limit per signed-in user (or per IP when anonymous). Behind a reverse proxy, configure forwarded headers so the
+// client IP, not the proxy's, is what is limited.
+builder.Services.AddRateLimiter(limiter =>
+{
+    limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    limiter.AddPolicy("auth", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    // Provider callbacks carry no user; they are limited per client IP and authenticated by their signature.
+    limiter.AddPolicy("webhook", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    limiter.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.User.Identity?.IsAuthenticated == true
+            ? "u:" + (ctx.User.FindFirst("sub")?.Value ?? "?")
+            : "ip:" + (ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 600, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
+
 builder.Services.AddApexControllers();
 
 builder.Services.AddEndpointsApiExplorer();
@@ -207,7 +252,20 @@ builder.Services.AddSwaggerGen(c =>
         });
 });
 
+// Behind a reverse proxy (Vercel, nginx, a load balancer) the connection's address is the proxy's. Set Security:TrustForwardedHeaders=true
+// ONLY when every request really arrives through a proxy you control, so the real client IP is used for rate limiting and the audit trail.
+if (builder.Configuration.GetValue<bool>("Security:TrustForwardedHeaders"))
+{
+    builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+        o.KnownNetworks.Clear();
+        o.KnownProxies.Clear();
+    });
+}
+
 var app = builder.Build();
+if (builder.Configuration.GetValue<bool>("Security:TrustForwardedHeaders")) app.UseForwardedHeaders();
 
 if (isDevelopment)
 {
@@ -260,6 +318,31 @@ if (isDevelopment || builder.Configuration.GetValue<bool>("Swagger:Enabled"))
     app.UseSwaggerUI();
 }
 
+// ---- Security headers on every API response (APEXERP spec 29.1) ----
+if (!isDevelopment) app.UseHsts();
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        var headers = context.Response.Headers;
+        headers["X-Content-Type-Options"] = "nosniff";
+        headers["X-Frame-Options"] = "DENY";
+        headers["Referrer-Policy"] = "no-referrer";
+        headers["Cache-Control"] = "no-store";
+        return Task.CompletedTask;
+    });
+    await next();
+});
+
+app.UseMiddleware<ApexERP.API.Middleware.CorrelationIdMiddleware>();
+
+// The client IP is recorded on every audit row, signed in or not (spec 12.2).
+app.Use(async (context, next) =>
+{
+    context.RequestServices.GetRequiredService<ApexErpDbContext>().CurrentIpAddress = context.Connection.RemoteIpAddress?.ToString();
+    await next();
+});
+
 app.UseCors("Frontend");
 app.UseAuthentication();
 
@@ -282,6 +365,7 @@ app.Use(async (context, next) =>
             context.RequestServices.GetRequiredService<ApexErpDbContext>();
 
         dbContext.CurrentCompanyId = companyId;
+        dbContext.CurrentIpAddress = context.Connection.RemoteIpAddress?.ToString();
 
         if (Guid.TryParse(
                 (context.User.FindFirst("sub") ??
@@ -296,9 +380,16 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.UseRateLimiter();   // after authentication so the global limit can key on the signed-in user
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Readiness: the API is only "ready" when it can reach its database (use this for load-balancer / orchestrator checks).
+app.MapGet("/health/ready", async (ApexErpDbContext db, CancellationToken ct) =>
+    await db.Database.CanConnectAsync(ct)
+        ? Results.Ok(new { status = "ready", timestamp = DateTime.UtcNow })
+        : Results.Json(new { status = "database unreachable", timestamp = DateTime.UtcNow }, statusCode: StatusCodes.Status503ServiceUnavailable));
 
 app.MapGet(
     "/health",

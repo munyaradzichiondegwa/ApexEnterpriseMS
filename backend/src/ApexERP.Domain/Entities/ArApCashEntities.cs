@@ -102,6 +102,13 @@ namespace ApexERP.Domain.Entities
         public decimal WhtRate { get; set; } = 0.10m; // ZIMRA default non-compliant supplier WHT
         public bool IsActive { get; set; } = true;
 
+        /// <summary>Bank details are changed only through an approved SupplierBankChange (spec 16: bank-detail change control).</summary>
+        public string? BankName { get; set; }
+        public string? BankAccountNo { get; set; }
+        public string? BankBranch { get; set; }
+        /// <summary>Payments to this supplier are blocked while a bank-detail change is awaiting verification.</summary>
+        public bool PaymentHold { get; set; }
+
         /// <summary>Group/Inter-Company (PRD Module 2): set when this "supplier" is actually another
         /// company within the same group (the counterparty of a mirror-posted intercompany invoice).</summary>
         public Guid? LinkedCompanyId { get; set; }
@@ -135,6 +142,14 @@ namespace ApexERP.Domain.Entities
         /// <summary>True if this invoice originated as a mirror posting from another group entity's AR invoice.</summary>
         public bool IsIntercompanyMirror { get; set; }
 
+        /// <summary>The supplier's own invoice number. Together with supplier, amount and date it identifies duplicates (spec 16).</summary>
+        public string? SupplierInvoiceNo { get; set; }
+        /// <summary>Purchase order this invoice is matched against (three-way match).</summary>
+        public Guid? PurchaseOrderId { get; set; }
+        public string MatchStatus { get; set; } = "NotRequired";   // NotRequired | Matched | WithinTolerance | Discrepancy | Overridden
+        public string? MatchNotes { get; set; }
+        public Guid? MatchOverriddenBy { get; set; }
+
         public ICollection<ApInvoiceLine> Lines { get; set; } = new List<ApInvoiceLine>();
     }
 
@@ -162,6 +177,12 @@ namespace ApexERP.Domain.Entities
         public PaymentMethod PaymentMethod { get; set; }
         public Guid? JournalEntryId { get; set; }
         public Guid? BankAccountId { get; set; }
+        /// <summary>Independent payment authorisation (spec 16): the authoriser must differ from the preparer and hold authority for the amount.</summary>
+        public Guid? PreparedBy { get; set; }
+        public Guid? AuthorisedBy { get; set; }
+        public DateTime? AuthorisedAt { get; set; }
+        public Guid? PaymentRunId { get; set; }
+        public string? WithholdingCertificateNo { get; set; }
 
         public ICollection<ApPaymentAllocation> Allocations { get; set; } = new List<ApPaymentAllocation>();
     }

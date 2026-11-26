@@ -45,6 +45,7 @@ namespace ApexERP.Application.Services
 
         public async Task<NotesToFinancialStatementsResult> GetNotesAsync(Guid companyId, DateTime periodStart, DateTime periodEnd, CancellationToken ct = default)
         {
+            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
             var company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == companyId, ct)
                 ?? throw new InvalidOperationException("Company not found.");
 

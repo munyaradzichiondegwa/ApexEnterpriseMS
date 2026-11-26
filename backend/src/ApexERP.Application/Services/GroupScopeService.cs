@@ -114,9 +114,12 @@ namespace ApexERP.Application.Services
         public async Task<bool> IsVisibleAsync(Guid companyId, Guid otherCompanyId, CancellationToken ct = default) =>
             (await GetVisibleCompanyIdsAsync(companyId, ct)).Contains(otherCompanyId);
 
-        public async Task<bool> ParentHasLinkedRecordAsync(Guid parentCompanyId, Guid childCompanyId, CancellationToken ct = default) =>
-            await _db.Customers.IgnoreQueryFilters().AnyAsync(c => c.CompanyId == parentCompanyId && c.LinkedCompanyId == childCompanyId, ct)
-            || await _db.Suppliers.IgnoreQueryFilters().AnyAsync(s => s.CompanyId == parentCompanyId && s.LinkedCompanyId == childCompanyId, ct);
+        public async Task<bool> ParentHasLinkedRecordAsync(Guid parentCompanyId, Guid childCompanyId, CancellationToken ct = default)
+        {
+            using var crossTenant = _db.CrossTenantScope();   // the parent company's records, not the caller's own
+            return await _db.Customers.IgnoreQueryFilters().AnyAsync(c => c.CompanyId == parentCompanyId && c.LinkedCompanyId == childCompanyId, ct)
+                || await _db.Suppliers.IgnoreQueryFilters().AnyAsync(s => s.CompanyId == parentCompanyId && s.LinkedCompanyId == childCompanyId, ct);
+        }
 
         /// <summary>Returns an error message when the change is not allowed, otherwise null.</summary>
         public async Task<string?> ValidateStructureChangeAsync(Guid caller, Guid target, Guid? newParent, CancellationToken ct = default)

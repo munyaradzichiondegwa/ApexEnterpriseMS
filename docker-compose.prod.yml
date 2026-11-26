@@ -1,0 +1,70 @@
+# Production overrides. Use together with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d
+#
+# Adds what a real deployment needs on top of the development stack: readiness checks, resource limits, log rotation,
+# the database no longer published on the host, and a backup service. Needs Docker Compose 2.24.4 or newer (uses !reset). Required in .env: JWT_SECRET, POSTGRES_PASSWORD,
+# FRONTEND_ORIGIN, NEXT_PUBLIC_API_URL, BACKUP_PASSPHRASE (see docs/OPERATIONS.md).
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "20m", max-file: "5" }
+
+services:
+  postgres:
+    ports: !reset []
+    logging: *logging
+    deploy: { resources: { limits: { memory: 2g } } }
+    shm_size: 256mb
+
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Jwt__Secret: "${JWT_SECRET:?set JWT_SECRET}"
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=apexerp;Username=apexerp;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
+      Security__TrustForwardedHeaders: "true"
+      # The API is only reachable through the web container's proxy
+      Jobs__Enabled: "${JOBS_ENABLED:-true}"
+      # Turn on only after running backend/database/hardening/002_row_level_security.sql (see docs/OPERATIONS.md):
+      Security__RowLevelSecurity__Enabled: "${RLS_ENABLED:-false}"
+      # Set to the PEM of the ZIMRA-issued fiscal device key to enable fiscal signing (leave unset to record invoices as NOT fiscalised):
+      FDMS_DEVICE_KEY_PEM: "${FDMS_DEVICE_KEY_PEM:-}"
+    ports: !reset [] # reachable only from the web container, not from the network
+    logging: *logging
+    deploy: { resources: { limits: { memory: 1g } } }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+
+  web:
+    logging: *logging
+    deploy: { resources: { limits: { memory: 512m } } }
+    depends_on:
+      api: { condition: service_healthy }
+
+  backup:
+    image: postgres:16-alpine
+    container_name: apexerp-backup
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PGHOST: postgres
+      PGUSER: apexerp
+      PGPASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
+      PGDATABASE: apexerp
+      BACKUP_DIR: /backups
+      BACKUP_PASSPHRASE: "${BACKUP_PASSPHRASE:?set BACKUP_PASSPHRASE}"
+      BACKUP_RETENTION_DAYS: "${BACKUP_RETENTION_DAYS:-14}"
+      BACKUP_COPY_CMD: "${BACKUP_COPY_CMD:-}"
+    volumes:
+      - apexerp_backups:/backups
+      - ./scripts:/scripts:ro
+    # Daily at BACKUP_AT (default 01:30 UTC). These are the backups scripts/restore-test.sh proves can be restored.
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache bash openssl coreutils >/dev/null && exec bash /scripts/backup-loop.sh"]
+    logging: *logging
+
+volumes:
+  apexerp_backups:

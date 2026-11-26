@@ -34,6 +34,7 @@ namespace ApexERP.Application.Services
         /// direct and indirect subsidiaries), each with its ownership percentage from its immediate parent.</summary>
         public async Task<List<Company>> GetGroupStructureAsync(Guid parentCompanyId, CancellationToken ct = default)
         {
+            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
             var all = await _db.Companies.IgnoreQueryFilters().ToListAsync(ct);
             var group = new List<Company>();
             void AddChildren(Guid id)
@@ -54,6 +55,7 @@ namespace ApexERP.Application.Services
 
         public async Task<ConsolidationResult> ConsolidateAsync(Guid parentCompanyId, DateTime asOfDate, CancellationToken ct = default)
         {
+            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
             var group = await GetGroupStructureAsync(parentCompanyId, ct);
             var subsidiaries = group.Where(c => c.Id != parentCompanyId).ToList();
 

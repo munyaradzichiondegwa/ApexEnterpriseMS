@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ApexERP.Application.Services
 {
-    public record ApInvoiceLineRequest(string Description, decimal Quantity, decimal UnitCost, Guid? TaxCodeId, Guid GlAccountId);
+    public record ApInvoiceLineRequest(string Description, decimal Quantity, decimal UnitCost, Guid? TaxCodeId, Guid GlAccountId, Guid? InventoryItemId = null);
 
     /// <summary>PRD Module 4 (Accounts Payable): supplier invoicing with VAT input and Withholding
     /// Tax (WHT) calculation on qualifying non-compliant suppliers, payments, and GL auto-posting.</summary>
@@ -13,19 +13,32 @@ namespace ApexERP.Application.Services
     {
         private readonly ApexErpDbContext _db;
         private readonly GlPostingService _gl;
+        private readonly ApMatchService? _match;
 
-        public ApService(ApexErpDbContext db, GlPostingService gl)
+        public ApService(ApexErpDbContext db, GlPostingService gl, ApMatchService? match = null)
         {
             _db = db;
             _gl = gl;
+            _match = match;
         }
 
         public async Task<ApInvoice> CreateInvoiceAsync(Guid companyId, Guid supplierId, DateTime invoiceDate,
             string currency, decimal exchangeRate, IEnumerable<ApInvoiceLineRequest> lineRequests,
-            Guid? fundCentreId = null, Guid? grantId = null, Guid? commitmentId = null, CancellationToken ct = default)
+            Guid? fundCentreId = null, Guid? grantId = null, Guid? commitmentId = null, CancellationToken ct = default,
+            string? supplierInvoiceNo = null, Guid? purchaseOrderId = null)
         {
             var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == supplierId && s.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("Supplier not found.");
+
+            if (!string.IsNullOrWhiteSpace(supplierInvoiceNo))
+            {
+                // Duplicate control (spec 16): same supplier + same invoice number (ignoring case/punctuation/leading zeros), or same amount and date.
+                var existing = await _db.ApInvoices.Where(i => i.CompanyId == companyId && i.SupplierId == supplierId && i.Status != InvoiceStatus.Cancelled).ToListAsync(ct);
+                var normalised = ApexERP.Domain.Controls.ValuationRules.NormaliseInvoiceNo(supplierInvoiceNo);
+                var clash = existing.FirstOrDefault(i => ApexERP.Domain.Controls.ValuationRules.NormaliseInvoiceNo(i.SupplierInvoiceNo) == normalised);
+                if (clash != null)
+                    throw new InvalidOperationException($"Supplier invoice {supplierInvoiceNo} has already been captured as {clash.InvoiceNo}.");
+            }
 
             var taxCodeIds = lineRequests.Where(l => l.TaxCodeId.HasValue).Select(l => l.TaxCodeId!.Value).Distinct().ToList();
             var taxCodes = await _db.TaxCodes.Where(t => taxCodeIds.Contains(t.Id)).ToDictionaryAsync(t => t.Id, ct);
@@ -49,7 +62,8 @@ namespace ApexERP.Application.Services
                     LineSubtotal = lineSubtotal,
                     LineVat = lineVat,
                     LineTotal = lineSubtotal + lineVat,
-                    GlAccountId = lr.GlAccountId
+                    GlAccountId = lr.GlAccountId,
+                    InventoryItemId = lr.InventoryItemId
                 });
             }
 
@@ -76,6 +90,9 @@ namespace ApexERP.Application.Services
                 FundCentreId = fundCentreId,
                 GrantId = grantId,
                 CommitmentId = commitmentId,
+                SupplierInvoiceNo = string.IsNullOrWhiteSpace(supplierInvoiceNo) ? null : supplierInvoiceNo.Trim(),
+                PurchaseOrderId = purchaseOrderId,
+                MatchStatus = purchaseOrderId.HasValue ? "Pending" : "NotRequired",
                 Lines = lines
             };
             _db.ApInvoices.Add(invoice);
@@ -94,6 +111,18 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Invoice not found.");
             if (invoice.Status != InvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be posted.");
+
+            // Three-way match (spec 16): an invoice that disagrees with its purchase order / goods received cannot be posted
+            // for payment until the discrepancy is resolved or overridden by someone with authority.
+            if (_match != null && invoice.PurchaseOrderId != null)
+            {
+                var result = await _match.EvaluateAndStoreAsync(companyId, invoice, ct);
+                if (result.Outcome == ApexERP.Domain.Controls.MatchOutcome.Discrepancy && invoice.MatchStatus != "Overridden")
+                {
+                    await _db.SaveChangesAsync(ct);
+                    throw new InvalidOperationException("Three-way match failed: " + string.Join("; ", result.Issues.Select(i => i.Message)));
+                }
+            }
 
             var glLines = new List<GlLineRequest>();
             foreach (var group in invoice.Lines.GroupBy(l => l.GlAccountId))

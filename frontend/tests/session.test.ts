@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  STORAGE_KEYS, SESSION_NOTICES, StorageLike, clearSession, isExpired, readAccessToken, readSession, writeSession,
+  STORAGE_KEYS, LEGACY_TOKEN_KEYS, SESSION_NOTICES, StorageLike, clearSession, getAccessToken, isExpired, readSession, setAccessToken, writeSession,
 } from "../lib/session";
 
 /** An in-memory stand-in for localStorage. */
@@ -21,8 +21,7 @@ const PAST = "2026-10-25T09:00:00Z";
 const validUser = (over: Record<string, unknown> = {}) =>
   JSON.stringify({ userId: "u1", companyId: "c1", email: "a@b.co", role: "Administrator", permissions: ["*"], expiresAt: FUTURE, ...over });
 
-const withSession = (user: string, token: string | null = "token") =>
-  fakeStorage({ [STORAGE_KEYS.user]: user, ...(token ? { [STORAGE_KEYS.accessToken]: token } : {}) });
+const withSession = (user: string) => fakeStorage({ [STORAGE_KEYS.user]: user });
 
 describe("readSession", () => {
   it("returns none when nothing is stored, or when storage is unavailable", () => {
@@ -36,7 +35,6 @@ describe("readSession", () => {
     if (result.status === "ok") {
       expect(result.user.userId).toBe("u1");
       expect(result.user.permissions).toEqual(["*"]);
-      expect(result.accessToken).toBe("token");
     }
   });
 
@@ -56,10 +54,11 @@ describe("readSession", () => {
     expect(readSession(withSession(raw), NOW)).toEqual({ status: "invalid", reason: "corrupt" });
   });
 
-  it("treats a user without a token (or a token without a user) as corrupt", () => {
-    expect(readSession(withSession(validUser(), null), NOW)).toEqual({ status: "invalid", reason: "corrupt" });
-    expect(readSession(withSession(validUser(), "  "), NOW)).toEqual({ status: "invalid", reason: "corrupt" });
-    expect(readSession(fakeStorage({ [STORAGE_KEYS.accessToken]: "token" }), NOW)).toEqual({ status: "invalid", reason: "corrupt" });
+  it("discards a session saved by an older version that kept tokens in localStorage", () => {
+    for (const key of LEGACY_TOKEN_KEYS) {
+      const storage = fakeStorage({ [STORAGE_KEYS.user]: validUser(), [key]: "old-token" });
+      expect(readSession(storage, NOW)).toEqual({ status: "invalid", reason: "legacy" });
+    }
   });
 
   it("asks sessions saved before permissions existed to sign in again", () => {
@@ -68,9 +67,9 @@ describe("readSession", () => {
     expect(readSession(withSession(validUser({ permissions: [1, 2] })), NOW)).toEqual({ status: "invalid", reason: "legacy" });
   });
 
-  it("rejects an expired session, and one with an unreadable expiry", () => {
-    expect(readSession(withSession(validUser({ expiresAt: PAST })), NOW)).toEqual({ status: "invalid", reason: "expired" });
-    expect(readSession(withSession(validUser({ expiresAt: "yesterday-ish" })), NOW)).toEqual({ status: "invalid", reason: "expired" });
+  it("does not treat an expired access token as a dead session: the refresh cookie decides that", () => {
+    expect(readSession(withSession(validUser({ expiresAt: PAST })), NOW).status).toBe("ok");
+    expect(readSession(withSession(validUser({ expiresAt: "yesterday-ish" })), NOW).status).toBe("ok");
   });
 
   it("accepts a session with no recorded expiry", () => {
@@ -85,7 +84,6 @@ describe("readSession", () => {
     };
     expect(readSession(hostile, NOW)).toEqual({ status: "invalid", reason: "unavailable" });
     expect(() => clearSession(hostile)).not.toThrow();
-    expect(readAccessToken(hostile)).toBeNull();
   });
 
   it("has a user-facing notice for every invalid reason", () => {
@@ -96,7 +94,7 @@ describe("readSession", () => {
 });
 
 describe("writeSession / clearSession", () => {
-  const response = { accessToken: "a", refreshToken: "r", expiresAt: FUTURE, userId: "u1", companyId: "c1", role: "Accountant", permissions: ["gl.read"] };
+  const response = { accessToken: "a", refreshToken: "", expiresAt: FUTURE, userId: "u1", companyId: "c1", role: "Accountant", permissions: ["gl.read"] };
 
   it("round-trips through readSession", () => {
     const storage = fakeStorage();
@@ -105,7 +103,21 @@ describe("writeSession / clearSession", () => {
     const read = readSession(storage, NOW);
     expect(read.status).toBe("ok");
     if (read.status === "ok") expect(read.user).toEqual(user);
-    expect(storage.data[STORAGE_KEYS.refreshToken]).toBe("r");
+  });
+
+  it("keeps the access token in memory only and writes no token to storage", () => {
+    const storage = fakeStorage();
+    writeSession(storage, { ...response, accessToken: "secret-access-token", refreshToken: "secret-refresh-token" }, "a@b.co");
+    expect(getAccessToken()).toBe("secret-access-token");
+    expect(JSON.stringify(storage.data)).not.toContain("secret-access-token");
+    expect(JSON.stringify(storage.data)).not.toContain("secret-refresh-token");
+    expect(Object.keys(storage.data)).toEqual([STORAGE_KEYS.user]);
+  });
+
+  it("removes tokens that an older version left in storage", () => {
+    const storage = fakeStorage({ [LEGACY_TOKEN_KEYS[0]]: "old", [LEGACY_TOKEN_KEYS[1]]: "old" });
+    writeSession(storage, response, "a@b.co");
+    for (const key of LEGACY_TOKEN_KEYS) expect(storage.data[key]).toBeUndefined();
   });
 
   it("stores no permissions when the server sent none (least privilege)", () => {
@@ -125,9 +137,11 @@ describe("writeSession / clearSession", () => {
 
   it("clearSession removes every key", () => {
     const storage = withSession(validUser());
-    storage.setItem(STORAGE_KEYS.refreshToken, "r");
+    storage.setItem(LEGACY_TOKEN_KEYS[1], "r");
+    setAccessToken("in-memory");
     clearSession(storage);
     expect(storage.data).toEqual({});
+    expect(getAccessToken()).toBeNull();      // signing out also forgets the in-memory token
   });
 });
 

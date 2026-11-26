@@ -1,4 +1,5 @@
 using ApexERP.API.Authorization;
+using ApexERP.API.Common;
 using ApexERP.Application.Security;
 using ApexERP.Application.Services;
 using ApexERP.Domain.Common;
@@ -11,6 +12,7 @@ namespace ApexERP.API.Controllers
 {
     public record CreateGlAccountRequest(string Code, string Name, GlAccountType Type, string? SubType, Guid? ParentId, string Currency, bool IsBankAccount, bool IsControlAccount);
     public record SetAccountActiveRequest(bool IsActive);
+    public record SetPostingRulesRequest(bool IsPostable, string? AllowedSources);
     public record CreateJournalLineRequest(Guid GlAccountId, decimal Debit, decimal Credit, string Currency, decimal ExchangeRate, Guid? CostCentreId, string? Narrative,
         Guid? FundCentreId = null, Guid? GrantId = null);
     public record CreateJournalRequest(DateTime EntryDate, string? Description, string? Reference, List<CreateJournalLineRequest> Lines);
@@ -22,11 +24,15 @@ namespace ApexERP.API.Controllers
     {
         private readonly ApexErpDbContext _db;
         private readonly GlPostingService _gl;
+        private readonly PeriodCloseService _close;
+        private readonly GovernanceService _gov;
 
-        public GlController(ApexErpDbContext db, GlPostingService gl)
+        public GlController(ApexErpDbContext db, GlPostingService gl, PeriodCloseService close, GovernanceService gov)
         {
             _db = db;
             _gl = gl;
+            _close = close;
+            _gov = gov;
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -127,7 +133,12 @@ namespace ApexERP.API.Controllers
         [HttpPost("periods/{id}/close")]
         [HasPermission(Permissions.AccountingPeriodClose)]
         public Task<IActionResult> ClosePeriod(Guid id) =>
-            Run(async () => Ok(await _gl.ClosePeriodAsync(CompanyId, id, UserId)));
+            Run(async () =>
+            {
+                // Once a close checklist exists (or the company requires one) every task must be done or waived with a reason.
+                await _close.AssertReadyAsync(CompanyId, id);
+                return Ok(await _gl.ClosePeriodAsync(CompanyId, id, UserId));
+            });
 
         /// <summary>Controlled re-opening of a closed period. A reason is mandatory and is audited.</summary>
         [HttpPost("periods/{id}/reopen")]
@@ -141,13 +152,15 @@ namespace ApexERP.API.Controllers
 
         [HttpGet("journal-entries")]
         [HasPermission(Permissions.GlJournalsRead)]
-        public async Task<IActionResult> GetJournalEntries([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] JournalStatus? status)
+        public async Task<IActionResult> GetJournalEntries([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] JournalStatus? status,
+            [FromQuery] int? page = null, [FromQuery] int pageSize = 50)
         {
             var q = _db.JournalEntries.Include(j => j.Lines).Where(j => j.CompanyId == CompanyId);
             if (from.HasValue) q = q.Where(j => j.EntryDate >= from.Value);
             if (to.HasValue) q = q.Where(j => j.EntryDate <= to.Value);
             if (status.HasValue) q = q.Where(j => j.Status == status.Value);
-            return Ok(await q.OrderByDescending(j => j.EntryDate).Take(200).ToListAsync());
+            var ordered = q.OrderByDescending(j => j.EntryDate).ThenBy(j => j.EntryNo);
+            return page == null ? Ok(await ordered.Take(200).ToListAsync()) : Ok(await ordered.ToPagedAsync(page, pageSize));
         }
 
         [HttpGet("journal-entries/{id}")]
@@ -188,7 +201,34 @@ namespace ApexERP.API.Controllers
         [HttpPost("journal-entries/{id}/approve")]
         [HasPermission(Permissions.GlJournalsApprove)]
         public Task<IActionResult> ApproveJournalEntry(Guid id, JournalCommentRequest? req) =>
-            Run(async () => Ok(await _gl.ApproveAsync(CompanyId, UserId, id, req?.Comment)));
+            Run(async () =>
+            {
+                // Delegation of authority (spec 8): the approver's role (or a delegation to them) must cover the journal's value.
+                var entry = await _db.JournalEntries.Include(j => j.Lines).FirstOrDefaultAsync(j => j.Id == id && j.CompanyId == CompanyId);
+                if (entry != null)
+                {
+                    var decision = await _gov.CheckApprovalAuthorityAsync(CompanyId, UserId, "JournalEntry", entry.Lines.Sum(l => l.BaseDebit), entry.CreatedBy);
+                    if (!decision.Allowed) return StatusCode(StatusCodes.Status403Forbidden, new { error = decision.Reason });
+                }
+                return Ok(await _gl.ApproveAsync(CompanyId, UserId, id, req?.Comment));
+            });
+
+        /// <summary>Sets whether an account accepts postings and which kinds of transaction may post to it (spec GL-002). Body: IsPostable, AllowedSources e.g. "AR,Manual" (empty = all).</summary>
+        [HttpPut("accounts/{id}/posting-rules")]
+        [HasPermission(Permissions.GlAccountsManage)]
+        public Task<IActionResult> SetPostingRules(Guid id, SetPostingRulesRequest req) =>
+            Run(async () =>
+            {
+                var account = await _db.GlAccounts.FirstOrDefaultAsync(a => a.Id == id && a.CompanyId == CompanyId);
+                if (account == null) return NotFound();
+                var sources = (req.AllowedSources ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                var bad = sources.Where(x => !Enum.TryParse<JournalSource>(x, true, out _)).ToList();
+                if (bad.Count > 0) return BadRequest(new { error = "Unknown source(s): " + string.Join(", ", bad) + ". Valid: " + string.Join(", ", Enum.GetNames<JournalSource>()) });
+                account.IsPostable = req.IsPostable;
+                account.AllowedSourcesCsv = sources.Count == 0 ? null : string.Join(",", sources.Select(x => Enum.Parse<JournalSource>(x, true).ToString()));
+                await _db.SaveChangesAsync();
+                return Ok(account);
+            });
 
         [HttpPost("journal-entries/{id}/reject")]
         [HasPermission(Permissions.GlJournalsApprove)]

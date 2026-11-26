@@ -5,10 +5,17 @@
 // sat on "Loading ApexERP…" forever (audit finding 10). Everything here is defensive and returns a result instead of throwing.
 
 export const STORAGE_KEYS = {
-  accessToken: "apexerp_access_token",
-  refreshToken: "apexerp_refresh_token",
   user: "apexerp_user",
 } as const;
+
+/** Keys written by older versions, which kept tokens in localStorage where any script on the page could read them. Always removed. */
+export const LEGACY_TOKEN_KEYS = ["apexerp_access_token", "apexerp_refresh_token"] as const;
+
+// The access token lives only in memory (it is never written to storage), and the refresh token is an HttpOnly cookie that
+// JavaScript cannot read at all. A page reload therefore starts with no access token and asks the API for one using the cookie.
+let accessTokenInMemory: string | null = null;
+export const setAccessToken = (token: string | null): void => { accessTokenInMemory = token; };
+export const getAccessToken = (): string | null => accessTokenInMemory;
 
 export interface AuthUser {
   userId: string;
@@ -24,7 +31,8 @@ export interface AuthUser {
 /** The subset of the login/register response the session needs. */
 export interface LoginResponse {
   accessToken: string;
-  refreshToken: string;
+  /** Empty when the API keeps the refresh token in its HttpOnly cookie (the default). */
+  refreshToken?: string;
   expiresAt?: string | null;
   userId: string;
   companyId: string;
@@ -38,7 +46,7 @@ export type InvalidReason = "corrupt" | "legacy" | "expired" | "unavailable";
 
 export type SessionReadResult =
   | { status: "none" }
-  | { status: "ok"; user: AuthUser; accessToken: string }
+  | { status: "ok"; user: AuthUser }
   | { status: "invalid"; reason: InvalidReason };
 
 /** Access to localStorage can itself throw (blocked cookies, private mode, SSR), so never touch it unguarded. */
@@ -59,19 +67,21 @@ export function isExpired(expiresAt: string | null | undefined, now: number = Da
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
 
 export function readSession(storage: StorageLike | null, now: number = Date.now()): SessionReadResult {
+  void now;
   if (!storage) return { status: "none" };
 
   let rawUser: string | null;
-  let accessToken: string | null;
+  let legacy = false;
   try {
     rawUser = storage.getItem(STORAGE_KEYS.user);
-    accessToken = storage.getItem(STORAGE_KEYS.accessToken);
+    legacy = LEGACY_TOKEN_KEYS.some((k) => storage.getItem(k) != null);
   } catch {
     return { status: "invalid", reason: "unavailable" };
   }
 
-  if (rawUser == null && accessToken == null) return { status: "none" };
-  if (rawUser == null || !isNonEmptyString(accessToken)) return { status: "invalid", reason: "corrupt" };
+  // A session saved by an older version put tokens in localStorage. Discard it and ask for a fresh sign-in under the safer scheme.
+  if (legacy) return { status: "invalid", reason: "legacy" };
+  if (rawUser == null) return { status: "none" };
 
   let parsed: any;
   try {
@@ -91,12 +101,11 @@ export function readSession(storage: StorageLike | null, now: number = Date.now(
     return { status: "invalid", reason: "legacy" };
   }
 
+  // The stored profile is only a cache of who is signed in. Whether the session is still alive is decided by the refresh cookie
+  // when the app starts, not by the profile's expiry time (an expired access token is simply renewed).
   const expiresAt: string | null = typeof parsed.expiresAt === "string" ? parsed.expiresAt : null;
-  if (isExpired(expiresAt, now)) return { status: "invalid", reason: "expired" };
-
   return {
     status: "ok",
-    accessToken,
     user: {
       userId: parsed.userId,
       companyId: parsed.companyId,
@@ -117,10 +126,10 @@ export function writeSession(storage: StorageLike, tokens: LoginResponse, email:
     permissions: Array.isArray(tokens.permissions) ? tokens.permissions : [],
     expiresAt: tokens.expiresAt ?? null,
   };
+  setAccessToken(tokens.accessToken);
   try {
-    storage.setItem(STORAGE_KEYS.accessToken, tokens.accessToken);
-    storage.setItem(STORAGE_KEYS.refreshToken, tokens.refreshToken);
     storage.setItem(STORAGE_KEYS.user, JSON.stringify(user));
+    for (const k of LEGACY_TOKEN_KEYS) storage.removeItem(k);
   } catch {
     clearSession(storage);
     throw new Error("Your browser would not let ApexERP save your sign-in (private mode or blocked storage). Allow site data and try again.");
@@ -129,21 +138,14 @@ export function writeSession(storage: StorageLike, tokens: LoginResponse, email:
 }
 
 export function clearSession(storage: StorageLike | null): void {
+  setAccessToken(null);
   if (!storage) return;
-  for (const key of Object.values(STORAGE_KEYS)) {
+  for (const key of [...Object.values(STORAGE_KEYS), ...LEGACY_TOKEN_KEYS]) {
     try {
       storage.removeItem(key);
     } catch {
       /* nothing more can be done */
     }
-  }
-}
-
-export function readAccessToken(storage: StorageLike | null): string | null {
-  try {
-    return storage?.getItem(STORAGE_KEYS.accessToken) ?? null;
-  } catch {
-    return null;
   }
 }
 

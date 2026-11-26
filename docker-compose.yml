@@ -39,6 +39,8 @@ services:
       Jwt__Secret: "${JWT_SECRET:-dev-only-compose-signing-key-never-use-in-production-4d8e2a6c}"
       Jwt__Issuer: "ApexERP"
       Frontend__Origin: "${FRONTEND_ORIGIN:-http://localhost:3000}"
+      # The API sits behind the web container's proxy, so use the forwarded client IP for rate limiting and the audit trail.
+      Security__TrustForwardedHeaders: "${TRUST_FORWARDED_HEADERS:-false}"
       ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Development}"
     ports:
       - "8080:8080"
@@ -50,6 +52,8 @@ services:
       args:
         # NEXT_PUBLIC_* values are compiled into the browser bundle at BUILD time, so they are build arguments.
         NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8080}"
+        # The browser calls /backend on this site; the web server forwards it to the API over the internal Docker network.
+        API_PROXY_TARGET: "${API_PROXY_TARGET:-http://api:8080}"
     container_name: apexerp-web
     restart: unless-stopped
     depends_on:

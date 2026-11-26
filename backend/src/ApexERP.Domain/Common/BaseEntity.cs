@@ -56,7 +56,12 @@ namespace ApexERP.Domain.Common
         Assets,
         Bank,
         Procurement,
-        Manufacturing
+        Manufacturing,
+        Accrual,
+        Prepayment,
+        Revenue,
+        Impairment,
+        Provision
     }
 
     /// <summary>

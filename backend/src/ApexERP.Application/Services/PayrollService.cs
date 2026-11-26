@@ -47,19 +47,30 @@ namespace ApexERP.Application.Services
             return Math.Max(0m, Math.Round(paye, 6));
         }
 
-        public decimal CalculateNssaEmployee(decimal monthlyGross)
+        // Statutory rates are effective-dated configuration (StatutoryRate rows). The constants above are only the
+        // fallback when a company has not configured a code yet, so existing tenants keep working (spec 25.2).
+        private static StatutoryRate? Pick(IReadOnlyList<StatutoryRate>? rates, string code) =>
+            rates?.Where(r => r.Code == code).OrderByDescending(r => r.EffectiveFrom).FirstOrDefault();
+
+        public decimal CalculateNssaEmployee(decimal monthlyGross, IReadOnlyList<StatutoryRate>? rates = null)
         {
-            var insurable = Math.Min(monthlyGross, NssaInsurableCeiling);
-            return Math.Round(insurable * NssaRate, 6);
+            var r = Pick(rates, "NSSA_EMPLOYEE");
+            var insurable = Math.Min(monthlyGross, r?.Ceiling ?? NssaInsurableCeiling);
+            return Math.Round(insurable * (r != null ? r.RatePct / 100m : NssaRate), 6);
         }
 
-        public decimal CalculateNssaEmployer(decimal monthlyGross)
+        public decimal CalculateNssaEmployer(decimal monthlyGross, IReadOnlyList<StatutoryRate>? rates = null)
         {
-            var insurable = Math.Min(monthlyGross, NssaInsurableCeiling);
-            return Math.Round(insurable * NssaRate, 6);
+            var r = Pick(rates, "NSSA_EMPLOYER");
+            var insurable = Math.Min(monthlyGross, r?.Ceiling ?? NssaInsurableCeiling);
+            return Math.Round(insurable * (r != null ? r.RatePct / 100m : NssaRate), 6);
         }
 
-        public decimal CalculateAidsLevy(decimal paye) => Math.Round(paye * AidsLevyRate, 6);
+        public decimal CalculateAidsLevy(decimal paye, IReadOnlyList<StatutoryRate>? rates = null)
+        {
+            var r = Pick(rates, "AIDS_LEVY");
+            return Math.Round(paye * (r != null ? r.RatePct / 100m : AidsLevyRate), 6);
+        }
 
         /// <summary>
         /// Runs payroll for every active employee for the given month/year, computing gross-to-net
@@ -77,6 +88,10 @@ namespace ApexERP.Application.Services
             var employees = await _db.Employees.Where(e => e.CompanyId == companyId && e.IsActive).ToListAsync(ct);
             var asOf = new DateTime(year, month, DateTime.DaysInMonth(year, month));
 
+            var rates = await _db.StatutoryRates
+                .Where(r => r.CompanyId == companyId && r.ApprovedBy != null && r.EffectiveFrom <= asOf && (r.EffectiveTo == null || r.EffectiveTo >= asOf))
+                .ToListAsync(ct);
+
             var run = new PayrollRun { CompanyId = companyId, PeriodMonth = month, PeriodYear = year, Status = PayrollRunStatus.Draft };
             var lines = new List<PayrollLine>();
 
@@ -85,9 +100,9 @@ namespace ApexERP.Application.Services
                 var allowances = allowancesByEmployee != null && allowancesByEmployee.TryGetValue(emp.Id, out var a) ? a : 0m;
                 var gross = emp.BasicSalary + allowances;
                 var paye = await CalculatePayeAsync(companyId, gross, asOf, ct);
-                var nssaEmp = CalculateNssaEmployee(gross);
-                var nssaEmployer = CalculateNssaEmployer(gross);
-                var aidsLevy = CalculateAidsLevy(paye);
+                var nssaEmp = CalculateNssaEmployee(gross, rates);
+                var nssaEmployer = CalculateNssaEmployer(gross, rates);
+                var aidsLevy = CalculateAidsLevy(paye, rates);
                 var net = gross - paye - nssaEmp - aidsLevy;
 
                 lines.Add(new PayrollLine

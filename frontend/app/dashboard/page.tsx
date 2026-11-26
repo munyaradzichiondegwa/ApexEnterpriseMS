@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
+import Link from "next/link";
 import { api } from "@/lib/api";
+import { Stat, Section, DataTable, Badge } from "@/components/ui";
+import { fmtMoney, fmtDate } from "@/lib/format";
 
 export default function DashboardPage() {
   const [balanceSheet, setBalanceSheet] = useState<any>(null);
   const [incomeStatement, setIncomeStatement] = useState<any>(null);
   const [lowStock, setLowStock] = useState<any[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [exec, setExec] = useState<any>(null);
+  const [execError, setExecError] = useState<string | null>(null);
 
   useEffect(() => {
     const now = new Date();
@@ -19,7 +24,10 @@ export default function DashboardPage() {
       api.get("/reports/balance-sheet"),
       api.get(`/reports/income-statement?from=${from}&to=${to}`),
       api.get("/inventory/items/low-stock"),
-    ]).then(([bs, is, ls]) => {
+      api.get("/reports/dashboard"),
+    ]).then(([bs, is, ls, ex]) => {
+      if (ex.status === "fulfilled") setExec(ex.value.data);
+      else setExecError("The control and cash dashboard is not available to your role or could not be loaded.");
       if (bs.status === "fulfilled") setBalanceSheet(bs.value.data);
       if (is.status === "fulfilled") setIncomeStatement(is.value.data);
       if (ls.status === "fulfilled") setLowStock(ls.value.data);
@@ -77,6 +85,63 @@ export default function DashboardPage() {
           </ul>
         </div>
       </div>
+
+      <ExecutiveDashboard exec={exec} error={execError} />
     </AppShell>
+  );
+}
+
+type Ageing = { current: number; days1to30: number; days31to60: number; days61to90: number; over90: number; total: number };
+
+/** Financial position, control health, period close, compliance and operations (spec 14). Each tile links to the screen that fixes it. */
+function ExecutiveDashboard({ exec, error }: { exec: any; error: string | null }) {
+  if (error) return <p className="text-sm text-slate-500 mt-8">{error}</p>;
+  if (!exec) return null;
+  const f = exec.financial, c = exec.controls, k = exec.compliance, o = exec.operations, close = exec.periodClose;
+  const ageingRows = (label: string, a: Ageing) => [{ label, ...a }];
+  return (
+    <div className="mt-10" aria-label="Executive dashboard">
+      <h2 className="text-xl font-bold mb-1">Cash, working capital and control health</h2>
+      <p className="text-slate-500 mb-4 text-sm">As at {fmtDate(exec.asOf)}. Select a tile's link to go straight to the screen that resolves it.</p>
+
+      <h3 className="font-semibold mb-2">Financial position</h3>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+        <Stat label="Cash at bank" value={fmtMoney(f.cash)} /><Stat label="Receivables" value={fmtMoney(f.receivables)} hint={f.daysSalesOutstanding != null ? `${f.daysSalesOutstanding} days sales outstanding` : undefined} />
+        <Stat label="Payables" value={fmtMoney(f.payables)} hint={f.daysPayablesOutstanding != null ? `${f.daysPayablesOutstanding} days payables outstanding` : undefined} />
+        <Stat label="Net working capital" value={fmtMoney(f.netWorkingCapital)} tone={f.netWorkingCapital < 0 ? "bad" : "good"} />
+        <Stat label="VAT payable this month" value={fmtMoney(k.vatOutputThisMonth - k.vatInputThisMonth)} hint={`Withholding tax this month ${fmtMoney(k.withholdingThisMonth)}`} />
+      </div>
+      <div className="grid md:grid-cols-2 gap-4 mb-8">
+        {([["Receivables ageing", f.receivablesAgeing, "/receivables-controls"], ["Payables ageing", f.payablesAgeing, "/payables-controls"]] as const).map(([title, a, href]) => (
+          <Section key={title} title={title}>
+            <DataTable caption={title} rowKey={(r) => r.label} rows={ageingRows("Outstanding", a as Ageing)} columns={[
+              { header: "Current", align: "right", cell: (r) => fmtMoney(r.current) }, { header: "1-30", align: "right", cell: (r) => fmtMoney(r.days1to30) }, { header: "31-60", align: "right", cell: (r) => fmtMoney(r.days31to60) },
+              { header: "61-90", align: "right", cell: (r) => fmtMoney(r.days61to90) }, { header: "Over 90", align: "right", cell: (r) => fmtMoney(r.over90) }]} />
+            <Link className="text-sm text-brand-700 underline" href={href}>Open controls</Link>
+          </Section>))}
+      </div>
+
+      <h3 className="font-semibold mb-2">Controls</h3>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <Stat label="Open exceptions" value={c.openExceptions} tone={c.critical ? "bad" : c.high ? "warn" : "good"} hint={`${c.critical} critical, ${c.high} high, ${c.overdue} overdue`} />
+        <Stat label="Integrity tests failing" value={c.selfTestsFailing} tone={c.selfTestsFailing ? "bad" : "good"} />
+        <Stat label="Sub-ledgers unreconciled" value={c.unreconciledAreas} tone={c.unreconciledAreas ? "bad" : "good"} />
+        <Stat label="Approvals waiting" value={c.pendingJournalApprovals + c.paymentRunsAwaitingAuthorisation + c.supplierBankChangesPending} hint={`${c.pendingJournalApprovals} journals, ${c.paymentRunsAwaitingAuthorisation} payment runs, ${c.supplierBankChangesPending} bank changes`} />
+      </div>
+      <div className="flex flex-wrap gap-4 text-sm mb-8">
+        <Link className="text-brand-700 underline" href="/audit">Audit workspace</Link><Link className="text-brand-700 underline" href="/reconciliation">Reconciliation</Link>
+        <Link className="text-brand-700 underline" href="/governance">Governance</Link>
+        {c.emergencyAccessUnreviewed > 0 && <span className="text-red-700 font-medium">{c.emergencyAccessUnreviewed} emergency access grant(s) not yet reviewed</span>}
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <Section title="Period close">
+          {close ? <p className="text-sm">Period {close.period} ends {fmtDate(close.endDate)}: {close.done} of {close.tasks} checklist steps done{close.blocked ? `, ${close.blocked} blocked` : ""}. <Link className="text-brand-700 underline" href="/period-close">Open checklist</Link></p> : <p className="text-sm text-slate-500">No open period.</p>}
+        </Section>
+        <Section title="Integrations and jobs">
+          <p className="text-sm">{o.integrationPending} message(s) pending, <span className={o.integrationDeadLetter ? "text-red-700 font-medium" : ""}>{o.integrationDeadLetter} dead-lettered</span>, {o.backgroundJobFailures7d} job failure(s) in 7 days. <Link className="text-brand-700 underline" href="/integrations">Open</Link></p>
+        </Section>
+      </div>
+    </div>
   );
 }

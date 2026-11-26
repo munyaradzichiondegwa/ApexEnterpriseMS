@@ -16,6 +16,9 @@ namespace ApexERP.API.Extensions
                 o.Conventions.Add(new ModulePermissionConvention());
                 // One database transaction per mutating request, so multi-step postings are all-or-nothing.
                 o.Filters.Add<TransactionalActionFilter>();
+                // Replays of a request carrying the same Idempotency-Key return the first response instead of posting twice.
+                // Order 100 puts it inside the transactional filter (order 0), so the stored response commits or rolls back with the work.
+                o.Filters.Add(new Microsoft.AspNetCore.Mvc.TypeFilterAttribute(typeof(IdempotencyFilter)) { Order = 100 });
             }).AddJsonOptions(o =>
             {
                 o.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
