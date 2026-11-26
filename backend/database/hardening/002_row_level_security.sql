@@ -1,9 +1,10 @@
 -- ApexERP PostgreSQL row-level security (APEXERP spec 10.3). OPT-IN: run this only after setting
 -- Security:RowLevelSecurity:Enabled=true so the API stamps each connection with the caller's company.
 --
--- Rule: a row is visible/writable when its "CompanyId" equals the connection's app.company_id, OR the connection is a
--- system context (app.rls_bypass = 'on': sign-in, registration, background scheduling, or a CrossTenantScope).
--- A connection that never says who it is sees nothing (fail closed).
+-- Rule: a row is visible/writable only when its CompanyId matches app.company_id AND that company belongs to
+-- app.tenant_id. Explicit system contexts (app.rls_bypass = 'on') remain available for tightly controlled
+-- sign-in, registration, and background operations. A normal connection missing either identity sees nothing.
+-- Apply the tenant identity migration before enabling this policy: Companies.TenantId must exist.
 --
 -- FORCE ROW LEVEL SECURITY makes the policy apply to the table owner as well, which is the account the API normally uses.
 -- Superusers and roles with BYPASSRLS (for example the one used for backups) are not restricted: keep them off the API.
@@ -12,8 +13,16 @@
 CREATE OR REPLACE FUNCTION apex_rls_allowed(row_company uuid) RETURNS boolean
 LANGUAGE sql STABLE AS $$
     SELECT coalesce(current_setting('app.rls_bypass', true), '') = 'on'
-        OR (row_company IS NOT NULL
-            AND row_company = nullif(current_setting('app.company_id', true), '')::uuid)
+        OR (
+            row_company IS NOT NULL
+            AND row_company = nullif(current_setting('app.company_id', true), '')::uuid
+            AND EXISTS (
+                SELECT 1
+                FROM "Companies" c
+                WHERE c."Id" = row_company
+                  AND c."TenantId" = nullif(current_setting('app.tenant_id', true), '')::uuid
+            )
+        )
 $$;
 
 DO $$
