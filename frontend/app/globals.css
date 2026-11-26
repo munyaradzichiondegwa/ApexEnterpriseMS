@@ -2,13 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --apex-navy: #19385d;
+  --apex-navy-deep: #122b49;
+  --apex-blue: #1597d4;
+  --apex-teal: #20b6a5;
+  --apex-orange: #f28b28;
+  --apex-surface: #f4f7fb;
+}
+
 html, body { height: 100%; }
-body { @apply bg-slate-50 text-slate-900; }
+body { @apply bg-slate-50 text-slate-900; background: var(--apex-surface); }
 
 .card { @apply bg-white rounded-xl shadow-sm border border-slate-200 p-6; }
-.btn-primary { @apply bg-brand-600 hover:bg-brand-700 text-white font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50; }
+.btn-primary { @apply text-white font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50; background: var(--apex-navy); }
+.btn-primary:hover { background: var(--apex-navy-deep); }
 .btn-secondary { @apply bg-white hover:bg-slate-50 text-slate-700 font-medium px-4 py-2 rounded-lg border border-slate-300 transition-colors; }
-.input { @apply w-full border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent; }
+.input { @apply w-full border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:border-transparent; }
+.input:focus { --tw-ring-color: var(--apex-teal); }
 .label { @apply block text-sm font-medium text-slate-600 mb-1; }
 .table-base { @apply w-full text-sm; }
 .table-base th { @apply text-left font-semibold text-slate-500 uppercase text-xs tracking-wide px-3 py-2 border-b border-slate-200; }
