@@ -45,6 +45,15 @@ export const PATH_MODULES: Record<string, string | null> = {
   "/public-sector": "public-sector",
   "/grants": "grants",
   "/exceptions": "exceptions",
+  "/automation": "automation",
+  "/payables-controls": "ap",
+  "/receivables-controls": "ar",
+  "/reconciliation": "controls",
+  "/period-close": "controls",
+  "/audit": "controls",
+  "/governance": "controls",
+  "/integrations": "integrations",
+  "/security": null,
   "/admin": "admin",
 };
 

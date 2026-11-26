@@ -37,12 +37,81 @@ jobs:
         run: dotnet build backend/ApexERP.sln --no-restore -c Release
       - name: Test
         run: dotnet test backend/tests/ApexERP.Tests/ApexERP.Tests.csproj --no-build -c Release --logger "trx;LogFileName=test-results.trx"
+      - name: Vulnerable NuGet packages (report)
+        run: dotnet list backend/ApexERP.sln package --vulnerable --include-transitive
+        continue-on-error: true
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-test-results
           path: "**/test-results.trx"
+
+  migrations:
+    name: Migrations (drift check, clean install, hardening scripts, boot)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: apexerp
+          POSTGRES_PASSWORD: ci_only_password
+          POSTGRES_DB: apexerp_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U apexerp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ConnectionStrings__Default: "Host=localhost;Port=5432;Database=apexerp_ci;Username=apexerp;Password=ci_only_password"
+      PGPASSWORD: ci_only_password
+      Jwt__Secret: "ci-only-signing-key-0123456789-abcdefghijklmnopqrstuvwxyz"
+      Jwt__Issuer: ApexERP
+      Frontend__Origin: http://localhost:3000
+      ASPNETCORE_ENVIRONMENT: Development
+      Jobs__Enabled: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore backend/ApexERP.sln
+      - name: Install EF tooling
+        run: dotnet tool install --global dotnet-ef --version 8.*
+      - name: Model and migrations agree (no drift)
+        run: |
+          cd backend
+          dotnet ef migrations add CiDriftCheck -p src/ApexERP.Infrastructure -s src/ApexERP.API -o Data/Migrations
+          if grep -q "migrationBuilder\." src/ApexERP.Infrastructure/Data/Migrations/*CiDriftCheck.cs; then
+            echo "::error::The entity model changed without a migration. Run scripts/generate-migrations.ps1 (or .sh) and commit the result."
+            cat src/ApexERP.Infrastructure/Data/Migrations/*CiDriftCheck.cs
+            exit 1
+          fi
+          dotnet ef migrations remove -p src/ApexERP.Infrastructure -s src/ApexERP.API --force
+      - name: Apply every migration to a clean database
+        run: cd backend && dotnet ef database update -p src/ApexERP.Infrastructure -s src/ApexERP.API
+      - name: Hardening scripts are idempotent (run twice)
+        run: |
+          for i in 1 2; do psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -q -f backend/database/hardening/001_append_only_guards.sql; done
+          for i in 1 2; do psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -q -f backend/database/hardening/002_row_level_security.sql; done
+          psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -q -f backend/database/hardening/002_row_level_security_disable.sql
+      - name: API boots and reports ready
+        run: |
+          cd backend/src/ApexERP.API
+          dotnet run -c Release --urls http://127.0.0.1:8080 > /tmp/api.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8080/health/ready; then exit 0; fi
+            sleep 3
+          done
+          cat /tmp/api.log; exit 1
+      - name: Backup and restore round-trip
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null
+          export PGHOST=localhost PGUSER=apexerp PGDATABASE=apexerp_ci BACKUP_DIR=/tmp/backups
+          bash scripts/backup.sh
+          bash scripts/restore-test.sh
 
   frontend:
     name: Frontend (typecheck, tests, build)
@@ -63,3 +132,8 @@ jobs:
       - run: npm run build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8080
+      # Production dependencies: block on critical advisories; high/moderate are reported (see docs/READINESS_TRACKER.md).
+      - name: Dependency audit (production, blocking on critical)
+        run: npm audit --omit=dev --audit-level=critical
+      - name: Dependency audit (all, report only)
+        run: npm audit || true

@@ -45,6 +45,7 @@ namespace ApexERP.Application.Services
         {
             return _db.InTransactionAsync(async token =>
             {
+                using var crossTenant = _db.CrossTenantScope();
                 // One mirror per invoice: serialise concurrent attempts, and make a repeat a harmless no-op.
                 await _db.TryAcquireTransactionLockAsync($"icmirror:{arInvoiceId:N}", token);
                 var already = await _db.IntercompanyTransactions.IgnoreQueryFilters()
@@ -142,6 +143,7 @@ namespace ApexERP.Application.Services
         /// </summary>
         public async Task<MirrorOutcome> TryMirrorAsync(Guid fromCompanyId, Guid arInvoiceId, Guid? userId, CancellationToken ct = default)
         {
+            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
             var invoice = await _db.ArInvoices.IgnoreQueryFilters().Include(i => i.Customer)
                 .FirstOrDefaultAsync(i => i.Id == arInvoiceId && i.CompanyId == fromCompanyId, ct)
                 ?? throw new InvalidOperationException("Source AR invoice not found.");
@@ -205,6 +207,7 @@ namespace ApexERP.Application.Services
         /// entities with its matching status, for verification before running eliminations.</summary>
         public async Task<List<IntercompanyTransaction>> GetReconciliationReportAsync(Guid companyId, CancellationToken ct = default)
         {
+            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
             return await _db.IntercompanyTransactions.IgnoreQueryFilters()
                 .Where(t => t.FromCompanyId == companyId || t.ToCompanyId == companyId)
                 .OrderByDescending(t => t.TransactionDate)
@@ -215,6 +218,7 @@ namespace ApexERP.Application.Services
         /// review this before calling ExecuteNettingAsync.</summary>
         public async Task<NettingProposal> ProposeNettingAsync(Guid companyAId, Guid companyBId, CancellationToken ct = default)
         {
+            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
             var open = await _db.IntercompanyTransactions.IgnoreQueryFilters()
                 .Where(t => t.Status == IntercompanyStatus.Matched &&
                             ((t.FromCompanyId == companyAId && t.ToCompanyId == companyBId) ||
@@ -237,6 +241,7 @@ namespace ApexERP.Application.Services
         public async Task<NettingBatch> ExecuteNettingAsync(Guid companyAId, Guid companyBId, DateTime settlementDate,
             Guid companyABankAccountId, Guid companyBBankAccountId, CancellationToken ct = default)
         {
+            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
             var proposal = await ProposeNettingAsync(companyAId, companyBId, ct);
             if (proposal.NetAmount <= 0) throw new InvalidOperationException("No open inter-company balance to net between these entities.");
 

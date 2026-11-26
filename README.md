@@ -155,7 +155,7 @@ ApexERP/
 │   │   └── ApexERP.API/             Controllers, authorization, request transaction filter, Program.cs, Dockerfile
 │   ├── tests/ApexERP.Tests/         xUnit unit tests + PostgreSQL integration tests
 │   └── database/
-│       ├── schema.sql               Reference schema for manual bootstrap without the .NET SDK
+│       ├── hardening/               SQL guards: append-only audit log and ledger, optional row-level security
 │       └── seed.sql                 Zimbabwe chart of accounts, VAT/WHT codes, PAYE bands
 ├── frontend/                        Next.js 15.5.28 (App Router, TypeScript, Tailwind)
 │   ├── app/                         One route per module (dashboard, gl, ar, ap, inventory, group, public-sector, grants, reports, ...)
@@ -373,7 +373,7 @@ Each integration is isolated behind a service boundary, so a production credenti
 
 The core is functionally complete across all 16 modules, and the financial core has been hardened against a source-level audit; see [docs/AUDIT_REMEDIATION.md](docs/AUDIT_REMEDIATION.md) for what changed, why, how it was verified, and what is still open. The GitHub Actions workflow (`.github/workflows/build.yml`) builds and tests the backend and frontend on every push, and `scripts/smoke-test.sh` exercises the posting lifecycle and access control end to end.
 
-`backend/database/schema.sql` mirrors the original 14-module core for anyone bootstrapping without the .NET SDK; it has not been updated for the Group, Public Sector, Grants and control tables added since. The authoritative schema is always the committed EF Core migrations.
+The authoritative schema is always the committed EF Core migrations. `scripts/export-schema.sh` writes them out as one idempotent SQL script (`backend/database/schema.generated.sql`) for DBAs and audits; the old hand-written `schema.sql` was removed because it drifted.
 
 ---
 
@@ -431,3 +431,10 @@ Munyaradzi holds an MBA and BAcc (Hons) from Zimbabwe Open University and a BSc 
 ---
 
 <p align="center">Built with ASP.NET Core, PostgreSQL, and Next.js — for Zimbabwe, for Africa, and beyond.</p>
+
+
+## Controls, automation and operations (added from the APEXERP readiness specification)
+
+See **docs/OPERATIONS.md** for upgrade steps (generate the migration first), configuration, backups and recovery, monitoring and runbooks, and **docs/READINESS_TRACKER.md** for the status of every specification item.
+
+New screens: Accounting Automation, Payables Controls, Receivables Controls, Reconciliation, Period Close, Audit Workspace, Governance & Approvals, Integrations & Jobs, Account Security, and an executive dashboard on the Dashboard page.

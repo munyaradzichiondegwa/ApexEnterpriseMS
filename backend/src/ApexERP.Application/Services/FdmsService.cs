@@ -24,15 +24,38 @@ namespace ApexERP.Application.Services
     public class FdmsService
     {
         private readonly ApexErpDbContext _db;
-        private readonly ECDsa _deviceKey; // stand-in for the ZIMRA-issued device private key
+        private readonly ECDsa? _deviceKey;
+        private readonly IFdmsGateway _gateway;
 
-        public FdmsService(ApexErpDbContext db)
+        /// <summary>
+        /// The fiscal device's private key, loaded once from the FDMS_DEVICE_KEY_PEM environment variable (PKCS#8 or SEC1 PEM, ECDSA P-256),
+        /// provisioned when the device is registered with ZIMRA. It is deliberately NOT generated on the fly: a key invented per request makes
+        /// every signature unverifiable, which is worse than having none. With no key configured, invoices are recorded as "not fiscalised".
+        /// </summary>
+        private static readonly Lazy<ECDsa?> ConfiguredKey = new(() =>
+        {
+            var pem = Environment.GetEnvironmentVariable("FDMS_DEVICE_KEY_PEM");
+            if (string.IsNullOrWhiteSpace(pem)) return null;
+            var key = ECDsa.Create();
+            key.ImportFromPem(pem.Replace("\\n", "\n"));
+            return key;
+        });
+
+        public static bool IsDeviceConfigured => ConfiguredKey.Value != null;
+
+        public FdmsService(ApexErpDbContext db, IFdmsGateway? gateway = null)
         {
             _db = db;
-            // In production this key is loaded from secure device-certificate storage (e.g. Azure Key
-            // Vault / HSM), provisioned once when the fiscal device is registered with ZIMRA. Here we
-            // generate a session key so the signing mechanics are fully exercised end-to-end.
-            _deviceKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            _deviceKey = ConfiguredKey.Value;
+            _gateway = gateway ?? new NotConfiguredFdmsGateway();
+        }
+
+        /// <summary>Verifies a stored signature against the device's public key, so an auditor can prove a fiscal record was not altered.</summary>
+        public bool VerifySignature(ArInvoice invoice, string signatureBase64)
+        {
+            if (_deviceKey == null || string.IsNullOrEmpty(signatureBase64)) return false;
+            try { return _deviceKey.VerifyData(Encoding.UTF8.GetBytes(BuildCanonicalPayload(invoice)), Convert.FromBase64String(signatureBase64), HashAlgorithmName.SHA256); }
+            catch (FormatException) { return false; }
         }
 
         /// <summary>Builds the canonical payload, signs it, computes the QR digest, and queues the
@@ -45,6 +68,21 @@ namespace ApexERP.Application.Services
 
             var canonicalPayload = BuildCanonicalPayload(invoice);
             var invoiceHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalPayload)));
+
+            if (_deviceKey == null)
+            {
+                // No fiscal device key: record the invoice as NOT fiscalised rather than fabricating a signature or QR code.
+                var unsigned = new FdmsSubmission
+                {
+                    CompanyId = companyId, ArInvoiceId = arInvoiceId, InvoiceHash = invoiceHash, Signature = string.Empty, QrCode = string.Empty,
+                    Status = FdmsSubmissionStatus.Failed, QueuedAt = DateTime.UtcNow,
+                    ErrorMessage = "Fiscal device key is not configured (FDMS_DEVICE_KEY_PEM). This invoice has NOT been fiscalised and carries no valid fiscal signature or QR code."
+                };
+                _db.FdmsSubmissions.Add(unsigned);
+                invoice.FdmsSubmissionId = unsigned.Id;
+                await _db.SaveChangesAsync(ct);
+                return unsigned;
+            }
             var signatureBytes = _deviceKey.SignData(Encoding.UTF8.GetBytes(canonicalPayload), HashAlgorithmName.SHA256);
             var signature = Convert.ToBase64String(signatureBytes);
             var qrCode = ComputeQrDigest(signature);
@@ -98,19 +136,21 @@ namespace ApexERP.Application.Services
             submission.LastAttemptAt = DateTime.UtcNow;
             submission.RetryCount++;
 
-            // PLACEHOLDER: real deployment posts `signature` + `qrCode` + canonical payload to
-            // https://fdmsapi.zimra.co.zw using the registered device's mTLS certificate, and reads
-            // back a ZIMRA-assigned receipt/global invoice number. No real ZIMRA endpoint is called here.
-            var hoursSinceQueued = (DateTime.UtcNow - submission.QueuedAt).TotalHours;
-            if (hoursSinceQueued > 72)
+            if (string.IsNullOrEmpty(submission.Signature))
             {
                 submission.Status = FdmsSubmissionStatus.Failed;
-                submission.ErrorMessage = "Exceeded the 72-hour offline submission window without a registered ZIMRA device connection.";
+                submission.ErrorMessage = "The invoice was never signed (no fiscal device key). Configure the device and re-fiscalise it.";
+            }
+            else if ((DateTime.UtcNow - submission.QueuedAt).TotalHours > 72)
+            {
+                submission.Status = FdmsSubmissionStatus.Failed;
+                submission.ErrorMessage = "Exceeded the 72-hour offline submission window.";
             }
             else
             {
-                submission.Status = FdmsSubmissionStatus.Failed;
-                submission.ErrorMessage = "No ZIMRA device certificate configured -- submission not actually attempted (placeholder). Queued for retry.";
+                var result = await _gateway.SubmitAsync(submission.InvoiceHash, submission.Signature, submission.QrCode, ct);
+                if (result.Accepted) { submission.Status = FdmsSubmissionStatus.Acknowledged; submission.ErrorMessage = null; }
+                else { submission.Status = FdmsSubmissionStatus.Failed; submission.ErrorMessage = result.Error ?? "Submission failed."; }
             }
 
             await _db.SaveChangesAsync(ct);
@@ -127,5 +167,20 @@ namespace ApexERP.Application.Services
                 .OrderBy(s => s.QueuedAt)
                 .ToListAsync(ct);
         }
+    }
+
+    public sealed record FdmsGatewayResult(bool Accepted, string? ReceiptNumber, string? Error);
+
+    /// <summary>The call to ZIMRA's fiscal service. Implement this once the device is registered and ZIMRA's current API specification and mTLS certificate are available, then register it in DI.</summary>
+    public interface IFdmsGateway
+    {
+        Task<FdmsGatewayResult> SubmitAsync(string invoiceHash, string signature, string qrCode, CancellationToken ct);
+    }
+
+    /// <summary>Default gateway: states plainly that no ZIMRA connection exists, so nothing is ever reported as submitted.</summary>
+    public sealed class NotConfiguredFdmsGateway : IFdmsGateway
+    {
+        public Task<FdmsGatewayResult> SubmitAsync(string invoiceHash, string signature, string qrCode, CancellationToken ct) =>
+            Task.FromResult(new FdmsGatewayResult(false, null, "No ZIMRA gateway is configured. The signed invoice is queued and will be submitted when a gateway is registered."));
     }
 }

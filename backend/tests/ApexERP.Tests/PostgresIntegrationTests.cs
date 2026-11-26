@@ -280,7 +280,7 @@ namespace ApexERP.Tests
             await using (var ctx = db.NewContext(company, preparer))
                 draft = await Gl(ctx).CreateDraftAsync(company, preparer, Oct15, "sale", "REF-1", new[] { Dr(cash, 100m), Cr(revenue, 100m) });
             Assert.Equal(JournalStatus.Draft, draft.Status);
-            Assert.True(draft.EntryNo.StartsWith("DR-"));
+            Assert.StartsWith("DR-", draft.EntryNo);
 
             await using (var ctx = db.NewContext(company, preparer)) await Gl(ctx).SubmitAsync(company, preparer, draft.Id);
 
@@ -294,7 +294,7 @@ namespace ApexERP.Tests
             JournalEntry posted;
             await using (var ctx = db.NewContext(company, approver)) posted = await Gl(ctx).PostApprovedAsync(company, approver, draft.Id);
             Assert.Equal(JournalStatus.Posted, posted.Status);
-            Assert.True(posted.EntryNo.StartsWith("JE-"));
+            Assert.StartsWith("JE-", posted.EntryNo);
 
             await using (var ctx = db.NewContext(company, approver))
                 Assert.Equal(posted.EntryNo, (await Gl(ctx).PostApprovedAsync(company, approver, draft.Id)).EntryNo);   // repeat is a no-op

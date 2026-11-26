@@ -59,6 +59,11 @@ namespace ApexERP.Domain.Entities
         public string? TotpSecret { get; set; }
         public bool TotpEnabled { get; set; }
         public DateTime? LastLogin { get; set; }
+
+        // Sign-in protection (spec 11): lockout with back-off, and invalidation of old sessions after a password change.
+        public int FailedLoginCount { get; set; }
+        public DateTime? LockedUntil { get; set; }
+        public DateTime? PasswordChangedAt { get; set; }
         public string FirstName { get; set; } = string.Empty;
         public string LastName { get; set; } = string.Empty;
     }

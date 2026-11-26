@@ -28,7 +28,7 @@ namespace ApexERP.Application.Services
             {
                 CompanyId = companyId,
                 UserId = userId,
-                IpAddress = ipAddress,
+                IpAddress = ipAddress ?? _db.CurrentIpAddress,
                 Action = action,
                 Module = module,
                 EntityType = entityType,
@@ -48,7 +48,7 @@ namespace ApexERP.Application.Services
             {
                 CompanyId = companyId,
                 UserId = userId,
-                IpAddress = ipAddress,
+                IpAddress = ipAddress ?? _db.CurrentIpAddress,
                 Action = action,
                 Module = module,
                 EntityType = entityType,

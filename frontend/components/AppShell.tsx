@@ -28,6 +28,15 @@ const NAV = [
   { href: "/public-sector", label: "Public Sector" },
   { href: "/grants", label: "Grants & NGO" },
   { href: "/exceptions", label: "Exceptions" },
+  { href: "/automation", label: "Accounting Automation" },
+  { href: "/payables-controls", label: "Payables Controls" },
+  { href: "/receivables-controls", label: "Receivables Controls" },
+  { href: "/reconciliation", label: "Reconciliation" },
+  { href: "/period-close", label: "Period Close" },
+  { href: "/audit", label: "Audit Workspace" },
+  { href: "/governance", label: "Governance & Approvals" },
+  { href: "/integrations", label: "Integrations & Jobs" },
+  { href: "/security", label: "Account Security" },
   { href: "/admin", label: "Admin & Settings" },
 ];
 

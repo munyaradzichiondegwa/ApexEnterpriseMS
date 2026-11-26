@@ -10,6 +10,9 @@ COPY . .
 # NEXT_PUBLIC_* values are inlined into the browser bundle at build time, so they must be present HERE.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Where the web server itself reaches the API to forward /backend/* requests (compiled into the routing table at build time).
+ARG API_PROXY_TARGET
+ENV API_PROXY_TARGET=$API_PROXY_TARGET
 RUN npm run build
 
 FROM node:20-alpine AS runner

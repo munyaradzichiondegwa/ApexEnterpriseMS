@@ -11,5 +11,25 @@ if (process.env.VERCEL && !(process.env.NEXT_PUBLIC_API_URL || "").trim()) {
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  // The browser talks to /backend on this origin; Next.js forwards it to the API. Cookies set by the API (the HttpOnly refresh
+  // token) therefore belong to this site, so sign-in survives browsers that block third-party cookies.
+  async rewrites() {
+    // API_PROXY_TARGET is where THIS server reaches the API (inside Docker: http://api:8080). It falls back to the public API URL.
+    const target = (process.env.API_PROXY_TARGET || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080').replace(/\/+$/, '');
+    return [{ source: '/backend/:path*', destination: `${target}/:path*` }];
+  },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+        ],
+      },
+    ];
+  },
 };
 module.exports = nextConfig;

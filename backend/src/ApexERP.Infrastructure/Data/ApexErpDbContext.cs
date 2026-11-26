@@ -24,6 +24,14 @@ namespace ApexERP.Infrastructure.Data
         /// CreatedBy/UpdatedBy on every saved row, which segregation-of-duties checks rely on.</summary>
         public Guid? CurrentUserId { get; set; }
 
+        /// <summary>Client IP of the current request (set by the tenant middleware). Audit rows use it when no
+        /// address is passed explicitly, so every audited action records where it came from (spec 12.2).</summary>
+        public string? CurrentIpAddress { get; set; }
+
+        /// <summary>True only inside a <see cref="CrossTenantScope"/>: the code deliberately reads across companies (group consolidation,
+        /// inter-company postings). With row-level security enabled this is what lets the database allow it.</summary>
+        public bool AllowCrossTenant { get; set; }
+
         public ApexErpDbContext(DbContextOptions<ApexErpDbContext> options) : base(options) { }
 
         // Core / tenancy
@@ -112,6 +120,44 @@ namespace ApexERP.Infrastructure.Data
 
         // Controls: visible exception queue (failed inter-company mirrors, etc.)
         public DbSet<ExceptionItem> ExceptionItems => Set<ExceptionItem>();
+
+        // ---- Controls, automation and integrations (APEXERP spec) ----
+        public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+        public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+        public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
+        public DbSet<CompanySetting> CompanySettings => Set<CompanySetting>();
+        public DbSet<SoDConflictRule> SoDConflictRules => Set<SoDConflictRule>();
+        public DbSet<ApprovalDelegation> ApprovalDelegations => Set<ApprovalDelegation>();
+        public DbSet<ApprovalMatrixTier> ApprovalMatrixTiers => Set<ApprovalMatrixTier>();
+        public DbSet<MaterialityConfiguration> MaterialityConfigurations => Set<MaterialityConfiguration>();
+        public DbSet<ControlException> ControlExceptions => Set<ControlException>();
+        public DbSet<AccountingPolicyVersion> AccountingPolicyVersions => Set<AccountingPolicyVersion>();
+        public DbSet<AccrualSchedule> AccrualSchedules => Set<AccrualSchedule>();
+        public DbSet<PrepaymentSchedule> PrepaymentSchedules => Set<PrepaymentSchedule>();
+        public DbSet<PrepaymentScheduleLine> PrepaymentScheduleLines => Set<PrepaymentScheduleLine>();
+        public DbSet<RevenueContract> RevenueContracts => Set<RevenueContract>();
+        public DbSet<PerformanceObligation> PerformanceObligations => Set<PerformanceObligation>();
+        public DbSet<RevenueScheduleLine> RevenueScheduleLines => Set<RevenueScheduleLine>();
+        public DbSet<ImpairmentAssessment> ImpairmentAssessments => Set<ImpairmentAssessment>();
+        public DbSet<InventoryNrvAssessment> InventoryNrvAssessments => Set<InventoryNrvAssessment>();
+        public DbSet<EclLossRate> EclLossRates => Set<EclLossRate>();
+        public DbSet<EclProvisionRun> EclProvisionRuns => Set<EclProvisionRun>();
+        public DbSet<CreditLimitOverride> CreditLimitOverrides => Set<CreditLimitOverride>();
+        public DbSet<ArCreditNote> ArCreditNotes => Set<ArCreditNote>();
+        public DbSet<ApPaymentRun> ApPaymentRuns => Set<ApPaymentRun>();
+        public DbSet<ApPaymentRunItem> ApPaymentRunItems => Set<ApPaymentRunItem>();
+        public DbSet<SupplierBankChange> SupplierBankChanges => Set<SupplierBankChange>();
+        public DbSet<BankReconciliation> BankReconciliations => Set<BankReconciliation>();
+        public DbSet<PettyCashFund> PettyCashFunds => Set<PettyCashFund>();
+        public DbSet<PettyCashVoucher> PettyCashVouchers => Set<PettyCashVoucher>();
+        public DbSet<ReconciliationRun> ReconciliationRuns => Set<ReconciliationRun>();
+        public DbSet<PeriodCloseTask> PeriodCloseTasks => Set<PeriodCloseTask>();
+        public DbSet<AuditEvidenceReference> AuditEvidenceReferences => Set<AuditEvidenceReference>();
+        public DbSet<ControlTestResult> ControlTestResults => Set<ControlTestResult>();
+        public DbSet<JobExecution> JobExecutions => Set<JobExecution>();
+        public DbSet<StatutoryRate> StatutoryRates => Set<StatutoryRate>();
+        public DbSet<IntegrationEndpoint> IntegrationEndpoints => Set<IntegrationEndpoint>();
+        public DbSet<IntegrationMessage> IntegrationMessages => Set<IntegrationMessage>();
 
         // Public Sector & Government
         public DbSet<FundCentre> FundCentres => Set<FundCentre>();
@@ -297,6 +343,74 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<GrantCloseoutChecklist>(modelBuilder);
             ApplyTenantFilter<TenderBid>(modelBuilder);
             ApplyTenantFilter<ExceptionItem>(modelBuilder);
+            ApplyTenantFilter<IdempotencyRecord>(modelBuilder);
+            ApplyTenantFilter<RefreshToken>(modelBuilder);
+            ApplyTenantFilter<MfaRecoveryCode>(modelBuilder);
+            ApplyTenantFilter<CompanySetting>(modelBuilder);
+            ApplyTenantFilter<SoDConflictRule>(modelBuilder);
+            ApplyTenantFilter<ApprovalDelegation>(modelBuilder);
+            ApplyTenantFilter<ApprovalMatrixTier>(modelBuilder);
+            ApplyTenantFilter<MaterialityConfiguration>(modelBuilder);
+            ApplyTenantFilter<ControlException>(modelBuilder);
+            ApplyTenantFilter<AccountingPolicyVersion>(modelBuilder);
+            ApplyTenantFilter<AccrualSchedule>(modelBuilder);
+            ApplyTenantFilter<PrepaymentSchedule>(modelBuilder);
+            ApplyTenantFilter<RevenueContract>(modelBuilder);
+            ApplyTenantFilter<ImpairmentAssessment>(modelBuilder);
+            ApplyTenantFilter<InventoryNrvAssessment>(modelBuilder);
+            ApplyTenantFilter<EclLossRate>(modelBuilder);
+            ApplyTenantFilter<EclProvisionRun>(modelBuilder);
+            ApplyTenantFilter<CreditLimitOverride>(modelBuilder);
+            ApplyTenantFilter<ArCreditNote>(modelBuilder);
+            ApplyTenantFilter<ApPaymentRun>(modelBuilder);
+            ApplyTenantFilter<SupplierBankChange>(modelBuilder);
+            ApplyTenantFilter<BankReconciliation>(modelBuilder);
+            ApplyTenantFilter<PettyCashFund>(modelBuilder);
+            ApplyTenantFilter<PettyCashVoucher>(modelBuilder);
+            ApplyTenantFilter<ReconciliationRun>(modelBuilder);
+            ApplyTenantFilter<PeriodCloseTask>(modelBuilder);
+            ApplyTenantFilter<AuditEvidenceReference>(modelBuilder);
+            ApplyTenantFilter<ControlTestResult>(modelBuilder);
+            ApplyTenantFilter<JobExecution>(modelBuilder);
+            ApplyTenantFilter<StatutoryRate>(modelBuilder);
+            ApplyTenantFilter<IntegrationEndpoint>(modelBuilder);
+            ApplyTenantFilter<IntegrationMessage>(modelBuilder);
+
+            // ---- Controls & automation: relationships and integrity indexes ----
+            // Existing rows must keep working after the migration: accounts stay postable, existing invoices need no match.
+            // (EF Core 8 sends an explicit false even when the column default is true.)
+            modelBuilder.Entity<GlAccount>().Property(a => a.IsPostable).HasDefaultValue(true);
+            modelBuilder.Entity<ApInvoice>().Property(i => i.MatchStatus).HasDefaultValue("NotRequired");
+            modelBuilder.Entity<IdempotencyRecord>().HasIndex(r => new { r.CompanyId, r.Scope, r.Key }).IsUnique();
+            modelBuilder.Entity<RefreshToken>().HasIndex(r => r.TokenHash).IsUnique();
+            modelBuilder.Entity<RefreshToken>().HasIndex(r => new { r.UserId, r.FamilyId });
+            modelBuilder.Entity<MfaRecoveryCode>().HasIndex(r => new { r.UserId, r.CodeHash });
+            modelBuilder.Entity<CompanySetting>().HasIndex(r => new { r.CompanyId, r.Key }).IsUnique();
+            modelBuilder.Entity<ControlException>().HasIndex(r => new { r.CompanyId, r.Fingerprint }).IsUnique();
+            modelBuilder.Entity<ControlException>().HasIndex(r => new { r.CompanyId, r.Status, r.Severity });
+            modelBuilder.Entity<MaterialityConfiguration>().HasIndex(r => new { r.CompanyId, r.Version }).IsUnique();
+            modelBuilder.Entity<AccountingPolicyVersion>().HasIndex(r => new { r.CompanyId, r.Area, r.Version }).IsUnique();
+            modelBuilder.Entity<ApprovalMatrixTier>().HasIndex(r => new { r.CompanyId, r.EntityType, r.UpToAmount });
+            modelBuilder.Entity<ApprovalDelegation>().HasIndex(r => new { r.CompanyId, r.DelegateUserId, r.ValidTo });
+            modelBuilder.Entity<JobExecution>().HasIndex(r => new { r.CompanyId, r.JobCode, r.RunKey }).IsUnique();
+            modelBuilder.Entity<IntegrationMessage>().HasIndex(r => new { r.CompanyId, r.Provider, r.ExternalRef }).IsUnique();
+            modelBuilder.Entity<IntegrationMessage>().HasIndex(r => new { r.Status, r.NextAttemptAt });
+            modelBuilder.Entity<RevenueContract>().HasIndex(r => new { r.CompanyId, r.ContractNo }).IsUnique();
+            modelBuilder.Entity<ArCreditNote>().HasIndex(r => new { r.CompanyId, r.CreditNoteNo }).IsUnique();
+            modelBuilder.Entity<ApPaymentRun>().HasIndex(r => new { r.CompanyId, r.RunNo }).IsUnique();
+            modelBuilder.Entity<ReconciliationRun>().HasIndex(r => new { r.CompanyId, r.Area, r.AsOfDate });
+            modelBuilder.Entity<PeriodCloseTask>().HasIndex(r => new { r.CompanyId, r.PeriodId, r.Code }).IsUnique();
+            modelBuilder.Entity<AuditEvidenceReference>().HasIndex(r => new { r.CompanyId, r.EntityType, r.EntityId });
+            modelBuilder.Entity<StatutoryRate>().HasIndex(r => new { r.CompanyId, r.Code, r.EffectiveFrom });
+            modelBuilder.Entity<EclLossRate>().HasIndex(r => new { r.CompanyId, r.FromDays });
+            // Duplicate supplier invoices are refused by the database too (cancelled invoices free the number).
+            modelBuilder.Entity<ApInvoice>().HasIndex(i => new { i.CompanyId, i.SupplierId, i.SupplierInvoiceNo })
+                .IsUnique().HasFilter("\"SupplierInvoiceNo\" IS NOT NULL AND \"Status\" <> 4");
+
+            modelBuilder.Entity<PrepaymentSchedule>().HasMany(p => p.Lines).WithOne().HasForeignKey(l => l.PrepaymentScheduleId).OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<RevenueContract>().HasMany(c => c.Obligations).WithOne().HasForeignKey(o => o.RevenueContractId).OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<PerformanceObligation>().HasMany(o => o.Schedule).WithOne().HasForeignKey(l => l.PerformanceObligationId).OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<ApPaymentRun>().HasMany(r => r.Items).WithOne().HasForeignKey(i => i.ApPaymentRunId).OnDelete(DeleteBehavior.Cascade);
 
             // ---- Additional relationships for the expanded modules ----
             modelBuilder.Entity<WorkflowRequest>()

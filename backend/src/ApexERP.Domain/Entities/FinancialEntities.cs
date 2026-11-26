@@ -28,6 +28,10 @@ namespace ApexERP.Domain.Entities
         public OciCategory OciCategory { get; set; } = OciCategory.NotApplicable;
         /// <summary>True for inter-company AR/AP/loan accounts that must be eliminated on
         /// consolidation (PRD Module 2).</summary>
+        /// <summary>Header/rollup accounts cannot receive postings (spec GL-002).</summary>
+        public bool IsPostable { get; set; } = true;
+        /// <summary>Comma-separated JournalSource names allowed to post here, e.g. "AR,Manual". Null/empty = every source (spec GL-002).</summary>
+        public string? AllowedSourcesCsv { get; set; }
         public bool IsIntercompanyAccount { get; set; }
         /// <summary>When IsIntercompanyAccount, which group Company this balance is with.</summary>
         public Guid? IntercompanyCounterpartyCompanyId { get; set; }

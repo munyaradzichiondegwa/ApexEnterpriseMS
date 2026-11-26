@@ -81,13 +81,14 @@ namespace ApexERP.Application.Services
             IReadOnlyCollection<GlLineRequest> lines, Guid? postedBy, Guid? reversalOfId, bool allowInactiveAccounts,
             CancellationToken ct)
         {
+            if (reversalOfId == null) lines = await ApplyFxControlsAsync(companyId, entryDate, lines, ct);
             var validated = JournalValidator.ValidateLines(lines, allowZeroLines: true);
 
             // Lock order is always: period -> entry number. Keeping one order avoids deadlocks.
             var period = await GetPeriodUnderLockAsync(companyId, entryDate, ct);
             EnsurePeriodOpen(period);
 
-            var accounts = await LoadPostableAccountsAsync(companyId, validated.Select(v => v.Source.GlAccountId), allowInactiveAccounts, ct);
+            var accounts = await LoadPostableAccountsAsync(companyId, validated.Select(v => v.Source.GlAccountId), allowInactiveAccounts, ct, reversalOfId == null ? source : null);
 
             var entryNo = await NextEntryNoAsync(companyId, entryDate, "JE", ct);
 
@@ -185,11 +186,12 @@ namespace ApexERP.Application.Services
             var lineList = lines.ToList();
             return _db.InTransactionAsync(async token =>
             {
+                lineList = (await ApplyFxControlsAsync(companyId, entryDate, lineList, token)).ToList();
                 var validated = JournalValidator.ValidateLines(lineList, allowZeroLines: false);
 
                 var period = await GetPeriodUnderLockAsync(companyId, entryDate, token);
                 EnsurePeriodOpen(period);
-                await LoadPostableAccountsAsync(companyId, validated.Select(v => v.Source.GlAccountId), allowInactiveAccounts: false, token);
+                await LoadPostableAccountsAsync(companyId, validated.Select(v => v.Source.GlAccountId), allowInactiveAccounts: false, token, JournalSource.Manual);
 
                 var draftNo = await NextEntryNoAsync(companyId, entryDate, "DR", token);
 
@@ -279,7 +281,7 @@ namespace ApexERP.Application.Services
 
                 var period = await GetPeriodUnderLockAsync(companyId, entry.EntryDate, token);
                 EnsurePeriodOpen(period);
-                var accounts = await LoadPostableAccountsAsync(companyId, persisted.Select(p => p.GlAccountId), allowInactiveAccounts: false, token);
+                var accounts = await LoadPostableAccountsAsync(companyId, persisted.Select(p => p.GlAccountId), allowInactiveAccounts: false, token, JournalSource.Manual);
 
                 var before = entry.Status;
                 entry.EntryNo = await NextEntryNoAsync(companyId, entry.EntryDate, "JE", token);
@@ -414,6 +416,51 @@ namespace ApexERP.Application.Services
         }
 
         /// <summary>
+        /// GL-004. Off unless the company configures it (settings gl.fx.*), so existing behaviour is unchanged:
+        ///   gl.fx.rateTolerancePct   - a foreign-currency line's rate must be within this % of the rate on file (ExchangeRates) for the entry date,
+        ///                              and a rate no older than gl.fx.rateMaxAgeDays (default 7) must exist.
+        ///   gl.fx.roundingAccountId  - a base-currency imbalance of at most gl.fx.roundingTolerance (default 0.05) caused by rounding foreign
+        ///                              amounts is posted to this account instead of rejecting the journal.
+        /// </summary>
+        private async Task<IReadOnlyCollection<GlLineRequest>> ApplyFxControlsAsync(Guid companyId, DateTime entryDate, IReadOnlyCollection<GlLineRequest> lines, CancellationToken ct)
+        {
+            var settings = await _db.CompanySettings.Where(x => x.CompanyId == companyId && x.Key.StartsWith("gl.fx.")).ToDictionaryAsync(x => x.Key, x => x.Value, ct);
+            if (settings.Count == 0) return lines;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var baseCurrency = await _db.Companies.IgnoreQueryFilters().Where(c => c.Id == companyId).Select(c => c.BaseCurrency).FirstAsync(ct);
+            var list = lines.ToList();
+
+            if (settings.TryGetValue("gl.fx.rateTolerancePct", out var tolText) && decimal.TryParse(tolText, System.Globalization.NumberStyles.Number, inv, out var tolerance))
+            {
+                var maxAge = settings.TryGetValue("gl.fx.rateMaxAgeDays", out var ageText) && int.TryParse(ageText, out var a) ? a : 7;
+                foreach (var cur in list.Select(l => JournalValidator.NormaliseCurrency(l.Currency)).Where(c => c != null && c != baseCurrency).Distinct().ToList())
+                {
+                    var onFile = await _db.ExchangeRates.Where(r => r.CompanyId == companyId && r.FromCurrency == cur && r.ToCurrency == baseCurrency
+                            && r.RateDate <= entryDate.Date && r.RateDate >= entryDate.Date.AddDays(-maxAge))
+                        .OrderByDescending(r => r.RateDate).FirstOrDefaultAsync(ct)
+                        ?? throw new InvalidOperationException($"No {cur}/{baseCurrency} exchange rate is on file within {maxAge} days of {entryDate:yyyy-MM-dd}. Record the rate first.");
+                    foreach (var l in list.Where(x => JournalValidator.NormaliseCurrency(x.Currency) == cur))
+                    {
+                        var deviation = Math.Abs(l.ExchangeRate - onFile.Rate) / onFile.Rate * 100m;
+                        if (deviation > tolerance)
+                            throw new InvalidOperationException($"The {cur} rate {l.ExchangeRate} differs from the rate on file ({onFile.Rate} on {onFile.RateDate:yyyy-MM-dd}) by {deviation:0.##}%, more than the {tolerance}% allowed.");
+                    }
+                }
+            }
+
+            if (settings.TryGetValue("gl.fx.roundingAccountId", out var accText) && Guid.TryParse(accText, out var roundingAccountId))
+            {
+                var roundingTolerance = settings.TryGetValue("gl.fx.roundingTolerance", out var rtText) && decimal.TryParse(rtText, System.Globalization.NumberStyles.Number, inv, out var rt) ? rt : 0.05m;
+                var diff = list.Sum(l => JournalValidator.Round(l.Debit * l.ExchangeRate)) - list.Sum(l => JournalValidator.Round(l.Credit * l.ExchangeRate));
+                if (diff != 0m && Math.Abs(diff) <= roundingTolerance)
+                    list.Add(diff > 0m
+                        ? new GlLineRequest(roundingAccountId, 0m, diff, baseCurrency, 1m, null, "FX rounding difference")
+                        : new GlLineRequest(roundingAccountId, -diff, 0m, baseCurrency, 1m, null, "FX rounding difference"));
+            }
+            return list;
+        }
+
+        /// <summary>
         /// Takes the period lock, then returns the period, creating it on first use. The period is read without
         /// tracking so its status is always current for the check that follows.
         /// </summary>
@@ -441,7 +488,7 @@ namespace ApexERP.Application.Services
         }
 
         private async Task<Dictionary<Guid, GlAccount>> LoadPostableAccountsAsync(Guid companyId, IEnumerable<Guid> accountIds,
-            bool allowInactiveAccounts, CancellationToken ct)
+            bool allowInactiveAccounts, CancellationToken ct, JournalSource? source = null)
         {
             var ids = accountIds.Distinct().ToList();
             var accounts = await _db.GlAccounts.IgnoreQueryFilters().AsNoTracking()
@@ -454,6 +501,17 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException($"GL account {id} not found.");
                 if (!allowInactiveAccounts && !account.IsActive)
                     throw new InvalidOperationException($"GL account {account.Code} - {account.Name} is inactive and cannot be posted to.");
+
+                // GL-002: header accounts take no postings, and an account may be limited to certain kinds of transaction.
+                // Reversals pass no source so a later restriction can never block correcting history.
+                if (source != null)
+                {
+                    if (!account.IsPostable)
+                        throw new InvalidOperationException($"GL account {account.Code} - {account.Name} is a header account and cannot be posted to.");
+                    if (!string.IsNullOrWhiteSpace(account.AllowedSourcesCsv) &&
+                        !account.AllowedSourcesCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(source.Value.ToString(), StringComparer.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"GL account {account.Code} - {account.Name} does not accept {source} postings (allowed: {account.AllowedSourcesCsv}).");
+                }
             }
             return accounts;
         }
