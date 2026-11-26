@@ -20,6 +20,9 @@ namespace ApexERP.Infrastructure.Data
         /// <summary>Resolved once per request from the authenticated user's JWT claims.</summary>
         public Guid? CurrentCompanyId { get; set; }
 
+        /// <summary>Customer organisation (tenant) resolved from the signed access token.</summary>
+        public Guid? CurrentTenantId { get; set; }
+
         /// <summary>The signed-in user for this request (from the JWT "sub" claim). Used to stamp
         /// CreatedBy/UpdatedBy on every saved row, which segregation-of-duties checks rely on.</summary>
         public Guid? CurrentUserId { get; set; }
@@ -193,6 +196,10 @@ namespace ApexERP.Infrastructure.Data
                 .HasIndex(t => t.RegistrationNumber);
             modelBuilder.Entity<Company>()
                 .HasIndex(c => c.TenantId);
+            modelBuilder.Entity<CustomerOrganisation>()
+                .HasQueryFilter(t => CurrentTenantId != null && t.Id == CurrentTenantId);
+            modelBuilder.Entity<Company>()
+                .HasQueryFilter(c => CurrentTenantId != null && c.TenantId == CurrentTenantId);
 
             // ---- Decimal precision: NUMERIC(20,6) everywhere per PRD Section 5 ----
             // ---- Dates: every DateTime is stored/read as UTC. Npgsql refuses to write a DateTime whose
