@@ -8,6 +8,7 @@ import { canView } from "@/lib/permissions";
 import ConfigError from "@/components/ConfigError";
 import LoadingState from "@/components/LoadingState";
 import clsx from "clsx";
+import BrandMark from "@/components/BrandMark";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
@@ -98,7 +99,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
-        <span className="font-bold tracking-tight">ApexERP</span>
+        <BrandMark compact />
         <div className="w-9" /> {/* spacer to keep the title centered */}
       </header>
 
@@ -109,7 +110,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <aside className="relative w-72 max-w-[80vw] bg-brand-900 text-brand-50 flex flex-col h-full overflow-y-auto">
             <div className="px-5 py-5 border-b border-brand-800 flex items-center justify-between">
               <div>
-                <div className="text-lg font-bold tracking-tight">ApexERP</div>
+                <BrandMark compact />
                 <div className="text-xs text-brand-300 truncate">{user.email}</div>
               </div>
               <button onClick={() => setDrawerOpen(false)} aria-label="Close navigation menu" className="p-1 rounded hover:bg-brand-800">
