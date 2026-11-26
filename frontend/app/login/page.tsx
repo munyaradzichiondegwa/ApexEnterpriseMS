@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { MfaRequiredError, useAuth } from "@/lib/auth";
 import ConfigError from "@/components/ConfigError";
+import BrandMark from "@/components/BrandMark";
 
 export default function LoginPage() {
   const { login, sessionNotice, configError } = useAuth();
@@ -40,7 +41,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-brand-900 px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="text-3xl font-bold text-white">ApexERP</div>
+          <div className="flex justify-center"><BrandMark /></div>
           <div className="text-brand-300 text-sm mt-1">Zimbabwe-first Enterprise Resource Planning</div>
         </div>
         <form onSubmit={onSubmit} className="card space-y-4">
