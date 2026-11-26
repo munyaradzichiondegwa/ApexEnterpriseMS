@@ -6,7 +6,8 @@ namespace ApexERP.Infrastructure.Data
 {
     /// <summary>
     /// Optional PostgreSQL row-level security (APEXERP spec 10.3). When Security:RowLevelSecurity:Enabled is true, every database
-    /// connection is told which company the request belongs to ("app.company_id") and whether it is a system context
+    /// connection is told which customer organisation and company the request belongs to ("app.tenant_id" and
+    /// "app.company_id") and whether it is a system context
     /// ("app.rls_bypass" = on: sign-in, registration, background scheduling, or an explicit <see cref="CrossTenantScope"/>). The
     /// policies in backend/database/hardening/002_row_level_security.sql then make the database itself refuse rows from other
     /// companies, even if application code forgot a filter. Off by default; the application-level query filters always apply.
