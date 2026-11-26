@@ -102,8 +102,8 @@ namespace ApexERP.Application.Services
             _db = db;
         }
 
-        /// <summary>Id -> parent id for every company. Companies are the tenants themselves, so this table has no
-        /// tenant filter; only these two columns leave this method.</summary>
+        /// <summary>Id -> parent id for companies inside the caller's customer organisation. The DbContext
+        /// tenant filter prevents this group graph from including companies belonging to another customer.</summary>
         public async Task<Dictionary<Guid, Guid?>> LoadParentMapAsync(CancellationToken ct = default) =>
             await _db.Companies.Select(c => new { c.Id, c.ParentCompanyId })
                 .ToDictionaryAsync(c => c.Id, c => c.ParentCompanyId, ct);
