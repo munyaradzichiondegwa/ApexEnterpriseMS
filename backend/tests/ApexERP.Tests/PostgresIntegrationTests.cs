@@ -51,10 +51,15 @@ namespace ApexERP.Tests
         }
 
         /// <summary>A context scoped to one company (null = no tenant, which must see nothing).</summary>
-        public ApexErpDbContext NewContext(Guid? companyId, Guid? userId = null)
+        public ApexErpDbContext NewContext(Guid? companyId, Guid? userId = null, Guid? tenantId = null)
         {
             var options = new DbContextOptionsBuilder<ApexErpDbContext>().UseNpgsql(ConnectionString).Options;
-            return new ApexErpDbContext(options) { CurrentCompanyId = companyId, CurrentUserId = userId };
+            return new ApexErpDbContext(options)
+            {
+                CurrentCompanyId = companyId,
+                CurrentTenantId = tenantId,
+                CurrentUserId = userId
+            };
         }
 
         public async ValueTask DisposeAsync()
@@ -100,6 +105,54 @@ namespace ApexERP.Tests
         {
             await using var ctx = db.NewContext(company);
             return await Gl(ctx).PostAsync(company, date, JournalSource.Manual, "test", null, lines);
+        }
+
+        // ---- Customer organisation isolation: a tenant can see its companies, never another customer's -------------------------------
+
+        [PostgresFact]
+        public async Task Customer_organisation_filter_only_exposes_companies_owned_by_the_current_tenant()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var tenantA = Guid.NewGuid();
+            var tenantB = Guid.NewGuid();
+            var companyA1 = Guid.NewGuid();
+            var companyA2 = Guid.NewGuid();
+            var companyB1 = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(null))
+            {
+                seed.CustomerOrganisations.AddRange(
+                    new CustomerOrganisation { Id = tenantA, Name = "Tenant A" },
+                    new CustomerOrganisation { Id = tenantB, Name = "Tenant B" });
+                seed.Companies.AddRange(
+                    new Company { Id = companyA1, TenantId = tenantA, Name = "A - Parent" },
+                    new Company { Id = companyA2, TenantId = tenantA, Name = "A - Subsidiary", ParentCompanyId = companyA1 },
+                    new Company { Id = companyB1, TenantId = tenantB, Name = "B - Company" });
+                await seed.SaveChangesAsync();
+            }
+
+            await using (var noTenant = db.NewContext(null))
+            {
+                Assert.Empty(await noTenant.CustomerOrganisations.ToListAsync());
+                Assert.Empty(await noTenant.Companies.ToListAsync());
+            }
+
+            await using (var tenantContext = db.NewContext(companyA1, tenantId: tenantA))
+            {
+                var organisations = await tenantContext.CustomerOrganisations.ToListAsync();
+                var companies = await tenantContext.Companies.OrderBy(c => c.Name).ToListAsync();
+
+                Assert.Single(organisations);
+                Assert.Equal(tenantA, organisations[0].Id);
+                Assert.Equal(new[] { companyA1, companyA2 }, companies.Select(c => c.Id).ToArray());
+                Assert.DoesNotContain(companies, c => c.TenantId == tenantB);
+            }
+
+            await using (var otherTenant = db.NewContext(companyB1, tenantId: tenantB))
+            {
+                Assert.Single(await otherTenant.Companies.ToListAsync());
+                Assert.Equal(tenantB, (await otherTenant.Companies.SingleAsync()).TenantId);
+            }
         }
 
         // ---- audit finding 9: tenant isolation fails closed ------------------------------------------------------------
