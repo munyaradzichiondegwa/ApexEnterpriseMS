@@ -120,7 +120,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             return BadRequest(new { error = "The parent company must be an active legal entity in this tenant." });
 
         var sourceRoles = await _db.Roles.IgnoreQueryFilters().Where(x => x.CompanyId == CompanyId).AsNoTracking().ToListAsync(ct);
-        if (sourceRoles.Count == 0) sourceRoles.Add(new Role { CompanyId = CompanyId, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\"*\"]" });
+        if (sourceRoles.Count == 0) sourceRoles.Add(new Role { CompanyId = CompanyId, Name = "Administrator", IsSystemRole = true, PermissionsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "*" }) });
         var company = new Company
         {
             TenantId = TenantId, Name = request.Name.Trim(), RegistrationNo = request.RegistrationNo,
@@ -169,33 +169,6 @@ public sealed class OrganisationManagementController : ApiControllerBase
         foreach (var membership in memberships) { membership.IsActive = false; membership.ValidTo = DateTime.UtcNow; }
         await _db.SaveChangesAsync(ct);
         return Ok(new { deactivated = true, companyId });
-    }
-
-
-    [HttpGet("companies/{companyId:guid}/roles")]
-    public async Task<IActionResult> CompanyRoles(Guid companyId, CancellationToken ct)
-    {
-        using var scope = _db.SystemAccessScope("tenant administration: list company roles");
-        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
-        return Ok(await _db.Roles.IgnoreQueryFilters().AsNoTracking().Where(x => x.CompanyId == companyId)
-            .OrderBy(x => x.Name).Select(x => new { x.Id, x.Name, x.IsSystemRole }).ToListAsync(ct));
-    }
-
-    [HttpGet("jurisdiction-catalogue")]
-    public async Task<IActionResult> JurisdictionCatalogue(CancellationToken ct)
-    {
-        using var scope = _db.SystemAccessScope("tenant configuration: list country defaults");
-        return Ok(await _db.JurisdictionProfiles.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.CountryName)
-            .Select(x => new { x.CountryCode, x.CountryName, x.DefaultCurrency, x.DefaultTimeZone, x.DefaultReportingFramework }).ToListAsync(ct));
-    }
-
-    [HttpGet("onboarding")]
-    public async Task<IActionResult> Onboarding(CancellationToken ct)
-    {
-        using var scope = _db.SystemAccessScope("tenant onboarding: read wizard state");
-        var row = await _db.TenantOnboardings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == TenantId, ct);
-        if (row is null) return NotFound();
-        return Ok(new { row.Status, row.CompletedStepsJson, row.DeploymentProfileId, row.CompletedAt, row.BlockedReason });
     }
 
     [HttpGet("companies/{companyId:guid}/branches")]
@@ -381,8 +354,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
     {
         if (DenyManagement() is { } denied) return denied;
         if (string.IsNullOrWhiteSpace(request.CountryCode) || request.CountryCode.Length != 2 || request.FiscalYearStartMonth is < 1 or > 12 ||
-            string.IsNullOrWhiteSpace(request.FunctionalCurrency) || request.FunctionalCurrency.Length != 3 ||
-            (request.BaseCurrency is not null && request.BaseCurrency.Length != 3)) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
+            string.IsNullOrWhiteSpace(request.FunctionalCurrency) || request.FunctionalCurrency.Length != 3) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
         using var scope = _db.SystemAccessScope("tenant configuration: set jurisdiction");
         var profile = await _db.JurisdictionProfiles.SingleOrDefaultAsync(x => x.CountryCode == request.CountryCode.ToUpperInvariant() && x.IsActive, ct);
         if (profile is null) return BadRequest(new { error = "The jurisdiction is not in the configured country catalogue." });
@@ -398,7 +370,6 @@ public sealed class OrganisationManagementController : ApiControllerBase
         row.IsPrimary = request.IsPrimary;
         row.ConfigurationStatus = "PendingStatutoryReview";
         targetCompany.FunctionalCurrency = row.FunctionalCurrency;
-        targetCompany.BaseCurrency = (request.BaseCurrency ?? profile.DefaultCurrency).ToUpperInvariant();
         targetCompany.FiscalYearStartMonth = row.FiscalYearStartMonth;
         if (!string.IsNullOrWhiteSpace(request.Timezone)) targetCompany.Timezone = request.Timezone;
         if (request.IsPrimary)
@@ -476,5 +447,5 @@ public sealed record AssignBranchRequest(Guid? BranchId);
 public sealed record AddCompanyMemberRequest(Guid UserId, Guid RoleId);
 public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
-    string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null, string? BaseCurrency = null);
+    string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null);
 public sealed record UpdateOnboardingRequest(string[] CompletedSteps, Guid? DeploymentProfileId = null, bool Completed = false);

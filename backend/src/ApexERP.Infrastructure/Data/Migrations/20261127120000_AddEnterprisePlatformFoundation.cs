@@ -108,6 +108,21 @@ CREATE TABLE "TenantSlaIncidents" (
  "CreatedAt" timestamptz NOT NULL, "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
 CREATE UNIQUE INDEX "IX_TenantSlaIncidents_TenantId_IncidentNumber" ON "TenantSlaIncidents" ("TenantId","IncidentNumber");
 CREATE INDEX "IX_TenantSlaIncidents_TenantId_Status_OpenedAt" ON "TenantSlaIncidents" ("TenantId","Status","OpenedAt");
+CREATE INDEX "IX_OrganisationalBranches_ParentBranchId" ON "OrganisationalBranches" ("ParentBranchId");
+CREATE INDEX "IX_CompanyMemberships_RoleId" ON "CompanyMemberships" ("RoleId");
+CREATE INDEX "IX_TenantSubscriptions_PlanId" ON "TenantSubscriptions" ("PlanId");
+CREATE INDEX "IX_TenantJurisdictions_CompanyId" ON "TenantJurisdictions" ("CompanyId");
+CREATE INDEX "IX_TenantJurisdictions_CountryCode" ON "TenantJurisdictions" ("CountryCode");
+CREATE INDEX "IX_TenantOnboardings_DeploymentProfileId" ON "TenantOnboardings" ("DeploymentProfileId");
+CREATE INDEX "IX_TenantAdministratorInvitations_AcceptedUserId" ON "TenantAdministratorInvitations" ("AcceptedUserId");
+CREATE INDEX "IX_TenantAdministratorInvitations_CompanyId" ON "TenantAdministratorInvitations" ("CompanyId");
+CREATE INDEX "IX_TenantAdministratorInvitations_TenantId" ON "TenantAdministratorInvitations" ("TenantId");
+CREATE INDEX "IX_CompanyUserInvitations_AcceptedUserId" ON "CompanyUserInvitations" ("AcceptedUserId");
+CREATE INDEX "IX_CompanyUserInvitations_CompanyId" ON "CompanyUserInvitations" ("CompanyId");
+CREATE INDEX "IX_CompanyUserInvitations_InvitedBy" ON "CompanyUserInvitations" ("InvitedBy");
+CREATE INDEX "IX_CompanyUserInvitations_RoleId" ON "CompanyUserInvitations" ("RoleId");
+CREATE INDEX "IX_Departments_BranchId" ON "Departments" ("BranchId");
+CREATE INDEX "IX_CostCentres_BranchId" ON "CostCentres" ("BranchId");
 ALTER TABLE "OrganisationalBranches" ADD CONSTRAINT "FK_OrganisationalBranches_Companies_CompanyId"
  FOREIGN KEY ("CompanyId") REFERENCES "Companies" ("Id") ON DELETE RESTRICT;
 ALTER TABLE "OrganisationalBranches" ADD CONSTRAINT "FK_OrganisationalBranches_OrganisationalBranches_ParentBranchId"
@@ -216,6 +231,21 @@ ON CONFLICT ("Code") DO NOTHING;
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("""
+DROP INDEX IF EXISTS "IX_CostCentres_BranchId";
+DROP INDEX IF EXISTS "IX_Departments_BranchId";
+DROP INDEX IF EXISTS "IX_CompanyUserInvitations_RoleId";
+DROP INDEX IF EXISTS "IX_CompanyUserInvitations_InvitedBy";
+DROP INDEX IF EXISTS "IX_CompanyUserInvitations_CompanyId";
+DROP INDEX IF EXISTS "IX_CompanyUserInvitations_AcceptedUserId";
+DROP INDEX IF EXISTS "IX_TenantAdministratorInvitations_TenantId";
+DROP INDEX IF EXISTS "IX_TenantAdministratorInvitations_CompanyId";
+DROP INDEX IF EXISTS "IX_TenantAdministratorInvitations_AcceptedUserId";
+DROP INDEX IF EXISTS "IX_TenantOnboardings_DeploymentProfileId";
+DROP INDEX IF EXISTS "IX_TenantJurisdictions_CountryCode";
+DROP INDEX IF EXISTS "IX_TenantJurisdictions_CompanyId";
+DROP INDEX IF EXISTS "IX_TenantSubscriptions_PlanId";
+DROP INDEX IF EXISTS "IX_CompanyMemberships_RoleId";
+DROP INDEX IF EXISTS "IX_OrganisationalBranches_ParentBranchId";
 DROP TABLE IF EXISTS "TenantSlaIncidents";
 DROP TABLE IF EXISTS "TenantSlaPolicies";
 DROP INDEX IF EXISTS "IX_Departments_CompanyId_BranchId";

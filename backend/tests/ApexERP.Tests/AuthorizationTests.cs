@@ -261,10 +261,12 @@ namespace ApexERP.Tests
         {
             var anonymousActions = Descriptors().Where(Anonymous).ToList();
             var controllers = anonymousActions.Select(d => d.ControllerTypeInfo.AsType()).Distinct().OrderBy(t => t.Name).ToList();
-            Assert.Equal(new[] { typeof(AuthController), typeof(IntegrationsController) }, controllers);
-            // On the integrations controller exactly one action is open: the signature-verified provider webhook.
+            Assert.Equal(new[] { typeof(AuthController), typeof(IntegrationsController), typeof(PlatformAdministrationController) }, controllers);
+            // Public endpoints are limited to credential/onboarding flows and the signature-verified provider webhook.
             Assert.Equal(new[] { nameof(IntegrationsController.Webhook) },
                 anonymousActions.Where(d => d.ControllerTypeInfo.AsType() == typeof(IntegrationsController)).Select(d => d.ActionName).ToArray());
+            Assert.Equal(new[] { "AcceptAdministratorInvitation", "LifecycleJobCallback" },
+                anonymousActions.Where(d => d.ControllerTypeInfo.AsType() == typeof(PlatformAdministrationController)).Select(d => d.ActionName).OrderBy(n => n).ToArray());
         }
 
         [Fact]
@@ -310,7 +312,24 @@ namespace ApexERP.Tests
                 .Select(d => $"{d.ControllerName}.{d.ActionName}")
                 .OrderBy(n => n)
                 .ToList();
-            Assert.Equal(new[] { "Workflow.GetPending" }, selfService);
+            Assert.Contains("Workflow.GetPending", selfService);
+            Assert.Contains("Auth.MyCompanies", selfService);
+            Assert.Contains("Auth.SwitchCompany", selfService);
+            // Organisation management is tenant-authenticated; its mutating actions enforce CanManage
+            // and its read/self-service actions expose only tenant-scoped data.
+            Assert.NotNull(typeof(OrganisationManagementController).GetCustomAttribute<AuthorizeAttribute>());
+
+            // Platform endpoints use a separate token issuer and policy. The marker must never turn
+            // platform administration into an ordinary tenant-authenticated controller.
+            var platformPolicy = typeof(PlatformAdministrationController).GetCustomAttributes<AuthorizeAttribute>().Single();
+            Assert.Equal("PlatformBearer", platformPolicy.AuthenticationSchemes);
+            Assert.Equal("PlatformAdmin", platformPolicy.Policy);
+
+            Assert.All(selfService, n => Assert.True(
+                n is "Workflow.GetPending" or "Auth.MyCompanies" or "Auth.SwitchCompany" ||
+                n.StartsWith("OrganisationManagement.", StringComparison.Ordinal) ||
+                n.StartsWith("PlatformAdministration.", StringComparison.Ordinal),
+                "Unexpected authenticated-only action: " + n));
         }
 
         private static string Permission(ControllerActionDescriptor d) =>

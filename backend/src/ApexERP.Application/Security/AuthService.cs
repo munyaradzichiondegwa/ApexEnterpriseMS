@@ -183,7 +183,7 @@ namespace ApexERP.Application.Security
             Guid? familyId = null, CancellationToken ct = default)
         {
             using var systemAccess = _db.SystemAccessScope("authentication: validate company membership and switch context");
-            var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == userId && x.IsActive, ct);
+            var user = await _db.Users.IgnoreQueryFilters().Include(x => x.Role).FirstOrDefaultAsync(x => x.Id == userId && x.IsActive, ct);
             if (user is null) throw new UnauthorizedAccessException("User is inactive or unavailable.");
             Guid? roleId = null;
             if (user.CompanyId != companyId)
@@ -206,7 +206,6 @@ namespace ApexERP.Application.Security
                 !await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == targetTenant.Value && x.IsActive, ct))
                 throw new UnauthorizedAccessException("Company access must remain within the user's active tenant.");
 
-            user.Role = null;
             return await IssueTokensAsync(user, ip, familyId, ct, companyId, roleId);
         }
 
@@ -253,7 +252,6 @@ namespace ApexERP.Application.Security
 
         public async Task RevokeAllForUserAsync(Guid userId, string reason, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: revoke every company session for user");
             var live = await _db.RefreshTokens.IgnoreQueryFilters().Where(t => t.UserId == userId && t.RevokedAt == null).ToListAsync(ct);
             foreach (var t in live) { t.RevokedAt = DateTime.UtcNow; t.RevokedReason = reason; }
             await _db.SaveChangesAsync(ct);
@@ -271,7 +269,6 @@ namespace ApexERP.Application.Security
         // ---------------------------------------------------------------------------------------------
         public async Task ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: change authenticated user's password");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (!VerifyPassword(currentPassword ?? "", user.PasswordHash)) throw new UnauthorizedAccessException("The current password is not correct.");
             var problem = PasswordPolicy.Validate(newPassword, user.Email);
@@ -284,7 +281,6 @@ namespace ApexERP.Application.Security
 
         public async Task<MfaSetup> BeginMfaSetupAsync(Guid userId, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: begin authenticated user's MFA setup");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (user.TotpEnabled) throw new InvalidOperationException("Two-step verification is already on. Turn it off first to enrol a new device.");
             var secret = Totp.GenerateSecret();
@@ -296,7 +292,6 @@ namespace ApexERP.Application.Security
         /// <summary>Confirms the first code from the authenticator app, turns MFA on and returns one-time recovery codes (shown once).</summary>
         public async Task<IReadOnlyList<string>> ConfirmMfaAsync(Guid userId, string code, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: confirm authenticated user's MFA setup");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (user.TotpSecret == null) throw new InvalidOperationException("Start MFA setup first.");
             if (!Totp.Verify(_protector.Unprotect(user.TotpSecret), code, DateTime.UtcNow)) throw new InvalidOperationException("That code is not valid. Check the time on your phone and try again.");
@@ -311,7 +306,6 @@ namespace ApexERP.Application.Security
 
         public async Task DisableMfaAsync(Guid userId, string password, string code, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: disable authenticated user's MFA");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (!VerifyPassword(password ?? "", user.PasswordHash)) throw new UnauthorizedAccessException("The password is not correct.");
             if (user.TotpEnabled && !await VerifySecondFactorAsync(user, code ?? "", DateTime.UtcNow, ct)) throw new UnauthorizedAccessException("The verification code is not valid.");
