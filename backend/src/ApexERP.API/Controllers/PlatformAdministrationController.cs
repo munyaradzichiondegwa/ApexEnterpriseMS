@@ -140,7 +140,7 @@ public sealed class PlatformAdministrationController : ControllerBase
     public async Task<IActionResult> ChangeSubscription(Guid tenantId, Guid subscriptionId,
         [FromBody] SubscriptionLifecycleRequest request, CancellationToken ct)
     {
-        var allowed = new[] { "Active", "Suspended", "Cancelled" };
+        var allowed = new[] { "Trial", "Active", "Suspended", "Cancelled" };
         if (!allowed.Contains(request.Status, StringComparer.Ordinal))
             return BadRequest(new { error = "Status must be Active, Suspended or Cancelled." });
         using var scope = _db.SystemAccessScope("platform admin: change subscription lifecycle");
@@ -150,6 +150,8 @@ public sealed class PlatformAdministrationController : ControllerBase
         sub.Status = request.Status;
         sub.SuspendedAt = request.Status == "Suspended" ? DateTime.UtcNow : null;
         sub.CancelledAt = request.Status == "Cancelled" ? DateTime.UtcNow : null;
+        if (request.PeriodEndsAt.HasValue) sub.CurrentPeriodEndsAt = request.PeriodEndsAt.Value;
+        if (request.Status == "Trial" && !sub.TrialEndsAt.HasValue) sub.TrialEndsAt = request.PeriodEndsAt ?? DateTime.UtcNow.AddDays(30);
         await _db.SaveChangesAsync(ct);
         await AuditAsync("subscription.status-changed", "TenantSubscription", sub.Id.ToString(),
             new { status = sub.Status }, ct);
@@ -204,6 +206,149 @@ public sealed class PlatformAdministrationController : ControllerBase
             tenantId = invitation.TenantId, companyId = invitation.CompanyId, role = login.Role, permissions = login.Permissions });
     }
 
+
+    [HttpGet("tenants")]
+    public async Task<IActionResult> Tenants([FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+    {
+        page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 200);
+        using var scope = _db.SystemAccessScope("platform admin: list customer tenants");
+        var total = await _db.CustomerOrganisations.IgnoreQueryFilters().CountAsync(ct);
+        var rows = await _db.CustomerOrganisations.IgnoreQueryFilters().AsNoTracking().OrderBy(x => x.Name)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(x => new { x.Id, x.Name, x.LegalName, x.IsActive, CompanyCount = x.Companies.Count })
+            .ToListAsync(ct);
+        return Ok(new { page, pageSize, total, items = rows });
+    }
+
+    [HttpGet("deployment-profiles")]
+    public async Task<IActionResult> PlatformDeploymentProfiles(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("platform admin: list deployment templates");
+        return Ok(await _db.DeploymentProfiles.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct));
+    }
+
+    [HttpPost("deployment-profiles")]
+    public async Task<IActionResult> CreateDeploymentProfile([FromBody] DeploymentProfileRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) ||
+            string.IsNullOrWhiteSpace(request.Sector)) return BadRequest(new { error = "Code, name and sector are required." });
+        try { using var _ = System.Text.Json.JsonDocument.Parse(request.ConfigurationJson ?? "{}"); }
+        catch { return BadRequest(new { error = "ConfigurationJson must be valid JSON." }); }
+        using var scope = _db.SystemAccessScope("platform admin: create deployment template");
+        var code = request.Code.Trim().ToUpperInvariant();
+        if (await _db.DeploymentProfiles.AnyAsync(x => x.Code == code, ct)) return Conflict();
+        var row = new DeploymentProfile { Code = code, Name = request.Name.Trim(), Sector = request.Sector.Trim().ToUpperInvariant(),
+            ConfigurationJson = request.ConfigurationJson ?? "{}", IsActive = true };
+        _db.DeploymentProfiles.Add(row);
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("deployment-profile.created", "DeploymentProfile", row.Id.ToString(), null, ct);
+        return Created($"/api/platform/deployment-profiles/{row.Id}", new { row.Id, row.Code });
+    }
+
+    [HttpGet("jurisdictions")]
+    public async Task<IActionResult> PlatformJurisdictions(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("platform admin: list jurisdiction catalogue");
+        return Ok(await _db.JurisdictionProfiles.AsNoTracking().OrderBy(x => x.CountryName).ToListAsync(ct));
+    }
+
+    [HttpPost("jurisdictions")]
+    public async Task<IActionResult> CreateJurisdiction([FromBody] JurisdictionProfileRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.CountryCode) || request.CountryCode.Trim().Length != 2 ||
+            string.IsNullOrWhiteSpace(request.CountryName) || string.IsNullOrWhiteSpace(request.DefaultCurrency) ||
+            request.DefaultCurrency.Trim().Length != 3)
+            return BadRequest(new { error = "ISO country code, country name and ISO currency are required." });
+        using var scope = _db.SystemAccessScope("platform admin: register jurisdiction defaults");
+        var code = request.CountryCode.Trim().ToUpperInvariant();
+        if (await _db.JurisdictionProfiles.AnyAsync(x => x.CountryCode == code, ct)) return Conflict();
+        var row = new JurisdictionProfile { CountryCode = code, CountryName = request.CountryName.Trim(),
+            DefaultCurrency = request.DefaultCurrency.Trim().ToUpperInvariant(), DefaultTimeZone = request.DefaultTimeZone ?? "UTC",
+            DefaultReportingFramework = request.DefaultReportingFramework ?? "IFRS", IsActive = true };
+        _db.JurisdictionProfiles.Add(row);
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("jurisdiction-profile.created", "JurisdictionProfile", row.Id.ToString(), null, ct);
+        return Created($"/api/platform/jurisdictions/{row.Id}", new { row.Id, row.CountryCode });
+    }
+
+    [HttpPost("tenants/{tenantId:guid}/support-grants")]
+    public async Task<IActionResult> RequestSupportGrant(Guid tenantId, [FromBody] SupportGrantRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.DurationMinutes is < 5 or > 240)
+            return BadRequest(new { error = "A reason and duration between 5 and 240 minutes are required." });
+        using var scope = _db.SystemAccessScope("platform admin: request time-limited customer support access");
+        if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
+        var actor = CurrentActorId();
+        var grant = new TenantSupportGrant { TenantId = tenantId, RequestedBy = actor, Reason = request.Reason.Trim(),
+            Status = "PendingApproval", ExpiresAt = DateTime.UtcNow.AddMinutes(request.DurationMinutes) };
+        _db.TenantSupportGrants.Add(grant);
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("support-grant.requested", "TenantSupportGrant", grant.Id.ToString(), new { request.DurationMinutes }, ct);
+        return Created($"/api/platform/tenants/{tenantId}/support-grants/{grant.Id}", new { grant.Id, grant.Status, grant.ExpiresAt });
+    }
+
+    [HttpPost("support-grants/{grantId:guid}/approve")]
+    public async Task<IActionResult> ApproveSupportGrant(Guid grantId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("platform admin: approve customer support access");
+        var grant = await _db.TenantSupportGrants.SingleOrDefaultAsync(x => x.Id == grantId, ct);
+        if (grant is null) return NotFound();
+        var actor = CurrentActorId();
+        if (grant.RequestedBy == actor) return Forbid();
+        if (grant.Status != "PendingApproval" || grant.ExpiresAt <= DateTime.UtcNow) return Conflict(new { error = "Grant is not pending or has expired." });
+        grant.ApprovedBy = actor; grant.Status = "Approved";
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("support-grant.approved", "TenantSupportGrant", grant.Id.ToString(), null, ct);
+        return Ok(new { grant.Id, grant.Status, grant.ExpiresAt });
+    }
+
+    [HttpPost("support-grants/{grantId:guid}/revoke")]
+    public async Task<IActionResult> RevokeSupportGrant(Guid grantId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("platform admin: revoke customer support access");
+        var grant = await _db.TenantSupportGrants.SingleOrDefaultAsync(x => x.Id == grantId, ct);
+        if (grant is null) return NotFound();
+        grant.Status = "Revoked"; grant.RevokedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("support-grant.revoked", "TenantSupportGrant", grant.Id.ToString(), null, ct);
+        return Ok(new { grant.Id, grant.Status });
+    }
+
+    [HttpPost("tenants/{tenantId:guid}/operational-checks")]
+    public async Task<IActionResult> RecordOperationalCheck(Guid tenantId, [FromBody] OperationalCheckRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.CheckCode) || !new[] { "Healthy", "Degraded", "Failed", "Unknown" }.Contains(request.Status))
+            return BadRequest(new { error = "A check code and valid status are required." });
+        using var scope = _db.SystemAccessScope("platform admin: record tenant operational diagnostic");
+        if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
+        var row = new TenantOperationalCheck { TenantId = tenantId, CheckCode = request.CheckCode.Trim(),
+            Status = request.Status, CheckedAt = DateTime.UtcNow, DurationMilliseconds = request.DurationMilliseconds,
+            DetailsJson = request.DetailsJson };
+        _db.TenantOperationalChecks.Add(row);
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("tenant.operational-check.recorded", "TenantOperationalCheck", row.Id.ToString(), new { row.CheckCode, row.Status }, ct);
+        return Ok(row);
+    }
+
+    [HttpPost("tenants/{tenantId:guid}/lifecycle-jobs")]
+    public async Task<IActionResult> QueueLifecycleJob(Guid tenantId, [FromBody] LifecycleJobRequest request, CancellationToken ct)
+    {
+        var types = new[] { "Provision", "Diagnostics", "Backup", "Restore", "Export", "Offboard" };
+        if (!types.Contains(request.JobType) || string.IsNullOrWhiteSpace(request.RequestedBy))
+            return BadRequest(new { error = "A supported job type and requester are required." });
+        using var scope = _db.SystemAccessScope("platform admin: queue tenant lifecycle operation");
+        if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
+        var job = new TenantLifecycleJob { TenantId = tenantId, JobType = request.JobType,
+            RequestedBy = request.RequestedBy.Trim(), Status = "Queued" };
+        _db.TenantLifecycleJobs.Add(job);
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("tenant.lifecycle-job.queued", "TenantLifecycleJob", job.Id.ToString(), new { job.JobType }, ct);
+        return Accepted(new { job.Id, job.Status, job.JobType });
+    }
+
+    private Guid CurrentActorId() => Guid.TryParse(User.FindFirst("sub")?.Value, out var id)
+        ? id : throw new UnauthorizedAccessException("Platform actor identity is missing.");
+
     private async Task AuditAsync(string action, string targetType, string targetId, object? details, CancellationToken ct)
     {
         _db.PlatformAuditEvents.Add(new PlatformAuditEvent
@@ -222,5 +367,10 @@ public sealed record CreatePlanRequest(string Code, string Name, string? Descrip
 public sealed record ProvisionTenantRequest(string OrganisationName, string? LegalName, string InitialCompanyName,
     string AdministratorEmail, Guid PlanId, int TrialDays = 30, int FiscalYearStartMonth = 1,
     string? Currency = "USD", string? TimeZone = "UTC", string? Sector = null);
-public sealed record SubscriptionLifecycleRequest(string Status);
+public sealed record SubscriptionLifecycleRequest(string Status, DateTime? PeriodEndsAt = null);
+public sealed record DeploymentProfileRequest(string Code, string Name, string Sector, string? ConfigurationJson = "{}");
+public sealed record JurisdictionProfileRequest(string CountryCode, string CountryName, string DefaultCurrency, string? DefaultTimeZone = "UTC", string? DefaultReportingFramework = "IFRS");
+public sealed record SupportGrantRequest(string Reason, int DurationMinutes = 60);
+public sealed record OperationalCheckRequest(string CheckCode, string Status, long? DurationMilliseconds = null, string? DetailsJson = null);
+public sealed record LifecycleJobRequest(string JobType, string RequestedBy);
 public sealed record AcceptInvitationRequest(string Token, string Email, string Password, string FirstName, string LastName);
