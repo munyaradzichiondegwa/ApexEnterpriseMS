@@ -27,7 +27,8 @@ public sealed class PlatformAdministrationController : ControllerBase
     private readonly AuthService _auth;
     private readonly IEmailDeliveryService _email;
     private readonly IConfiguration _configuration;
-    public PlatformAdministrationController(ApexErpDbContext db, AuthService auth, IEmailDeliveryService email, IConfiguration configuration) { _db = db; _auth = auth; _email = email; _configuration = configuration; }
+    private readonly IWebHostEnvironment _environment;
+    public PlatformAdministrationController(ApexErpDbContext db, AuthService auth, IEmailDeliveryService email, IConfiguration configuration, IWebHostEnvironment environment) { _db = db; _auth = auth; _email = email; _configuration = configuration; _environment = environment; }
 
     [HttpGet("plans")]
     public async Task<IActionResult> Plans(CancellationToken ct)
@@ -232,8 +233,13 @@ public sealed class PlatformAdministrationController : ControllerBase
         onboarding.CompletedStepsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "tenant-provisioned", "initial-company-created", "initial-administrator-created" });
         await _db.SaveChangesAsync(ct);
         var login = await _auth.IssueTokensAsync(user, HttpContext.Connection.RemoteIpAddress?.ToString(), null, ct);
-        return Ok(new { accessToken = login.AccessToken, expiresAt = login.ExpiresAt, userId = login.UserId,
-            tenantId = invitation.TenantId, companyId = invitation.CompanyId, role = login.Role, permissions = login.Permissions });
+        var sameSite = Enum.TryParse<SameSiteMode>(_configuration["Auth:CookieSameSite"], true, out var mode) ? mode : SameSiteMode.Strict;
+        Response.Cookies.Append(AuthController.RefreshCookie, login.RefreshToken, new CookieOptions
+        {
+            HttpOnly = true, Secure = !_environment.IsDevelopment() || Request.IsHttps, SameSite = sameSite,
+            Expires = DateTimeOffset.UtcNow.Add(AuthService.RefreshLifetime), Path = "/", IsEssential = true
+        });
+        return Ok(_configuration.GetValue("Auth:RefreshTokenCookieOnly", true) ? login with { RefreshToken = string.Empty } : login);
     }
 
 
