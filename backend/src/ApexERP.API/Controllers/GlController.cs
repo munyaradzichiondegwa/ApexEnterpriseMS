@@ -10,7 +10,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ApexERP.API.Controllers
 {
-    public record CreateGlAccountRequest(string Code, string Name, GlAccountType Type, string? SubType, Guid? ParentId, string Currency, bool IsBankAccount, bool IsControlAccount);
+    public record CreateGlAccountRequest(string Code, string Name, GlAccountType Type, string? SubType, Guid? ParentId, string Currency, bool IsBankAccount, bool IsControlAccount, bool IsMonetary = false);
+    public record SetAccountMonetaryRequest(bool IsMonetary);
     public record SetAccountActiveRequest(bool IsActive);
     public record SetPostingRulesRequest(bool IsPostable, string? AllowedSources);
     public record CreateJournalLineRequest(Guid GlAccountId, decimal Debit, decimal Credit, string Currency, decimal ExchangeRate, Guid? CostCentreId, string? Narrative,
@@ -65,7 +66,8 @@ namespace ApexERP.API.Controllers
                 ParentId = req.ParentId,
                 Currency = req.Currency,
                 IsBankAccount = req.IsBankAccount,
-                IsControlAccount = req.IsControlAccount
+                IsControlAccount = req.IsControlAccount,
+                IsMonetary = req.IsMonetary
             };
             _db.GlAccounts.Add(account);
             await _db.SaveChangesAsync();
@@ -74,6 +76,19 @@ namespace ApexERP.API.Controllers
 
         /// <summary>Deactivate (or reactivate) an account. A deactivated account accepts no NEW postings, but its
         /// historical activity still appears in the trial balance and statements.</summary>
+        [HttpPut("accounts/{id}/monetary")]
+        [HasPermission(Permissions.GlAccountsManage)]
+        public async Task<IActionResult> SetAccountMonetary(Guid id, SetAccountMonetaryRequest req)
+        {
+            var account = await _db.GlAccounts.FirstOrDefaultAsync(a => a.Id == id && a.CompanyId == CompanyId);
+            if (account == null) return NotFound();
+            if (req.IsMonetary && account.Type is not (GlAccountType.Asset or GlAccountType.Liability))
+                return BadRequest(new { error = "Only balance-sheet asset or liability accounts can be classified as monetary items." });
+            account.IsMonetary = req.IsMonetary;
+            await _db.SaveChangesAsync();
+            return Ok(account);
+        }
+
         [HttpPut("accounts/{id}/active")]
         [HasPermission(Permissions.GlAccountsManage)]
         public async Task<IActionResult> SetAccountActive(Guid id, SetAccountActiveRequest req)
