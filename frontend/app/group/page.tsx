@@ -189,7 +189,7 @@ export default function GroupPage() {
                 <p className="text-sm text-slate-500">No accounting-period evidence is available.</p>
               ) : (
                 <table className="table-base">
-                  <thead><tr><th>Company</th><th>Financial year</th><th>Period</th><th>Period start</th><th>Period end</th><th>Period end</th><th>Group window</th></tr></thead>
+                  <thead><tr><th>Company</th><th>Financial year</th><th>Period</th><th>Period start</th><th>Period end</th><th>Period end aligned</th><th>Group window</th></tr></thead>
                   <tbody>{consolidated.periodEvidence.map((p: any) => (
                     <tr key={p.companyId}>
                       <td>{p.companyName}</td>
