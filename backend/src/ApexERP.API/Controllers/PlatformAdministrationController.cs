@@ -91,8 +91,10 @@ public sealed class PlatformAdministrationController : ControllerBase
         };
         _db.CustomerOrganisations.Add(tenant);
         _db.Companies.Add(company);
+        await _db.SaveChangesAsync(ct);
         var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "*" }) };
         _db.Roles.Add(adminRole);
+        await _db.SaveChangesAsync(ct);
         _db.TenantSubscriptions.Add(new TenantSubscription
         {
             TenantId = tenant.Id, PlanId = plan.Id, Status = request.TrialDays > 0 ? "Trial" : "Active",
