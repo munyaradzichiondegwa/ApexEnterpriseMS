@@ -5037,6 +5037,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("JournalEntryId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Currency")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("USD");
+
                     b.Property<int>("PeriodMonth")
                         .HasColumnType("integer");
 
