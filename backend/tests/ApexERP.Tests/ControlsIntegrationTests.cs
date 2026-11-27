@@ -157,14 +157,14 @@ namespace ApexERP.Tests
             };
             var subsidiaryRole = new Role
             {
-                CompanyId = subsidiary.Id, Name = "Subsidiary Accountant",
+                CompanyId = subsidiary.Id, TenantId = tenantId, Name = "Subsidiary Accountant",
                 PermissionsJson = "[\"reports.financial.read\"]"
             };
             ctx.Companies.Add(subsidiary);
             ctx.Roles.Add(subsidiaryRole);
             ctx.CompanyMemberships.Add(new CompanyMembership
             {
-                CompanyId = subsidiary.Id, UserId = user.Id, RoleId = subsidiaryRole.Id,
+                CompanyId = subsidiary.Id, TenantId = tenantId, UserId = user.Id, RoleId = subsidiaryRole.Id,
                 MembershipRole = subsidiaryRole.Name, IsActive = true, ValidFrom = DateTime.UtcNow
             });
             await ctx.SaveChangesAsync();
@@ -200,14 +200,14 @@ namespace ApexERP.Tests
             };
             var targetRole = new Role
             {
-                CompanyId = targetCompany.Id, Name = "Subsidiary Accountant",
+                CompanyId = targetCompany.Id, TenantId = tenantId, Name = "Subsidiary Accountant",
                 PermissionsJson = "[\"reports.financial.read\"]"
             };
             ctx.Companies.Add(targetCompany);
             ctx.Roles.Add(targetRole);
             var membership = new CompanyMembership
             {
-                CompanyId = targetCompany.Id, UserId = user.Id, RoleId = targetRole.Id,
+                CompanyId = targetCompany.Id, TenantId = tenantId, UserId = user.Id, RoleId = targetRole.Id,
                 MembershipRole = targetRole.Name, IsActive = true, ValidFrom = DateTime.UtcNow
             };
             ctx.CompanyMemberships.Add(membership);
