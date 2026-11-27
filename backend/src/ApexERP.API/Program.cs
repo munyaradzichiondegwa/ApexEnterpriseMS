@@ -406,33 +406,29 @@ app.Use(async (context, next) =>
 app.UseCors("Frontend");
 app.UseAuthentication();
 
-// ---- Tenant resolution middleware ----
-// The signed tenant_id and company_id claims must describe a real, active
-// company belonging to an active customer organisation. Never trust a tenant
-// identifier supplied in a request header or query string.
+// ---- Tenant and company membership revalidation ----
+// The signed claims are not sufficient by themselves: account deactivation, membership
+// revocation, role changes and tenant suspension must take effect on the next request.
 app.Use(async (context, next) =>
 {
-    if (context.User.Identity?.IsAuthenticated == true)
+    if (context.User.Identity?.IsAuthenticated == true &&
+        context.User.FindFirst("platform_admin")?.Value != "true")
     {
+        var subject = context.User.FindFirst("sub") ??
+                      context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
         if (!Guid.TryParse(context.User.FindFirst("company_id")?.Value, out var companyId) ||
-            !Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId))
+            !Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId) ||
+            !Guid.TryParse(subject?.Value, out var userId) ||
+            !Guid.TryParse(context.User.FindFirst("role_id")?.Value, out var roleId))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
 
         var dbContext = context.RequestServices.GetRequiredService<ApexErpDbContext>();
-        bool tenantIsActive;
-        using (dbContext.SystemAccessScope("tenant resolution: validate signed token identities"))
-        {
-            var companyBelongsToTenant = await dbContext.Companies.IgnoreQueryFilters()
-                .AnyAsync(c => c.Id == companyId && c.TenantId == tenantId && c.IsActive, context.RequestAborted);
-            tenantIsActive = companyBelongsToTenant &&
-                await dbContext.CustomerOrganisations.IgnoreQueryFilters()
-                    .AnyAsync(t => t.Id == tenantId && t.IsActive, context.RequestAborted);
-        }
-
-        if (!tenantIsActive)
+        var valid = await TenantMembershipValidator.IsValidAsync(
+            dbContext, userId, tenantId, companyId, roleId, context.RequestAborted);
+        if (!valid)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
@@ -440,15 +436,8 @@ app.Use(async (context, next) =>
 
         dbContext.CurrentTenantId = tenantId;
         dbContext.CurrentCompanyId = companyId;
+        dbContext.CurrentUserId = userId;
         dbContext.CurrentIpAddress = context.Connection.RemoteIpAddress?.ToString();
-
-        if (Guid.TryParse(
-                (context.User.FindFirst("sub") ??
-                 context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))?.Value,
-                out var userId))
-        {
-            dbContext.CurrentUserId = userId;
-        }
         await TenantSession.RefreshAsync(dbContext, context.RequestAborted);
     }
 

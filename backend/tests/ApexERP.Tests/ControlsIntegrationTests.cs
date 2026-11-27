@@ -143,6 +143,39 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
+        public async Task Tenant_request_validation_rejects_revoked_membership_and_changed_company_role()
+        {
+            await using var db = await TestDb.CreateAsync();
+            await using var context = db.NewContext(null);
+            var auth = new AuthService(context, Secret, "apex");
+            var user = await auth.RegisterCompanyAndAdminAsync("Membership Co", "membership@example.com", "Correct-Horse-9!", "A", "B");
+            var tenantId = await context.Companies.IgnoreQueryFilters()
+                .Where(x => x.Id == user.CompanyId).Select(x => x.TenantId).SingleAsync();
+            var company = new Company { TenantId = tenantId, Name = "Membership Subsidiary", BaseCurrency = "USD", FunctionalCurrency = "USD" };
+            var role = new Role { CompanyId = company.Id, Name = "Subsidiary User", PermissionsJson = "[\\"reports.financial.read\\"]" };
+            var replacementRole = new Role { CompanyId = company.Id, Name = "Replacement User", PermissionsJson = "[\\"reports.financial.read\\"]" };
+            context.Companies.Add(company);
+            context.Roles.AddRange(role, replacementRole);
+            var membership = new CompanyMembership { CompanyId = company.Id, UserId = user.Id, MembershipRole = role.Name, RoleId = role.Id, IsActive = true, ValidFrom = DateTime.UtcNow };
+            context.CompanyMemberships.Add(membership);
+            await context.SaveChangesAsync();
+
+            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId!.Value, user.CompanyId, user.RoleId));
+            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id, role.Id));
+
+            membership.RoleId = replacementRole.Id;
+            membership.MembershipRole = replacementRole.Name;
+            await context.SaveChangesAsync();
+            Assert.False(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id, role.Id));
+            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id, replacementRole.Id));
+
+            membership.IsActive = false;
+            membership.ValidTo = DateTime.UtcNow;
+            await context.SaveChangesAsync();
+            Assert.False(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id, replacementRole.Id));
+        }
+
+        [PostgresFact]
         public async Task Changing_the_password_revokes_sessions_across_all_companies_in_the_same_tenant()
         {
             await using var db = await TestDb.CreateAsync();
