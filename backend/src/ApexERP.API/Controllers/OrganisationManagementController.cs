@@ -289,15 +289,33 @@ public sealed class OrganisationManagementController : ApiControllerBase
     {
         if (DenyManagement() is { } denied) return denied;
         var allowed = new HashSet<string>(StringComparer.Ordinal) { "organisation", "companies", "branches", "members", "jurisdiction", "modules", "workflow", "opening-balances", "review" };
-        if (request.CompletedSteps.Any(x => !allowed.Contains(x))) return BadRequest(new { error = "Unknown onboarding step." });
+        if (request.CompletedSteps is null || request.CompletedSteps.Any(x => !allowed.Contains(x))) return BadRequest(new { error = "Unknown or missing onboarding steps." });
         using var scope = _db.SystemAccessScope("tenant onboarding: update wizard progress");
         var row = await _db.TenantOnboardings.SingleOrDefaultAsync(x => x.TenantId == TenantId, ct);
         if (row is null) return NotFound();
+        if (request.DeploymentProfileId.HasValue && !await _db.DeploymentProfiles.AnyAsync(x => x.Id == request.DeploymentProfileId && x.IsActive, ct))
+            return BadRequest(new { error = "The selected deployment profile is unavailable." });
+        if (request.Completed)
+        {
+            var required = new[] { "organisation", "companies", "jurisdiction", "review" };
+            if (required.Any(x => !request.CompletedSteps.Contains(x)))
+                return BadRequest(new { error = "Organisation, companies, jurisdiction and review steps must be completed." });
+            if (!request.DeploymentProfileId.HasValue)
+                return BadRequest(new { error = "Select a deployment profile before completing onboarding." });
+            var companyIds = await _db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId && x.IsActive).Select(x => x.Id).ToListAsync(ct);
+            if (companyIds.Count == 0) return BadRequest(new { error = "At least one active legal company is required." });
+            var configuredCompanyIds = await _db.TenantJurisdictions.Where(x => x.TenantId == TenantId && x.IsPrimary && x.CompanyId.HasValue)
+                .Select(x => x.CompanyId!.Value).ToListAsync(ct);
+            if (companyIds.Any(x => !configuredCompanyIds.Contains(x)))
+                return BadRequest(new { error = "Every active legal company must have a primary jurisdiction configuration." });
+            var hasAdminMembership = await _db.CompanyMemberships.IgnoreQueryFilters().AnyAsync(x => x.UserId == UserId && x.IsActive &&
+                x.MembershipRole == "Administrator" && companyIds.Contains(x.CompanyId), ct);
+            if (!hasAdminMembership) return BadRequest(new { error = "An active company administrator membership is required." });
+        }
         row.CompletedStepsJson = JsonSerializer.Serialize(request.CompletedSteps.Distinct());
         row.DeploymentProfileId = request.DeploymentProfileId;
         row.Status = request.Completed ? "Completed" : "InProgress";
         row.CompletedAt = request.Completed ? DateTime.UtcNow : null;
-        if (request.Completed && !request.CompletedSteps.Contains("review")) return BadRequest(new { error = "The review step must be completed before finishing onboarding." });
         await _db.SaveChangesAsync(ct);
         return Ok(new { row.Status, row.CompletedStepsJson, row.CompletedAt });
     }
