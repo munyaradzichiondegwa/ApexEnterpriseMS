@@ -47,7 +47,7 @@ These are not hypothetical review comments; each was exposed by an actual GitHub
 | #46006252206 | 254/255 tests passed. The remaining RLS failure showed system bypass could not see company-owned tables that also carry `TenantId`. | Updated generated RLS policies for tables with both `CompanyId` and `TenantId` so explicit `app.rls_bypass = on` bypasses both predicates; normal requests still require both company and tenant match. | Confirm on latest PR #17 head. |
 | #46006584175 | The prior code was tested before the system-bypass correction was present; the run therefore does not verify the correction. | Superseded by the next run. | Use the run for the final head only. |
 
-The latest fully green GitHub Actions verification is run #46014527051 on executable-code commit 7b6418ac916ffa81dfcb7297ec8b8606d014c0d6 (27 November 2026). All three jobs passed: backend build and 261/261 tests; frontend typecheck, tests and production build; and migration drift, clean install, hardening idempotency, least-privilege runtime-role boot, backup/restore and RLS rollback. This run includes request-time tenant membership validation, anonymous-endpoint exemption, tenant capacity locks, public-sector PostgreSQL acceptance tests, AP commitment release by commitment ID, and parent-safe year-end carry-forward. The Vercel commit status remains separately rate-limited for 24 hours and is not a GitHub Actions failure.
+The latest fully green executable-code verification is workflow [#46049897283](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46049897283) on commit `abed068f8b344a878ef9739740b34091e74b9eb9` (27 November 2026). All three jobs passed: backend build and **292/292 unit/PostgreSQL integration tests**; frontend type-check, tests and production build; and migration drift, clean install, hardening scripts, least-privilege runtime-role boot and backup/restore checks. The run includes FX provenance and consolidation CTA coverage, public-sector posted-GL and year-end lapse tests, atomic payment retry and webhook tests, and bounded tenant lifecycle dispatch attempts. The current branch head subsequently adds a same-day FX override precedence correction (calendar effective date takes priority over timestamp) and its regression test; workflow [#46050356711](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46050356711) is validating that final code head. Do not call the latest head green until that run completes. The Vercel commit status remains separate and does not establish live deployment.
 
 ## 4. Subsequent security and capacity hardening
 
@@ -82,13 +82,14 @@ The branch includes:
 
 ## 7. Outstanding release gates
 
-1. GitHub Actions run #46014527051 on executable-code commit 7b6418a passed backend build and 261/261 unit/PostgreSQL integration tests.
-2. The same run passed migration drift, clean install, hardening idempotency, least-privilege runtime-role boot, backup/restore and RLS rollback.
-3. The same run passed frontend typecheck, tests and production build. The external Vercel status is separately rate-limited for 24 hours and remains unverified; it is not a failed GitHub Actions job.
-4. A subsequent documentation-only update refreshes this evidence and the public-sector acceptance register.
-4. Tenant/company isolation and platform-control-plane tests cover all required access boundaries.
-5. The nine architecture pillars and six implementation milestones have traceable code and executable acceptance tests.
-6. Provider-dependent SMTP, billing, operations worker, monitoring, backup infrastructure and statutory packs remain explicitly unverified until deployed and tested.
-7. The legacy company-to-tenant backfill remains a separately approved, evidence-based operation; this branch does not authorise production data changes.
+1. The latest fully green code baseline is workflow #46049897283 on commit `abed068`: backend 292/292 tests, frontend checks/build and migration/restore checks all passed. The current head adds the same-day FX override-by-effective-date correction and regression test; workflow #46050356711 must finish green.
+2. Full PostgreSQL consolidation acceptance remains for reporting-period alignment, elimination reconciliation and indirect NCI across ownership chains. The CTA translation reserve now has a PostgreSQL regression scenario.
+3. Public-sector AP invoice/GRN-to-commitment event linkage and a complete government variance/reporting pack remain open. Fund hierarchy, budget controls, partial/cumulative realisation, posted-GL expenditure, year-end carry-forward and lapse/repeat-close scenarios have PostgreSQL coverage.
+4. Tenant-isolation acceptance remains across all evidence/file routes, exports and background payloads. Evidence has cross-company boundary tests; exports are client-side; no shared application cache has been established in this branch.
+5. Provider-specific EcoCash, OneMoney, PayNow, ZimSwitch and bank protocols plus sandbox certification remain external prerequisites. The current signed-JSON adapter is provider-neutral, not live certification.
+6. The tenant lifecycle dispatcher has stale-lease recovery and a bounded eight-attempt retry policy; production worker deployment, callback monitoring and live recovery acceptance remain unverified.
+7. Legally approved jurisdiction-specific statutory packs remain outstanding. The Zimbabwe 2026 baseline must stay draft-only until full legal schedules and approvals are supplied.
+8. Disaster-recovery acceptance in the target environment remains outstanding: encrypted/off-site backup custody, isolated restore, integrity verification and measured RPO/RTO. CI restore checks are not production RPO/RTO evidence.
+9. Final release review must reconcile the acceptance register, deployment configuration, monitoring and security posture.
 
-**Decision:** PR #17 remains draft and unmerged. The latest fully green run is #46008684875 on 890e167; the current head includes a small follow-up for anonymous endpoints and requires its own fresh green run. A green workflow is necessary but not, by itself, sufficient for release approval.
+**Decision:** PR #17 remains open, draft and unmerged. The base branch `main` remains at `8d8a6f69b48f602430c3536aa868fe46807c483d`; implementation remains isolated to `feature/apexerp-consolidated-enterprise`. Green CI is necessary but is not production deployment, provider certification, legal approval or release authorisation.
