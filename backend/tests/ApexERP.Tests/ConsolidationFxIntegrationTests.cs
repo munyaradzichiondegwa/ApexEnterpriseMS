@@ -276,9 +276,11 @@ public sealed class ConsolidationFxIntegrationTests
 
         var parentPeriod = Assert.Single(result.PeriodEvidence, x => x.CompanyId == parentId);
         Assert.True(parentPeriod.IsPeriodEndAligned);
+        Assert.True(parentPeriod.IsGroupPeriodAligned);
         Assert.Equal("Period end aligned", parentPeriod.Status);
         var subsidiaryPeriod = Assert.Single(result.PeriodEvidence, x => x.CompanyId == subsidiaryId);
         Assert.False(subsidiaryPeriod.IsPeriodEndAligned);
+        Assert.False(subsidiaryPeriod.IsGroupPeriodAligned);
         Assert.Equal(new DateTime(2026, 2, 28), subsidiaryPeriod.PeriodEnd);
         Assert.Equal("Reporting date falls before the period end", subsidiaryPeriod.Status);
     }
