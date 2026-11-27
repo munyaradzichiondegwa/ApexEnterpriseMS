@@ -32,6 +32,14 @@ public sealed class StatutoryPackIntegrationTests
         };
         const string rules = "{ \"withholding\": { \"status\": \"requires-official-verified-values\" } }";
 
+        var invalidSources = new List<StatutoryPackSource>
+        {
+            new("Unknown", "Unverified source", "http://example.gov/act", null, new DateTime(2026, 1, 1))
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CreateDraftAsync(companyId, "ZW", "Zimbabwe", 99, new DateTime(2026, 1, 1),
+                null, rules, invalidSources, Guid.NewGuid()));
+
         var draft = await service.CreateDraftAsync(companyId, "ZW", "Zimbabwe", 1,
             new DateTime(2026, 1, 1), null, rules, sources, Guid.NewGuid());
         Assert.Equal("Draft", draft.Status);
@@ -63,12 +71,4 @@ public sealed class StatutoryPackIntegrationTests
         Assert.Equal(next.Version, (await service.GetApplicableAsync(companyId, "ZW", new DateTime(2027, 1, 1))).Version);
     }
 
-    [Fact]
-    public void Statutory_pack_rejects_non_https_or_unattributed_sources()
-    {
-        // Input validation is exercised by the database-backed service test; this test documents
-        // that no statutory rule can be published without a named source and secure reference.
-        Assert.StartsWith("https://", "https://example.gov/act");
-        Assert.DoesNotStartWith("https://", "http://example.gov/act");
-    }
 }
