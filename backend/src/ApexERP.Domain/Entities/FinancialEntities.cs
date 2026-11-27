@@ -11,6 +11,7 @@ namespace ApexERP.Domain.Entities
         public GlAccountType Type { get; set; }
         public string? SubType { get; set; }
         public Guid? ParentId { get; set; }
+        public Guid? BranchId { get; set; }
         public string Currency { get; set; } = "USD";
         public bool IsActive { get; set; } = true;
         public bool IsBankAccount { get; set; }
