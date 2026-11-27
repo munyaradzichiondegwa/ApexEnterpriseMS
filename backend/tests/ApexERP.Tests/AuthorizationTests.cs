@@ -315,7 +315,16 @@ namespace ApexERP.Tests
             Assert.Contains("Workflow.GetPending", selfService);
             Assert.Contains("Auth.MyCompanies", selfService);
             Assert.Contains("Auth.SwitchCompany", selfService);
-            // Organisation-management actions apply their own tenant-scoped CanManage checks to mutations.
+            // Organisation management is tenant-authenticated; its mutating actions enforce CanManage
+            // and its read/self-service actions expose only tenant-scoped data.
+            Assert.NotNull(typeof(OrganisationManagementController).GetCustomAttribute<AuthorizeAttribute>());
+
+            // Platform endpoints use a separate token issuer and policy. The marker must never turn
+            // platform administration into an ordinary tenant-authenticated controller.
+            var platformPolicy = typeof(PlatformAdministrationController).GetCustomAttributes<AuthorizeAttribute>().Single();
+            Assert.Equal("PlatformBearer", platformPolicy.AuthenticationSchemes);
+            Assert.Equal("PlatformAdmin", platformPolicy.Policy);
+
             Assert.All(selfService, n => Assert.True(
                 n is "Workflow.GetPending" or "Auth.MyCompanies" or "Auth.SwitchCompany" ||
                 n.StartsWith("OrganisationManagement.", StringComparison.Ordinal) ||
