@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -431,7 +432,7 @@ public sealed class StatutoryPackService
                 Currency = currency, EffectiveFrom = document.EffectiveFrom, EffectiveTo = document.EffectiveTo,
                 SourceReference = document.Sources.FirstOrDefault(x => x.Title.Contains(currency, StringComparison.OrdinalIgnoreCase))?.Url
                     ?? document.Sources.First().Url,
-                CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy, ApprovedAt = document.ApprovedAt
+                CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy
             });
         }
 
