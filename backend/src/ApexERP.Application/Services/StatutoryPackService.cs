@@ -479,7 +479,7 @@ public sealed class StatutoryPackService
                 CompanyId = companyId, Code = "CORPORATE_INCOME_TAX", RatePct = corporateRate * 100m,
                 Currency = currency, EffectiveFrom = document.EffectiveFrom, EffectiveTo = document.EffectiveTo,
                 SourceReference = corporateSource.Title + " — " + corporateSource.Url,
-                CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy, ApprovedAt = document.ApprovedAt
+                CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy
             });
         }
 
