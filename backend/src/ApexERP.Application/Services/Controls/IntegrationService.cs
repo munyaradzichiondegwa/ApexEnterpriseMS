@@ -146,34 +146,65 @@ namespace ApexERP.Application.Services
             msg.Attempts++;
             try
             {
-                if (p.Status == "Failed") { msg.Status = "Processed"; msg.LastError = "Provider reported the payment as failed; nothing posted."; }
-                else if (p.Status == "Pending") { msg.Status = "Pending"; msg.NextAttemptAt = null; }
-                else
+                // The receipt, GL journal, invoice allocation and message outcome commit together.
+                // A crash cannot leave a posted receipt with a retryable message that posts it again.
+                await _db.InTransactionAsync(async token =>
                 {
-                    var companyId = msg.CompanyId;
-                    var invoice = await _db.ArInvoices.Where(i => i.CompanyId == companyId && i.InvoiceNo == p.Reference && i.Status != InvoiceStatus.Cancelled && i.Status != InvoiceStatus.Draft).FirstOrDefaultAsync(ct)
-                        ?? throw new InvalidOperationException($"No open invoice with number '{p.Reference}'.");
-                    if (invoice.Currency != p.Currency) throw new InvalidOperationException($"Currency {p.Currency} does not match the invoice currency {invoice.Currency}.");
-                    var apply = Math.Min(p.Amount, invoice.Outstanding);
-                    if (apply <= 0) throw new InvalidOperationException("The invoice is already settled.");
-                    if (!Guid.TryParse(endpoint.SettlementBankGlAccountId, out var bankGl)) throw new InvalidOperationException("No settlement bank account is configured for this integration.");
-                    var arAccountText = await _settings.GetAsync(companyId, "integrations.arControlAccountId", ct);
-                    if (!Guid.TryParse(arAccountText, out var arControl)) throw new InvalidOperationException("Set the company setting integrations.arControlAccountId to the trade debtors account.");
-                    var receipt = await _db.InTransactionAsync(async token =>
-                        await _ar.ReceiveAndAllocateAsync(companyId, invoice.CustomerId, (p.PaidAt ?? DateTime.UtcNow).Date, p.Currency, apply, MethodFor(endpoint.Provider),
-                            $"{endpoint.Provider}:{p.ExternalRef}", bankGl, arControl, new Dictionary<Guid, decimal> { [invoice.Id] = apply }, token), ct);
-                    msg.ResultReceiptId = receipt.Id; msg.Status = "Processed"; msg.LastError = p.Amount > apply ? $"Overpayment of {p.Amount - apply:N2} not applied; refund or allocate manually." : null;
-                }
+                    if (p.Status == "Failed")
+                    {
+                        msg.Status = "Processed";
+                        msg.LastError = "Provider reported the payment as failed; nothing posted.";
+                        msg.NextAttemptAt = null;
+                    }
+                    else if (p.Status == "Pending")
+                    {
+                        msg.Status = "Pending";
+                        msg.NextAttemptAt = null;
+                    }
+                    else
+                    {
+                        var companyId = msg.CompanyId;
+                        var invoice = await _db.ArInvoices
+                            .Where(i => i.CompanyId == companyId && i.InvoiceNo == p.Reference &&
+                                i.Status != InvoiceStatus.Cancelled && i.Status != InvoiceStatus.Draft)
+                            .FirstOrDefaultAsync(token)
+                            ?? throw new InvalidOperationException($"No open invoice with number '{p.Reference}'.");
+                        if (invoice.Currency != p.Currency)
+                            throw new InvalidOperationException($"Currency {p.Currency} does not match the invoice currency {invoice.Currency}.");
+
+                        var apply = Math.Min(p.Amount, invoice.Outstanding);
+                        if (apply <= 0) throw new InvalidOperationException("The invoice is already settled.");
+                        if (!Guid.TryParse(endpoint.SettlementBankGlAccountId, out var bankGl))
+                            throw new InvalidOperationException("No settlement bank account is configured for this integration.");
+                        var arAccountText = await _settings.GetAsync(companyId, "integrations.arControlAccountId", token);
+                        if (!Guid.TryParse(arAccountText, out var arControl))
+                            throw new InvalidOperationException("Set the company setting integrations.arControlAccountId to the trade debtors account.");
+
+                        var receipt = await _ar.ReceiveAndAllocateAsync(companyId, invoice.CustomerId,
+                            (p.PaidAt ?? DateTime.UtcNow).Date, p.Currency, apply, MethodFor(endpoint.Provider),
+                            $"{endpoint.Provider}:{p.ExternalRef}", bankGl, arControl,
+                            new Dictionary<Guid, decimal> { [invoice.Id] = apply }, token);
+                        msg.ResultReceiptId = receipt.Id;
+                        msg.Status = "Processed";
+                        msg.NextAttemptAt = null;
+                        msg.LastError = p.Amount > apply
+                            ? $"Overpayment of {p.Amount - apply:N2} not applied; refund or allocate manually."
+                            : null;
+                    }
+
+                    await _db.SaveChangesAsync(token);
+                    return true;
+                }, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Provider messages are claimed before processing. Persist every failure as retryable
-                // or dead-lettered so an unexpected database/service exception cannot strand a message.
+                // The posting transaction has rolled back. Persist the retry/dead-letter outcome
+                // separately so a failed posting never leaves a half-written ledger transaction.
                 msg.LastError = ex.Message[..Math.Min(ex.Message.Length, 2000)];
                 msg.NextAttemptAt = WebhookSignature.NextAttempt(msg.Attempts - 1, DateTime.UtcNow);
                 msg.Status = msg.NextAttemptAt == null ? "DeadLetter" : "Failed";
+                await _db.SaveChangesAsync(ct);
             }
-            await _db.SaveChangesAsync(ct);
         }
 
         /// <summary>Retries failed messages whose back-off has elapsed. Run by the background scheduler.</summary>
