@@ -61,6 +61,31 @@ public sealed class StatutoryPackService
         }, ct);
     }
 
+    public Task<StatutoryPackDocument> UpdateDraftAsync(Guid companyId, string jurisdictionCode, int version,
+        string rulesJson, IReadOnlyList<StatutoryPackSource> sources, Guid editorId, CancellationToken ct = default)
+    {
+        var code = NormalizeCode(jurisdictionCode);
+        ValidateRules(rulesJson);
+        ValidateSources(sources);
+        return _db.InTransactionAsync(async token =>
+        {
+            await _db.AcquireTransactionLockAsync($"statutory-pack:{companyId:N}:{code}", token);
+            var setting = await _db.CompanySettings.FirstOrDefaultAsync(s => s.CompanyId == companyId && s.Key == Key(code, version), token)
+                ?? throw new InvalidOperationException("Statutory pack not found.");
+            var document = Deserialize(setting.Value);
+            if (document.Status != "Draft")
+                throw new InvalidOperationException("Only a Draft statutory pack can be edited; reviewed or approved packs require a new version.");
+            if (document.CreatedBy != editorId)
+                throw new InvalidOperationException("Only the original preparer may amend a draft statutory pack.");
+            var changed = document with { RulesJson = rulesJson, Sources = sources };
+            setting.Value = JsonSerializer.Serialize(changed);
+            _audit.Record(companyId, editorId, "StatutoryPack.DraftUpdated", "Statutory", nameof(StatutoryPackDocument),
+                Guid.Empty, new { document.Version, document.Status }, new { changed.Version, changed.Status, sourceCount = sources.Count });
+            await _db.SaveChangesAsync(token);
+            return changed;
+        }, ct);
+    }
+
     public Task<StatutoryPackDocument> ReviewAsync(Guid companyId, string jurisdictionCode, int version,
         Guid reviewerId, CancellationToken ct = default) =>
         ChangeAsync(companyId, jurisdictionCode, version, reviewerId, "Draft", "Reviewed",
@@ -90,6 +115,13 @@ public sealed class StatutoryPackService
             if (document.EffectiveTo.HasValue && document.EffectiveTo.Value.Date < document.EffectiveFrom.Date)
                 throw new InvalidOperationException("The statutory pack effective date range is invalid.");
 
+            using (var rulesDocument = JsonDocument.Parse(document.RulesJson))
+            {
+                if (!rulesDocument.RootElement.TryGetProperty("coverage", out var coverage) ||
+                    !string.Equals(coverage.GetString(), "complete", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("A statutory pack marked baseline-only or without complete coverage cannot be published. Complete the missing schedules and update the draft before approval.");
+            }
+
             var existing = await ListCoreAsync(companyId, token);
             // A later effective-dated version supersedes an earlier open-ended version without
             // rewriting the already-published legal record. A new pack cannot be backdated over a
@@ -99,6 +131,7 @@ public sealed class StatutoryPackService
             if (conflicts.Any(x => x.EffectiveFrom.Date >= document.EffectiveFrom.Date))
                 throw new InvalidOperationException("A published pack already takes effect on or after this date. New versions must advance the jurisdiction's effective timeline.");
 
+            await ApplyPayrollRulesAsync(companyId, document, token);
             var published = document with { Status = "Published", PublishedAt = DateTime.UtcNow };
             setting.Value = JsonSerializer.Serialize(published);
             _audit.Record(companyId, publisherId, "StatutoryPack.Published", "Statutory", nameof(StatutoryPackDocument),
@@ -249,6 +282,81 @@ public sealed class StatutoryPackService
             await _db.SaveChangesAsync(token);
             return changed;
         }, ct);
+    }
+
+    private async Task ApplyPayrollRulesAsync(Guid companyId, StatutoryPackDocument document, CancellationToken ct)
+    {
+        using var parsed = JsonDocument.Parse(document.RulesJson);
+        if (!parsed.RootElement.TryGetProperty("paye", out var paye) || paye.ValueKind != JsonValueKind.Object)
+            return;
+        if (!paye.TryGetProperty("aidsLevyRate", out var levyElement))
+            throw new InvalidOperationException("A complete PAYE pack must include the AIDS Levy rate.");
+        var levyRate = levyElement.GetDecimal();
+        if (levyRate is < 0m or > 1m)
+            throw new InvalidOperationException("The AIDS Levy rate must be expressed as a fraction between zero and one.");
+
+        foreach (var currency in new[] { "USD", "ZWG" })
+        {
+            if (!paye.TryGetProperty(currency, out var currencyRules) ||
+                !currencyRules.TryGetProperty("monthly", out var monthly) || monthly.ValueKind != JsonValueKind.Array)
+                throw new InvalidOperationException($"The complete statutory pack is missing monthly PAYE bands for {currency}.");
+
+            var bands = monthly.EnumerateArray().Select(item => new
+            {
+                Lower = item.GetProperty("from").GetDecimal(),
+                Upper = item.GetProperty("to").ValueKind == JsonValueKind.Null ? (decimal?)null : item.GetProperty("to").GetDecimal(),
+                Rate = item.GetProperty("rate").GetDecimal(),
+                Deduct = item.GetProperty("deduction").GetDecimal()
+            }).OrderBy(x => x.Lower).ToList();
+            if (bands.Count == 0 || bands[0].Lower != 0m ||
+                bands.Any(x => x.Lower < 0m || x.Rate is < 0m or > 1m || x.Deduct < 0m ||
+                    (x.Upper.HasValue && x.Upper.Value < x.Lower)) ||
+                bands.Take(bands.Count - 1).Any(x => !x.Upper.HasValue))
+                throw new InvalidOperationException($"PAYE bands for {currency} are incomplete or invalid.");
+
+            if (await _db.PayeTaxBands.AnyAsync(b => b.CompanyId == companyId && b.Currency == currency &&
+                b.EffectiveFrom == document.EffectiveFrom, ct))
+                throw new InvalidOperationException($"PAYE bands for {currency} already exist with this effective date.");
+
+            var previousBands = await _db.PayeTaxBands.Where(b => b.CompanyId == companyId && b.Currency == currency &&
+                b.EffectiveFrom < document.EffectiveFrom && (!b.EffectiveTo.HasValue || b.EffectiveTo >= document.EffectiveFrom)).ToListAsync(ct);
+            foreach (var previous in previousBands)
+                previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
+
+            foreach (var band in bands)
+            {
+                _db.PayeTaxBands.Add(new PayeTaxBand
+                {
+                    CompanyId = companyId, Currency = currency, LowerBound = band.Lower, UpperBound = band.Upper,
+                    Rate = band.Rate, Deduct = band.Deduct, EffectiveFrom = document.EffectiveFrom,
+                    EffectiveTo = document.EffectiveTo, CreatedBy = document.CreatedBy
+                });
+            }
+
+            if (await _db.StatutoryRates.AnyAsync(r => r.CompanyId == companyId && r.Code == "AIDS_LEVY" &&
+                r.Currency == currency && r.EffectiveFrom == document.EffectiveFrom, ct))
+                throw new InvalidOperationException($"An AIDS Levy rate for {currency} already exists with this effective date.");
+
+            var previousLevyRates = await _db.StatutoryRates.Where(r => r.CompanyId == companyId &&
+                r.Code == "AIDS_LEVY" && r.Currency == currency && r.EffectiveFrom < document.EffectiveFrom &&
+                (!r.EffectiveTo.HasValue || r.EffectiveTo >= document.EffectiveFrom)).ToListAsync(ct);
+            foreach (var previous in previousLevyRates)
+                previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
+
+            var source = document.Sources.FirstOrDefault(x => x.Title.Contains(currency, StringComparison.OrdinalIgnoreCase))
+                ?? document.Sources.First();
+            _db.StatutoryRates.Add(new StatutoryRate
+            {
+                CompanyId = companyId, Code = "AIDS_LEVY", RatePct = levyRate * 100m,
+                Currency = currency, EffectiveFrom = document.EffectiveFrom, EffectiveTo = document.EffectiveTo,
+                SourceReference = source.Title + " — " + source.Url,
+                CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy, ApprovedAt = document.ApprovedAt
+            });
+        }
+
+        _audit.Record(companyId, document.ApprovedBy!.Value, "StatutoryPack.PayrollRulesActivated", "Payroll",
+            nameof(StatutoryPackDocument), Guid.Empty, null,
+            new { document.JurisdictionCode, document.Version, currencies = new[] { "USD", "ZWG" } });
     }
 
     private async Task<List<StatutoryPackDocument>> ListCoreAsync(Guid companyId, CancellationToken ct)
