@@ -90,12 +90,16 @@ namespace ApexERP.Application.Services
         public async Task<(int Status, string Message)> ReceiveWebhookAsync(Guid companyId, string provider, string body, string? timestamp, string? signature, CancellationToken ct = default)
         {
             if (body.Length > 64 * 1024) return (413, "Payload too large.");
+            var canonicalProvider = Providers.FirstOrDefault(p =>
+                p.Equals(provider, StringComparison.OrdinalIgnoreCase));
+            if (canonicalProvider == null) return (404, "Unknown integration.");
+
             IntegrationEndpoint? endpoint;
             Guid? tenantId;
             using (_db.SystemAccessScope("webhook: resolve endpoint and owning tenant before signature verification"))
             {
                 endpoint = await _db.IntegrationEndpoints.IgnoreQueryFilters()
-                    .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == provider && e.IsActive, ct);
+                    .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == canonicalProvider && e.IsActive, ct);
                 tenantId = await _db.Companies.IgnoreQueryFilters()
                     .Where(c => c.Id == companyId && c.IsActive && c.TenantId.HasValue &&
                                 c.Tenant != null && c.Tenant.IsActive)
