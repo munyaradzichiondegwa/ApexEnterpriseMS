@@ -228,6 +228,7 @@ namespace ApexERP.Infrastructure.Data
             // Enterprise platform constraints. Platform catalogue/audit rows are deliberately
             // outside tenant query filters and must only be exposed through platform-admin policies.
             modelBuilder.Entity<OrganisationalBranch>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique();
+            modelBuilder.Entity<Department>().Property(x => x.IsActive).HasDefaultValue(true);
             modelBuilder.Entity<Department>().HasIndex(x => new { x.CompanyId, x.BranchId });
             modelBuilder.Entity<CostCentre>().HasIndex(x => new { x.CompanyId, x.BranchId });
             modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.CompanyId, x.UserId }).IsUnique();
