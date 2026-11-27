@@ -350,7 +350,11 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<OrganisationalBranch>(modelBuilder);
             ApplyTenantFilter<CompanyMembership>(modelBuilder);
             ApplyTenantFilter<Role>(modelBuilder);
-            ApplyTenantFilter<User>(modelBuilder);
+            modelBuilder.Entity<User>().HasQueryFilter(u => CurrentCompanyId != null &&
+                (u.CompanyId == CurrentCompanyId || (CurrentUserId != null && CompanyMemberships.Any(m =>
+                    m.UserId == u.Id && m.CompanyId == CurrentCompanyId && m.IsActive &&
+                    (!m.ValidFrom.HasValue || m.ValidFrom <= DateTime.UtcNow) &&
+                    (!m.ValidTo.HasValue || m.ValidTo > DateTime.UtcNow)))));
             ApplyTenantFilter<AuditLogEntry>(modelBuilder);
             ApplyTenantFilter<WorkflowRequest>(modelBuilder);
             ApplyTenantFilter<GlAccount>(modelBuilder);
