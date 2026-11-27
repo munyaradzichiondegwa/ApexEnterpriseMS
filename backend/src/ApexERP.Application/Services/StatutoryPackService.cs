@@ -246,7 +246,7 @@ public sealed class StatutoryPackService
                 "https://www.zimra.co.zw/public-notices?download=4441%3Apublic-notice-07-of-2026-change-of-vat-rate-on-submission-of-return-category-a",
                 new DateTime(2026, 2, 9), new DateTime(2026, 1, 1)),
             new("National Social Security Authority (NSSA)", "Pension and Other Benefits Scheme contribution rates and USD ceiling",
-                "https://www.nssa.org.zw/contributions/", null, new DateTime(2026, 1, 1)),
+                "https://www.nssa.org.zw/contributions/", null, new DateTime(2026, 11, 27)),
             new("National Social Security Authority (NSSA)", "Schedule of insurable earnings",
                 "https://www.nssa.org.zw/scheduleofinsurableearnings/", null, new DateTime(2024, 6, 1))
         };
