@@ -54,7 +54,7 @@ public sealed class ConsolidationIntercompanyIntegrationTests
             {
                 Id = intercompanyAccountId, CompanyId = companyAId, Code = "IC-100",
                 Name = "Due from group company", Type = GlAccountType.Asset, Currency = "USD",
-                IntercompanyCounterpartyCompanyId = companyBId
+                IsIntercompanyAccount = true, IntercompanyCounterpartyCompanyId = companyBId
             },
             new GlAccount
             {
@@ -65,7 +65,7 @@ public sealed class ConsolidationIntercompanyIntegrationTests
             {
                 Id = payableAccountId, CompanyId = companyBId, Code = "IC-100",
                 Name = "Due to group company", Type = GlAccountType.Liability, Currency = "USD",
-                IntercompanyCounterpartyCompanyId = companyAId
+                IsIntercompanyAccount = true, IntercompanyCounterpartyCompanyId = companyAId
             },
             new GlAccount
             {
