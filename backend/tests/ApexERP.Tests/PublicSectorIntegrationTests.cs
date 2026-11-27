@@ -509,5 +509,43 @@ namespace ApexERP.Tests
             Assert.Equal(45m, program.AvailableBudget);
         }
 
+        [PostgresFact]
+        public async Task Year_end_lapse_records_unexpended_appropriation_and_prevents_a_second_close()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var voteId = Guid.NewGuid();
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Lapse Reporting MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = voteId, CompanyId = companyId, Code = "VOTE-LAPSE",
+                    Name = "Health Vote", Level = FundCentreLevel.Vote,
+                    FinancialYear = 2026, AppropriationAmount = 100m
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var result = await service.CloseYearEndAsync(companyId, voteId, carryForward: false);
+
+            Assert.Equal(100m, result.UnexpendedBalance);
+            Assert.Equal(0m, result.CarriedForward);
+            Assert.Equal(100m, result.Lapsed);
+            Assert.Null(result.NewFundCentreId);
+
+            var closed = await ctx.FundCentres.SingleAsync(x => x.Id == voteId);
+            Assert.True(closed.IsClosed);
+            Assert.Equal(100m, closed.LapsedAmount);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CloseYearEndAsync(companyId, voteId, carryForward: false));
+        }
+
     }
 }
