@@ -183,7 +183,7 @@ namespace ApexERP.Application.Security
             Guid? familyId = null, CancellationToken ct = default)
         {
             using var systemAccess = _db.SystemAccessScope("authentication: validate company membership and switch context");
-            var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == userId && x.IsActive, ct);
+            var user = await _db.Users.IgnoreQueryFilters().Include(x => x.Role).FirstOrDefaultAsync(x => x.Id == userId && x.IsActive, ct);
             if (user is null) throw new UnauthorizedAccessException("User is inactive or unavailable.");
             Guid? roleId = null;
             if (user.CompanyId != companyId)
@@ -206,7 +206,6 @@ namespace ApexERP.Application.Security
                 !await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == targetTenant.Value && x.IsActive, ct))
                 throw new UnauthorizedAccessException("Company access must remain within the user's active tenant.");
 
-            user.Role = null;
             return await IssueTokensAsync(user, ip, familyId, ct, companyId, roleId);
         }
 
