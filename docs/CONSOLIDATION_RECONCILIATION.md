@@ -47,7 +47,7 @@ These are not hypothetical review comments; each was exposed by an actual GitHub
 | #46006252206 | 254/255 tests passed. The remaining RLS failure showed system bypass could not see company-owned tables that also carry `TenantId`. | Updated generated RLS policies for tables with both `CompanyId` and `TenantId` so explicit `app.rls_bypass = on` bypasses both predicates; normal requests still require both company and tenant match. | Confirm on latest PR #17 head. |
 | #46006584175 | The prior code was tested before the system-bypass correction was present; the run therefore does not verify the correction. | Superseded by the next run. | Use the run for the final head only. |
 
-The latest fully green GitHub Actions verification is run #46011813050 on code commit c510afb10a9d9e9075a2cdc5a8575ffb7d81c558 (27 November 2026). All three jobs passed: backend build and 257/257 tests; frontend typecheck, tests and production build; and migration drift, clean install, hardening idempotency, least-privilege runtime-role boot, backup/restore and RLS rollback. This run includes the request-time tenant membership validation, anonymous-endpoint exemption, tenant capacity locks, and public-sector commitment hardening changes. A subsequent documentation-only commit updates the public-sector/multinational acceptance register; it does not alter executable code. The final code head is green, while the documentation commit itself has not triggered a new GitHub Actions run.
+The latest fully green GitHub Actions verification is run #46014527051 on executable-code commit 7b6418ac916ffa81dfcb7297ec8b8606d014c0d6 (27 November 2026). All three jobs passed: backend build and 261/261 tests; frontend typecheck, tests and production build; and migration drift, clean install, hardening idempotency, least-privilege runtime-role boot, backup/restore and RLS rollback. This run includes request-time tenant membership validation, anonymous-endpoint exemption, tenant capacity locks, public-sector PostgreSQL acceptance tests, AP commitment release by commitment ID, and parent-safe year-end carry-forward. The Vercel commit status remains separately rate-limited for 24 hours and is not a GitHub Actions failure.
 
 ## 4. Subsequent security and capacity hardening
 
@@ -82,10 +82,10 @@ The branch includes:
 
 ## 7. Outstanding release gates
 
-1. GitHub Actions run #46011813050 on executable code commit c510afb passed backend build and 257/257 unit/PostgreSQL integration tests.
+1. GitHub Actions run #46014527051 on executable-code commit 7b6418a passed backend build and 261/261 unit/PostgreSQL integration tests.
 2. The same run passed migration drift, clean install, hardening idempotency, least-privilege runtime-role boot, backup/restore and RLS rollback.
 3. The same run passed frontend typecheck, tests and production build. The external Vercel status is separately rate-limited for 24 hours and remains unverified; it is not a failed GitHub Actions job.
-4. The later documentation-only acceptance-register update is commit 291bc387; no executable code changed after the green run.
+4. A subsequent documentation-only update refreshes this evidence and the public-sector acceptance register.
 4. Tenant/company isolation and platform-control-plane tests cover all required access boundaries.
 5. The nine architecture pillars and six implementation milestones have traceable code and executable acceptance tests.
 6. Provider-dependent SMTP, billing, operations worker, monitoring, backup infrastructure and statutory packs remain explicitly unverified until deployed and tested.
