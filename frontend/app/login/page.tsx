@@ -73,7 +73,7 @@ export default function LoginPage() {
           </p>
         </form>
       </div>
-      <div className="hidden lg:block">
+      <div className="block">
         <div className="overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-white/10">
           <img
             src="/apexerp-hero.png"
