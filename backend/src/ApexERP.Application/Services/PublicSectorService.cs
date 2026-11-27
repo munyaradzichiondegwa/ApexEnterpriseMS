@@ -151,8 +151,9 @@ namespace ApexERP.Application.Services
                 }
                 _audit.Record(companyId, _db.CurrentUserId, "BudgetCommitment.Realised", "PublicSector",
                     nameof(Commitment), commitment.Id,
-                    new { previousRealised = commitment.RealisedAmount - realisedAmount },
-                    new { realisedAmount, commitment.RealisedAmount, remaining = commitment.Amount - commitment.RealisedAmount });
+                    new { previousRealisedAmount = commitment.RealisedAmount - realisedAmount },
+                    new { invoiceRealisedAmount = realisedAmount, cumulativeRealisedAmount = commitment.RealisedAmount,
+                        remainingCommitmentAmount = commitment.Amount - commitment.RealisedAmount });
                 await _db.SaveChangesAsync(token);
                 return true;
             }, ct);
