@@ -173,7 +173,7 @@ namespace ApexERP.Tests
             var targetRole = new Role
             {
                 CompanyId = targetCompany.Id, Name = "Subsidiary Accountant",
-                PermissionsJson = "[\\"reports.financial.read\\"]"
+                PermissionsJson = "[\"reports.financial.read\"]"
             };
             ctx.Companies.Add(targetCompany);
             ctx.Roles.Add(targetRole);
