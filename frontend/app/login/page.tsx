@@ -38,8 +38,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-brand-900 px-4">
-      <div className="w-full max-w-sm">
+    <div className="min-h-screen flex items-center justify-center bg-brand-900 px-4 py-8">
+      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
         <div className="text-center mb-8">
           <div className="flex justify-center"><BrandMark /></div>
           <div className="text-brand-300 text-sm mt-1">Zimbabwe-first Enterprise Resource Planning</div>
@@ -72,6 +72,16 @@ export default function LoginPage() {
             No account? <Link href="/register" className="text-brand-600 font-medium">Register your company</Link>
           </p>
         </form>
+      </div>
+      <div className="hidden lg:block">
+        <div className="overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-white/10">
+          <img
+            src="/apexerp-hero.png"
+            alt="ApexERP dashboard displayed on a desktop computer in a modern office"
+            className="block w-full h-auto"
+          />
+        </div>
+        <p className="mt-4 text-center text-sm text-brand-200">Integrate. Optimize. Scale.</p>
       </div>
     </div>
   );

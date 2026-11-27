@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { Stat, Section, DataTable, Badge } from "@/components/ui";
 import { fmtMoney, fmtDate } from "@/lib/format";
 import FinancialTrendPanel from "@/components/FinancialTrendPanel";
+import DashboardCharts from "@/components/DashboardCharts";
 
 export default function DashboardPage() {
   const [balanceSheet, setBalanceSheet] = useState<any>(null);
@@ -114,6 +115,8 @@ function ExecutiveDashboard({ exec, error }: { exec: any; error: string | null }
         <Stat label="Net working capital" value={fmtMoney(f.netWorkingCapital)} tone={f.netWorkingCapital < 0 ? "bad" : "good"} />
         <Stat label="VAT payable this month" value={fmtMoney(k.vatOutputThisMonth - k.vatInputThisMonth)} hint={`Withholding tax this month ${fmtMoney(k.withholdingThisMonth)}`} />
       </div>
+      <DashboardCharts financial={f} />
+
       <div className="grid md:grid-cols-2 gap-4 mb-8">
         {([["Receivables ageing", f.receivablesAgeing, "/receivables-controls"], ["Payables ageing", f.payablesAgeing, "/payables-controls"]] as const).map(([title, a, href]) => (
           <Section key={title} title={title}>
