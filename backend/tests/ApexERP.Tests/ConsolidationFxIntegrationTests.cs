@@ -150,6 +150,8 @@ public sealed class ConsolidationFxIntegrationTests
         var cashAccountId = Guid.NewGuid();
         var equityAccountId = Guid.NewGuid();
         var periodId = Guid.NewGuid();
+        var parentPeriodId = Guid.NewGuid();
+        var subsidiaryPeriodId = Guid.NewGuid();
 
         await using (var seed = db.NewContext(null))
         {
@@ -186,12 +188,25 @@ public sealed class ConsolidationFxIntegrationTests
                     Id = equityAccountId, CompanyId = grandchildId, Code = "3000",
                     Name = "Share Capital", Type = GlAccountType.Equity, Currency = "USD"
                 });
-            seed.AccountingPeriods.Add(new AccountingPeriod
-            {
-                Id = periodId, CompanyId = grandchildId, Year = 2026, PeriodNo = 1,
-                StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 2, 1),
-                Status = PeriodStatus.Open
-            });
+            seed.AccountingPeriods.AddRange(
+                new AccountingPeriod
+                {
+                    Id = parentPeriodId, CompanyId = parentId, Year = 2026, PeriodNo = 1,
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 1, 31),
+                    Status = PeriodStatus.Closed
+                },
+                new AccountingPeriod
+                {
+                    Id = subsidiaryPeriodId, CompanyId = subsidiaryId, Year = 2026, PeriodNo = 1,
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 1, 31),
+                    Status = PeriodStatus.Closed
+                },
+                new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = grandchildId, Year = 2026, PeriodNo = 1,
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 1, 31),
+                    Status = PeriodStatus.Closed
+                });
             var journal = new JournalEntry
             {
                 CompanyId = grandchildId, EntryNo = "JE-NCI-001",
@@ -226,6 +241,7 @@ public sealed class ConsolidationFxIntegrationTests
         Assert.Equal(0m, Math.Round(
             result.TotalAssets - result.TotalLiabilities - result.TotalGroupEquity -
             result.TotalNonControllingInterest, 6));
+        Assert.All(result.PeriodEvidence, evidence => Assert.True(evidence.IsGroupPeriodAligned));
     }
 
     [PostgresFact]
