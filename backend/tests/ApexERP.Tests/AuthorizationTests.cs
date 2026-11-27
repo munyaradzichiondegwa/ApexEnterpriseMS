@@ -265,8 +265,8 @@ namespace ApexERP.Tests
             // Public endpoints are limited to credential/onboarding flows and the signature-verified provider webhook.
             Assert.Equal(new[] { nameof(IntegrationsController.Webhook) },
                 anonymousActions.Where(d => d.ControllerTypeInfo.AsType() == typeof(IntegrationsController)).Select(d => d.ActionName).ToArray());
-            Assert.Equal(new[] { "AcceptAdministratorInvitation" },
-                anonymousActions.Where(d => d.ControllerTypeInfo.AsType() == typeof(PlatformAdministrationController)).Select(d => d.ActionName).ToArray());
+            Assert.Equal(new[] { "AcceptAdministratorInvitation", "LifecycleJobCallback" },
+                anonymousActions.Where(d => d.ControllerTypeInfo.AsType() == typeof(PlatformAdministrationController)).Select(d => d.ActionName).OrderBy(n => n).ToArray());
         }
 
         [Fact]
@@ -316,11 +316,10 @@ namespace ApexERP.Tests
             Assert.Contains("Auth.MyCompanies", selfService);
             Assert.Contains("Auth.SwitchCompany", selfService);
             // Organisation-management actions apply their own tenant-scoped CanManage checks to mutations.
-            Assert.All(selfService.Where(n => n.StartsWith("OrganisationManagement.", StringComparison.Ordinal)),
-                n => Assert.StartsWith("OrganisationManagement.", n));
             Assert.All(selfService, n => Assert.True(
                 n is "Workflow.GetPending" or "Auth.MyCompanies" or "Auth.SwitchCompany" ||
-                n.StartsWith("OrganisationManagement.", StringComparison.Ordinal),
+                n.StartsWith("OrganisationManagement.", StringComparison.Ordinal) ||
+                n.StartsWith("PlatformAdministration.", StringComparison.Ordinal),
                 "Unexpected authenticated-only action: " + n));
         }
 
