@@ -247,6 +247,22 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<TenantSlaPolicy>().HasIndex(x => x.TenantId).IsUnique();
             modelBuilder.Entity<TenantSlaIncident>().HasIndex(x => new { x.TenantId, x.IncidentNumber }).IsUnique();
             modelBuilder.Entity<TenantSlaIncident>().HasIndex(x => new { x.TenantId, x.Status, x.OpenedAt });
+            // FK indexes are explicit so the migration, snapshot and production query plan remain aligned.
+            modelBuilder.Entity<OrganisationalBranch>().HasIndex(x => x.ParentBranchId);
+            modelBuilder.Entity<CompanyMembership>().HasIndex(x => x.RoleId);
+            modelBuilder.Entity<TenantSubscription>().HasIndex(x => x.PlanId);
+            modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => x.CompanyId);
+            modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => x.CountryCode);
+            modelBuilder.Entity<TenantOnboarding>().HasIndex(x => x.DeploymentProfileId);
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.AcceptedUserId);
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.CompanyId);
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.TenantId);
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.AcceptedUserId);
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.CompanyId);
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.InvitedBy);
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.RoleId);
+            modelBuilder.Entity<Department>().HasIndex(x => x.BranchId);
+            modelBuilder.Entity<CostCentre>().HasIndex(x => x.BranchId);
             modelBuilder.Entity<TenantSlaPolicy>().Property(x => x.BusinessHoursJson).HasColumnType("jsonb");
             modelBuilder.Entity<PlatformAuditEvent>().HasIndex(x => new { x.TenantId, x.CreatedAt });
             modelBuilder.Entity<OrganisationalBranch>().Property(x => x.Code).HasMaxLength(40);
@@ -256,6 +272,56 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<TenantOnboarding>().Property(x => x.CompletedStepsJson).HasColumnType("jsonb");
             modelBuilder.Entity<PlatformAuditEvent>().Property(x => x.DetailsJson).HasColumnType("jsonb");
             modelBuilder.Entity<TenantOperationalCheck>().Property(x => x.DetailsJson).HasColumnType("jsonb");
+
+            // Explicitly model every FK created by the enterprise platform migration.
+            modelBuilder.Entity<OrganisationalBranch>().HasOne<Company>().WithMany()
+                .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<OrganisationalBranch>().HasOne<OrganisationalBranch>().WithMany()
+                .HasForeignKey(x => x.ParentBranchId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CompanyMembership>().HasOne<Company>().WithMany()
+                .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CompanyMembership>().HasOne<User>().WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CompanyMembership>().HasOne<Role>().WithMany()
+                .HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantSubscription>().HasOne<CustomerOrganisation>().WithMany()
+                .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantSubscription>().HasOne<SubscriptionPlan>().WithMany()
+                .HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantJurisdiction>().HasOne<CustomerOrganisation>().WithMany()
+                .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantJurisdiction>().HasOne<Company>().WithMany()
+                .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantJurisdiction>().HasOne<JurisdictionProfile>().WithMany()
+                .HasForeignKey(x => x.CountryCode).HasPrincipalKey(x => x.CountryCode).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantOnboarding>().HasOne<CustomerOrganisation>().WithMany()
+                .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantOnboarding>().HasOne<DeploymentProfile>().WithMany()
+                .HasForeignKey(x => x.DeploymentProfileId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasOne<CustomerOrganisation>().WithMany()
+                .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasOne<Company>().WithMany()
+                .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasOne<User>().WithMany()
+                .HasForeignKey(x => x.AcceptedUserId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CompanyUserInvitation>().HasOne<CustomerOrganisation>().WithMany()
+                .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CompanyUserInvitation>().HasOne<Company>().WithMany()
+                .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CompanyUserInvitation>().HasOne<Role>().WithMany()
+                .HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CompanyUserInvitation>().HasOne<User>().WithMany()
+                .HasForeignKey(x => x.InvitedBy).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CompanyUserInvitation>().HasOne<User>().WithMany()
+                .HasForeignKey(x => x.AcceptedUserId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<Department>().HasOne<OrganisationalBranch>().WithMany()
+                .HasForeignKey(x => x.BranchId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CostCentre>().HasOne<OrganisationalBranch>().WithMany()
+                .HasForeignKey(x => x.BranchId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantSlaPolicy>().HasOne<CustomerOrganisation>().WithMany()
+                .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<TenantSlaIncident>().HasOne<CustomerOrganisation>().WithMany()
+                .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
 
             // ---- Decimal precision: NUMERIC(20,6) everywhere per PRD Section 5 ----
             // ---- Dates: every DateTime is stored/read as UTC. Npgsql refuses to write a DateTime whose
