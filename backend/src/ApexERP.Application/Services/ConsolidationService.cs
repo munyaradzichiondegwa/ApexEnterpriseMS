@@ -367,12 +367,11 @@ namespace ApexERP.Application.Services
                     .Sum(a => accountBalances[a.Id]);
                 if (signed == 0m) continue;
                 var representative = group.First();
-                var debitNormal = representative.Type is GlAccountType.Asset or GlAccountType.Expense;
-                lines.Add(debitNormal
-                    ? new TrialBalanceLine(representative.Code, representative.Name, representative.Type,
-                        Math.Max(signed, 0m), Math.Max(-signed, 0m))
-                    : new TrialBalanceLine(representative.Code, representative.Name, representative.Type,
-                        Math.Max(-signed, 0m), Math.Max(signed, 0m)));
+                // Account movements are already stored as debit-minus-credit in functional
+                // currency. Preserve that sign when presenting debit/credit columns for every
+                // account type; flipping credit-normal balances here reverses equity/liabilities.
+                lines.Add(new TrialBalanceLine(representative.Code, representative.Name, representative.Type,
+                    Math.Max(signed, 0m), Math.Max(-signed, 0m)));
             }
 
             var evidence = selectedRatesByDate.Select(selection =>
