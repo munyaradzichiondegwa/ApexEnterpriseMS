@@ -90,16 +90,31 @@ namespace ApexERP.Application.Services
         public async Task<(int Status, string Message)> ReceiveWebhookAsync(Guid companyId, string provider, string body, string? timestamp, string? signature, CancellationToken ct = default)
         {
             if (body.Length > 64 * 1024) return (413, "Payload too large.");
-            var endpoint = await _db.IntegrationEndpoints.IgnoreQueryFilters().FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == provider && e.IsActive, ct);
-            if (endpoint == null || !_adapters.TryGetValue(endpoint.Provider, out var adapter)) return (404, "Unknown integration.");
+            IntegrationEndpoint? endpoint;
+            Guid? tenantId;
+            using (_db.SystemAccessScope("webhook: resolve endpoint and owning tenant before signature verification"))
+            {
+                endpoint = await _db.IntegrationEndpoints.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == provider && e.IsActive, ct);
+                tenantId = await _db.Companies.IgnoreQueryFilters()
+                    .Where(c => c.Id == companyId && c.IsActive && c.TenantId.HasValue &&
+                                c.Tenant != null && c.Tenant.IsActive)
+                    .Select(c => c.TenantId)
+                    .SingleOrDefaultAsync(ct);
+            }
+            if (endpoint == null || !tenantId.HasValue || !_adapters.TryGetValue(endpoint.Provider, out var adapter))
+                return (404, "Unknown integration.");
             var secret = _secretResolver(endpoint.SecretName);
             if (string.IsNullOrEmpty(secret)) return (503, "Integration is not configured.");
 
             if (!adapter.VerifySignature(secret, timestamp, body, signature, DateTime.UtcNow))
-                return (401, "Invalid signature.");          // the API logs the rejection; this request's transaction rolls back, so nothing is written here
+                return (401, "Invalid signature.");          // no tenant data is read or written after an invalid signature
 
-            // The signature proves the message came from this company's provider, so work may now proceed in that company's context.
+            // The signature proves the message came from this company's provider. Stamp both identities
+            // and remove the temporary system bypass before touching any business records.
+            _db.CurrentTenantId = tenantId.Value;
             _db.CurrentCompanyId = companyId;
+            await TenantSession.RefreshAsync(_db, ct);
 
             ParsedPayment parsed;
             try { parsed = adapter.Parse(body); }
