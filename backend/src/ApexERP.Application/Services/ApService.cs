@@ -32,6 +32,42 @@ namespace ApexERP.Application.Services
             var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == supplierId && s.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("Supplier not found.");
 
+            if (purchaseOrderId.HasValue)
+            {
+                var purchaseOrder = await _db.PurchaseOrders.FirstOrDefaultAsync(p =>
+                    p.Id == purchaseOrderId.Value && p.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The linked purchase order was not found in this company.");
+                if (purchaseOrder.Status is not (PurchaseOrderStatus.Approved or PurchaseOrderStatus.Partial or PurchaseOrderStatus.Fulfilled))
+                    throw new InvalidOperationException("An AP invoice can only be linked to an approved, partially received or fulfilled purchase order.");
+                if (fundCentreId.HasValue && fundCentreId != purchaseOrder.FundCentreId)
+                    throw new InvalidOperationException("The invoice fund centre does not match its purchase order.");
+                if (grantId.HasValue && grantId != purchaseOrder.GrantId)
+                    throw new InvalidOperationException("The invoice grant does not match its purchase order.");
+
+                fundCentreId ??= purchaseOrder.FundCentreId;
+                grantId ??= purchaseOrder.GrantId;
+                var poCommitment = await _db.Commitments.FirstOrDefaultAsync(c =>
+                    c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrder.Id, ct);
+                if (poCommitment != null)
+                {
+                    if (poCommitment.Status != CommitmentStatus.Active)
+                        throw new InvalidOperationException("The purchase order's budget commitment is no longer active.");
+                    if (poCommitment.FundCentreId != purchaseOrder.FundCentreId)
+                        throw new InvalidOperationException("The purchase order and its budget commitment have inconsistent fund centres.");
+                    if (commitmentId.HasValue && commitmentId != poCommitment.Id)
+                        throw new InvalidOperationException("The supplied commitment does not belong to the linked purchase order.");
+                    commitmentId = poCommitment.Id;
+                }
+                else if (commitmentId.HasValue)
+                {
+                    throw new InvalidOperationException("The supplied budget commitment does not belong to the linked purchase order.");
+                }
+            }
+            else if (commitmentId.HasValue)
+            {
+                throw new InvalidOperationException("A commitment-linked AP invoice must reference its purchase order.");
+            }
+
             if (!string.IsNullOrWhiteSpace(supplierInvoiceNo))
             {
                 // Duplicate control (spec 16): same supplier + same invoice number (ignoring case/punctuation/leading zeros), or same amount and date.
