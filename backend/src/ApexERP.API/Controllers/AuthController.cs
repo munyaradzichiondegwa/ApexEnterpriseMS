@@ -99,6 +99,7 @@ namespace ApexERP.API.Controllers
             return Ok(new
             {
                 userId = (User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))?.Value,
+                tenantId = User.FindFirst("tenant_id")?.Value,
                 companyId = User.FindFirst("company_id")?.Value,
                 email = (User.FindFirst("email") ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email))?.Value,
                 role = (User.FindFirst("role") ?? User.FindFirst(System.Security.Claims.ClaimTypes.Role))?.Value,

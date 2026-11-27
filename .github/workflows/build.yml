@@ -96,8 +96,19 @@ jobs:
         run: |
           for i in 1 2; do psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -q -f backend/database/hardening/001_append_only_guards.sql; done
           for i in 1 2; do psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -q -f backend/database/hardening/002_row_level_security.sql; done
-          psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -q -f backend/database/hardening/002_row_level_security_disable.sql
-      - name: API boots and reports ready
+      - name: Create a least-privilege runtime database role
+        run: |
+          psql -h localhost -U apexerp -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE apex_app LOGIN PASSWORD 'ci_app_only_password' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION"
+          psql -h localhost -U apexerp -d postgres -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE apexerp_ci TO apex_app"
+          psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -c "GRANT USAGE ON SCHEMA public TO apex_app"
+          psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO apex_app"
+          psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -c "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO apex_app"
+          psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -c "GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO apex_app"
+      - name: API boots with RLS and a non-owner runtime role
+        env:
+          ConnectionStrings__Default: "Host=localhost;Port=5432;Database=apexerp_ci;Username=apex_app;Password=ci_app_only_password"
+          Security__RowLevelSecurity__Enabled: "true"
+          Database__ApplyMigrationsOnStartup: "false"
         run: |
           cd backend/src/ApexERP.API
           dotnet run -c Release --urls http://127.0.0.1:8080 > /tmp/api.log 2>&1 &
@@ -108,10 +119,13 @@ jobs:
           cat /tmp/api.log; exit 1
       - name: Backup and restore round-trip
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null
-          export PGHOST=localhost PGUSER=apexerp PGDATABASE=apexerp_ci BACKUP_DIR=/tmp/backups
-          bash scripts/backup.sh
-          bash scripts/restore-test.sh
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
+            -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER=apexerp \
+            -e PGPASSWORD=ci_only_password -e PGDATABASE=apexerp_ci -e BACKUP_DIR=/tmp/backups \
+            postgres:16-alpine sh -c "apk add --no-cache bash coreutils >/dev/null && bash scripts/backup.sh && bash scripts/restore-test.sh"
+      - name: Verify RLS rollback script
+        run: psql -h localhost -U apexerp -d apexerp_ci -v ON_ERROR_STOP=1 -q -f backend/database/hardening/002_row_level_security_disable.sql
 
   frontend:
     name: Frontend (typecheck, tests, build)

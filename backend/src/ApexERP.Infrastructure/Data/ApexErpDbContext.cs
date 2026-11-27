@@ -6,19 +6,22 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ApexERP.Infrastructure.Data
 {
     /// <summary>
-    /// Central EF Core context. Multi-tenancy is enforced with global query filters keyed off
-    /// CurrentCompanyId (set per-request by the tenant middleware from the JWT's company_id claim) ---
-    /// this is the application-level equivalent of the PostgreSQL RLS policies called for in the PRD.
+    /// Central EF Core context. Multi-tenancy is enforced with two layers of global query filters:
+    /// CurrentTenantId scopes customer organisations and legal companies; CurrentCompanyId scopes
+    /// company-owned business records. Both identities are resolved from the signed access token.
     ///
-    /// The filters FAIL CLOSED: when CurrentCompanyId is null a tenant-scoped query returns no rows
-    /// (audit finding 9). Code that legitimately works across tenants (sign-in, registration,
-    /// inter-company posting, consolidation, document numbering) must opt in explicitly with
-    /// IgnoreQueryFilters() AND filter by CompanyId itself.
+    /// The filters FAIL CLOSED when either required identity is missing. Code that legitimately
+    /// operates across companies must use IgnoreQueryFilters() with explicit company predicates and
+    /// a narrowly scoped CrossTenantScope or SystemAccessScope when PostgreSQL RLS is enabled.
+    /// IgnoreQueryFilters() alone never bypasses database-level RLS.
     /// </summary>
     public class ApexErpDbContext : DbContext
     {
         /// <summary>Resolved once per request from the authenticated user's JWT claims.</summary>
         public Guid? CurrentCompanyId { get; set; }
+
+        /// <summary>Customer organisation (tenant) resolved from the signed access token.</summary>
+        public Guid? CurrentTenantId { get; set; }
 
         /// <summary>The signed-in user for this request (from the JWT "sub" claim). Used to stamp
         /// CreatedBy/UpdatedBy on every saved row, which segregation-of-duties checks rely on.</summary>
@@ -32,9 +35,16 @@ namespace ApexERP.Infrastructure.Data
         /// inter-company postings). With row-level security enabled this is what lets the database allow it.</summary>
         public bool AllowCrossTenant { get; set; }
 
+        /// <summary>True only inside an explicitly named platform/system operation (authentication, tenant resolution,
+        /// webhook verification, or background-job discovery). A missing company identity alone never grants RLS bypass.</summary>
+        internal bool AllowSystemAccess { get; set; }
+
+        internal string? SystemAccessReason { get; set; }
+
         public ApexErpDbContext(DbContextOptions<ApexErpDbContext> options) : base(options) { }
 
         // Core / tenancy
+        public DbSet<CustomerOrganisation> CustomerOrganisations => Set<CustomerOrganisation>();
         public DbSet<Company> Companies => Set<Company>();
         public DbSet<Role> Roles => Set<Role>();
         public DbSet<User> Users => Set<User>();
@@ -180,6 +190,22 @@ namespace ApexERP.Infrastructure.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            // Customer organisation (tenant) owns one or more legal entities (companies).
+            // Restrict delete so tenant removal cannot cascade into accounting records.
+            modelBuilder.Entity<CustomerOrganisation>()
+                .HasMany(t => t.Companies)
+                .WithOne(c => c.Tenant)
+                .HasForeignKey(c => c.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CustomerOrganisation>()
+                .HasIndex(t => t.RegistrationNumber);
+            modelBuilder.Entity<Company>()
+                .HasIndex(c => c.TenantId);
+            modelBuilder.Entity<CustomerOrganisation>()
+                .HasQueryFilter(t => CurrentTenantId != null && t.Id == CurrentTenantId);
+            modelBuilder.Entity<Company>()
+                .HasQueryFilter(c => CurrentTenantId != null && c.TenantId == CurrentTenantId);
 
             // ---- Decimal precision: NUMERIC(20,6) everywhere per PRD Section 5 ----
             // ---- Dates: every DateTime is stored/read as UTC. Npgsql refuses to write a DateTime whose

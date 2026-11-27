@@ -4,9 +4,28 @@ using ApexERP.Domain.Common;
 
 namespace ApexERP.Domain.Entities
 {
+    /// <summary>
+    /// A customer organisation is the commercial or public-sector customer that contracts
+    /// for ApexERP. It is the tenant boundary; a Company is a legal entity owned by this
+    /// organisation. TenantId remains nullable only during the staged legacy-data backfill.
+    /// It must be made required by the follow-up migration after every existing company is assigned.
+    /// </summary>
+    public class CustomerOrganisation : BaseEntity
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? LegalName { get; set; }
+        public string? RegistrationNumber { get; set; }
+        public bool IsActive { get; set; } = true;
+        public ICollection<Company> Companies { get; set; } = new List<Company>();
+    }
+
     /// <summary>The tenant. Every other business table hangs off Company via CompanyId.</summary>
     public class Company : BaseEntity
     {
+        /// <summary>Owning customer organisation (tenant). Nullable only during legacy backfill.</summary>
+        public Guid? TenantId { get; set; }
+        public CustomerOrganisation? Tenant { get; set; }
+
         public string Name { get; set; } = string.Empty;
         public string? RegistrationNo { get; set; }
         public string? VatNo { get; set; }

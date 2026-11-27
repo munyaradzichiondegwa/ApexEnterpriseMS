@@ -23,19 +23,30 @@ namespace ApexERP.Application.Services
     {
         private readonly ApexErpDbContext _db;
         private readonly ReportingService _reporting;
+        private readonly GroupScopeService _scope;
 
-        public ConsolidationService(ApexErpDbContext db, ReportingService reporting)
+        public ConsolidationService(ApexErpDbContext db, ReportingService reporting, GroupScopeService scope)
         {
             _db = db;
             _reporting = reporting;
+            _scope = scope;
         }
 
         /// <summary>Returns every company in the group rooted at parentCompanyId (parent + all
         /// direct and indirect subsidiaries), each with its ownership percentage from its immediate parent.</summary>
         public async Task<List<Company>> GetGroupStructureAsync(Guid parentCompanyId, CancellationToken ct = default)
         {
-            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
-            var all = await _db.Companies.IgnoreQueryFilters().ToListAsync(ct);
+            var callerCompanyId = _db.CurrentCompanyId
+                ?? throw new InvalidOperationException("A company context is required for group consolidation.");
+            var visibleCompanyIds = await _scope.GetVisibleCompanyIdsAsync(callerCompanyId, ct);
+            if (!visibleCompanyIds.Contains(parentCompanyId))
+                throw new InvalidOperationException("Parent company is outside the caller's tenant-scoped group.");
+
+            // Keep the group graph tenant-scoped. Cross-company financial reads are opened only
+            // after this allow-list has been established in ConsolidateAsync.
+            var all = await _db.Companies
+                .Where(c => visibleCompanyIds.Contains(c.Id))
+                .ToListAsync(ct);
             var group = new List<Company>();
             void AddChildren(Guid id)
             {
@@ -55,9 +66,14 @@ namespace ApexERP.Application.Services
 
         public async Task<ConsolidationResult> ConsolidateAsync(Guid parentCompanyId, DateTime asOfDate, CancellationToken ct = default)
         {
-            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
             var group = await GetGroupStructureAsync(parentCompanyId, ct);
+            if (group.Count == 0)
+                throw new InvalidOperationException("The requested group is empty.");
             var subsidiaries = group.Where(c => c.Id != parentCompanyId).ToList();
+
+            // Financial rows are read across legal companies only after the tenant-scoped group
+            // allow-list has been established. Every query below retains an explicit CompanyId predicate.
+            using var crossTenant = _db.CrossTenantScope();
 
             // Aggregate each entity's trial balance line-by-line (by account code, since a well-run
             // group typically shares a common CoA structure across entities; accounts unique to one

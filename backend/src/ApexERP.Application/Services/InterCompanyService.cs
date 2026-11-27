@@ -58,6 +58,19 @@ namespace ApexERP.Application.Services
 
                 var toCompanyId = invoice.Customer?.LinkedCompanyId
                     ?? throw new InvalidOperationException("Customer is not linked to a group company -- not an inter-company transaction.");
+                if (toCompanyId == fromCompanyId)
+                    throw new InvalidOperationException("An inter-company mirror must target a different legal company.");
+
+                // Bilateral customer/supplier links are the consent boundary for this deliberate
+                // cross-tenant workflow. Both legal entities and their owning tenants must still be active.
+                var activePairCount = await _db.Companies.IgnoreQueryFilters()
+                    .Where(c => (c.Id == fromCompanyId || c.Id == toCompanyId) &&
+                                c.IsActive && c.Tenant != null && c.Tenant.IsActive)
+                    .Select(c => c.Id)
+                    .Distinct()
+                    .CountAsync(token);
+                if (activePairCount != 2)
+                    throw new InvalidOperationException("The source or target company, or its customer organisation, is inactive or unassigned.");
 
                 var rule = await _db.InterCompanyRules.IgnoreQueryFilters()
                     .FirstOrDefaultAsync(r => r.CompanyId == fromCompanyId && r.FromCompanyId == fromCompanyId && r.ToCompanyId == toCompanyId && r.IsActive, token)

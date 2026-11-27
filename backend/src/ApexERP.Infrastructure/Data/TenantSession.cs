@@ -1,3 +1,4 @@
+using System.Data;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -6,8 +7,9 @@ namespace ApexERP.Infrastructure.Data
 {
     /// <summary>
     /// Optional PostgreSQL row-level security (APEXERP spec 10.3). When Security:RowLevelSecurity:Enabled is true, every database
-    /// connection is told which company the request belongs to ("app.company_id") and whether it is a system context
-    /// ("app.rls_bypass" = on: sign-in, registration, background scheduling, or an explicit <see cref="CrossTenantScope"/>). The
+    /// connection is told which customer organisation and company the request belongs to ("app.tenant_id" and
+    /// "app.company_id") and whether it is a system context
+    /// ("app.rls_bypass" = on only inside an explicit <see cref="SystemAccessScope"/> or <see cref="CrossTenantScope"/>). The
     /// policies in backend/database/hardening/002_row_level_security.sql then make the database itself refuse rows from other
     /// companies, even if application code forgot a filter. Off by default; the application-level query filters always apply.
     /// </summary>
@@ -15,26 +17,49 @@ namespace ApexERP.Infrastructure.Data
     {
         public static bool Enabled { get; set; }
 
-        internal static (string CompanyId, string Bypass) ValuesFor(ApexErpDbContext db) =>
-            (db.CurrentCompanyId?.ToString() ?? string.Empty, db.CurrentCompanyId == null || db.AllowCrossTenant ? "on" : "off");
+        internal static (string CompanyId, string TenantId, string Bypass) ValuesFor(ApexErpDbContext db) =>
+            (db.CurrentCompanyId?.ToString() ?? string.Empty,
+             db.CurrentTenantId?.ToString() ?? string.Empty,
+             db.AllowSystemAccess || db.AllowCrossTenant ? "on" : "off");
 
-        public const string Sql = "SELECT set_config('app.company_id', @c, false), set_config('app.rls_bypass', @b, false)";
+        public const string Sql = "SELECT set_config('app.company_id', @c, false), set_config('app.tenant_id', @t, false), set_config('app.rls_bypass', @b, false)";
+
+        // Settings are session-scoped because ordinary read requests are not wrapped in transactions.
+        // The interceptor re-stamps every pooled connection checkout and clears the session before it
+        // is returned to Npgsql's pool, so a previous request's identity or bypass cannot survive reuse.
+        public const string ResetSql = "SELECT set_config('app.company_id', '', false), set_config('app.tenant_id', '', false), set_config('app.rls_bypass', 'off', false)";
+
+        internal static void Clear(DbConnection connection)
+        {
+            if (connection.State != ConnectionState.Open) return;
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = ResetSql;
+            cmd.ExecuteNonQuery();
+        }
+
+        internal static async Task ClearAsync(DbConnection connection)
+        {
+            if (connection.State != ConnectionState.Open) return;
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = ResetSql;
+            await cmd.ExecuteNonQueryAsync();
+        }
 
         internal static void Apply(DbConnection connection, ApexErpDbContext db)
         {
-            var (company, bypass) = ValuesFor(db);
+            var (company, tenant, bypass) = ValuesFor(db);
             using var cmd = connection.CreateCommand();
             cmd.CommandText = Sql;
-            AddParam(cmd, "@c", company); AddParam(cmd, "@b", bypass);
+            AddParam(cmd, "@c", company); AddParam(cmd, "@t", tenant); AddParam(cmd, "@b", bypass);
             cmd.ExecuteNonQuery();
         }
 
         internal static async Task ApplyAsync(DbConnection connection, ApexErpDbContext db, CancellationToken ct)
         {
-            var (company, bypass) = ValuesFor(db);
+            var (company, tenant, bypass) = ValuesFor(db);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = Sql;
-            AddParam(cmd, "@c", company); AddParam(cmd, "@b", bypass);
+            AddParam(cmd, "@c", company); AddParam(cmd, "@t", tenant); AddParam(cmd, "@b", bypass);
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
@@ -47,15 +72,66 @@ namespace ApexERP.Infrastructure.Data
         public static async Task RefreshAsync(ApexErpDbContext db, CancellationToken ct = default)
         {
             if (!Enabled) return;
-            var (company, bypass) = ValuesFor(db);
-            await db.Database.ExecuteSqlRawAsync(Sql.Replace("@c", "{0}").Replace("@b", "{1}"), new object[] { company, bypass }, ct);
+            var (company, tenant, bypass) = ValuesFor(db);
+            await db.Database.ExecuteSqlRawAsync(Sql.Replace("@c", "{0}").Replace("@t", "{1}").Replace("@b", "{2}"), new object[] { company, tenant, bypass }, ct);
         }
 
         public static void RefreshSync(ApexErpDbContext db)
         {
             if (!Enabled) return;
-            var (company, bypass) = ValuesFor(db);
-            db.Database.ExecuteSqlRaw(Sql.Replace("@c", "{0}").Replace("@b", "{1}"), company, bypass);
+            var (company, tenant, bypass) = ValuesFor(db);
+            db.Database.ExecuteSqlRaw(Sql.Replace("@c", "{0}").Replace("@t", "{1}").Replace("@b", "{2}"), company, tenant, bypass);
+        }
+
+        /// <summary>
+        /// Verifies that an RLS-enabled API is running with a least-privilege database identity.
+        /// The runtime role must not be superuser, have BYPASSRLS, own protected tables, or run
+        /// against a schema where the tenant-level RLS policies are missing.
+        /// </summary>
+        public static async Task ValidateRuntimeRoleAsync(ApexErpDbContext db, CancellationToken ct = default)
+        {
+            await db.Database.OpenConnectionAsync(ct);
+            try
+            {
+                await using var command = db.Database.GetDbConnection().CreateCommand();
+                command.CommandText = @"
+                    SELECT r.rolsuper,
+                           r.rolbypassrls,
+                           EXISTS (
+                               SELECT 1
+                               FROM pg_class c
+                               JOIN pg_namespace n ON n.oid = c.relnamespace
+                               WHERE n.nspname = current_schema()
+                                 AND c.relrowsecurity
+                                 AND c.relowner = r.oid
+                           ) AS owns_rls_table,
+                           (
+                               SELECT COUNT(*)
+                               FROM pg_class c
+                               JOIN pg_namespace n ON n.oid = c.relnamespace
+                               WHERE n.nspname = current_schema()
+                                 AND c.relname IN ('Companies', 'CustomerOrganisations', 'GlAccounts')
+                                 AND c.relrowsecurity
+                                 AND c.relforcerowsecurity
+                           ) AS protected_table_count
+                    FROM pg_roles r
+                    WHERE r.rolname = current_user";
+                await using var reader = await command.ExecuteReaderAsync(ct);
+                if (!await reader.ReadAsync(ct))
+                    throw new InvalidOperationException("Unable to identify the PostgreSQL runtime role.");
+
+                if (reader.GetBoolean(0) || reader.GetBoolean(1) || reader.GetBoolean(2))
+                    throw new InvalidOperationException(
+                        "Row-level security requires a non-superuser runtime role that has no BYPASSRLS privilege and does not own protected tables.");
+
+                if (reader.GetInt64(3) != 3)
+                    throw new InvalidOperationException(
+                        "Row-level security is enabled in configuration, but Companies, CustomerOrganisations, and GlAccounts are not all protected with FORCE ROW LEVEL SECURITY.");
+            }
+            finally
+            {
+                await db.Database.CloseConnectionAsync();
+            }
         }
     }
 
@@ -70,6 +146,18 @@ namespace ApexERP.Infrastructure.Data
         public override async Task ConnectionOpenedAsync(DbConnection connection, ConnectionEndEventData eventData, CancellationToken cancellationToken = default)
         {
             if (TenantSession.Enabled && eventData.Context is ApexErpDbContext db) await TenantSession.ApplyAsync(connection, db, cancellationToken);
+        }
+
+        public override InterceptionResult ConnectionClosing(DbConnection connection, ConnectionEventData eventData, InterceptionResult result)
+        {
+            if (TenantSession.Enabled && eventData.Context is ApexErpDbContext) TenantSession.Clear(connection);
+            return result;
+        }
+
+        public override async ValueTask<InterceptionResult> ConnectionClosingAsync(DbConnection connection, ConnectionEventData eventData, InterceptionResult result)
+        {
+            if (TenantSession.Enabled && eventData.Context is ApexErpDbContext) await TenantSession.ClearAsync(connection);
+            return result;
         }
     }
 
@@ -93,8 +181,40 @@ namespace ApexERP.Infrastructure.Data
         }
     }
 
+    /// <summary>
+    /// Grants a narrowly scoped, explicitly named platform operation access to rows across tenant boundaries.
+    /// This replaces the unsafe assumption that a missing company identity automatically means system access.
+    /// </summary>
+    public sealed class SystemAccessScope : IDisposable
+    {
+        private readonly ApexErpDbContext _db;
+        private readonly bool _previous;
+        private readonly string? _previousReason;
+
+        public SystemAccessScope(ApexErpDbContext db, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("A system-access reason is required.", nameof(reason));
+
+            _db = db;
+            _previous = db.AllowSystemAccess;
+            _previousReason = db.SystemAccessReason;
+            db.AllowSystemAccess = true;
+            db.SystemAccessReason = reason;
+            TenantSession.RefreshSync(db);
+        }
+
+        public void Dispose()
+        {
+            _db.AllowSystemAccess = _previous;
+            _db.SystemAccessReason = _previousReason;
+            TenantSession.RefreshSync(_db);
+        }
+    }
+
     public static class CrossTenantExtensions
     {
         public static CrossTenantScope CrossTenantScope(this ApexErpDbContext db) => new(db);
+        public static SystemAccessScope SystemAccessScope(this ApexErpDbContext db, string reason) => new(db, reason);
     }
 }

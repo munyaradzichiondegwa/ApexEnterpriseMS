@@ -19,6 +19,7 @@ var builder = WebApplication.CreateBuilder(args);
 // A missing, weak or placeholder JWT secret (or an unset production origin / database) stops the
 // application from starting outside Development instead of silently running with a known key.
 var isDevelopment = builder.Environment.IsDevelopment();
+var applyMigrationsOnStartup = builder.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup");
 var jwtSecret = builder.Configuration["Jwt:Secret"];
 var jwtIssuer = builder.Configuration["Jwt:Issuer"];
 var connectionString = builder.Configuration.GetConnectionString("Default");
@@ -38,6 +39,10 @@ if (configProblems.Count > 0)
 // ---- Database ----
 // Optional PostgreSQL row-level security: see backend/database/hardening/002_row_level_security.sql and docs/OPERATIONS.md.
 TenantSession.Enabled = builder.Configuration.GetValue<bool>("Security:RowLevelSecurity:Enabled");
+if (applyMigrationsOnStartup && !isDevelopment)
+    throw new InvalidOperationException("Automatic schema migration is permitted only in Development. Use a separate deployment migration identity in other environments.");
+if (applyMigrationsOnStartup && TenantSession.Enabled)
+    throw new InvalidOperationException("An RLS-enabled API must use a non-owner runtime database role and must not apply migrations at startup.");
 builder.Services.AddDbContext<ApexErpDbContext>(opts => opts.UseNpgsql(connectionString!).AddInterceptors(new TenantSessionInterceptor()));
 
 // ---- Controls (manual journal approval policy) ----
@@ -150,12 +155,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var isRefresh =
                     principal?.FindFirst("token_use")?.Value == "refresh";
 
-                var hasTenant =
-                    Guid.TryParse(
-                        principal?.FindFirst("company_id")?.Value,
-                        out _);
+                var hasCompany = Guid.TryParse(principal?.FindFirst("company_id")?.Value, out _);
+                var hasTenant = Guid.TryParse(principal?.FindFirst("tenant_id")?.Value, out _);
 
-                if (isRefresh || !hasTenant)
+                if (isRefresh || !hasTenant || !hasCompany)
                 {
                     context.Fail("The token is not valid for API access.");
                 }
@@ -301,13 +304,21 @@ else
         }));
 }
 
-// ---- Apply pending EF Core migrations on startup. ----
-// Every environment applies the same versioned database schema on boot.
-using (var scope = app.Services.CreateScope())
+// An RLS-enabled runtime must use a least-privilege database role, not a schema owner.
+// Validate this before serving requests. Database migrations are a separate deployment operation.
+if (TenantSession.Enabled)
 {
-    var db =
-        scope.ServiceProvider.GetRequiredService<ApexErpDbContext>();
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<ApexErpDbContext>();
+    await TenantSession.ValidateRuntimeRoleAsync(db);
+}
 
+// Automatic migrations are an opt-in convenience for local Development only.
+// Production and RLS-enabled environments must apply migrations through a separate deployment identity.
+if (applyMigrationsOnStartup)
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<ApexErpDbContext>();
     db.Database.Migrate();
 }
 
@@ -347,30 +358,45 @@ app.UseCors("Frontend");
 app.UseAuthentication();
 
 // ---- Tenant resolution middleware ----
-// Reads company_id and user ID from the validated JWT.
-// Every EF Core global query filter scopes data to the caller's company.
+// The signed tenant_id and company_id claims must describe a real, active
+// company belonging to an active customer organisation. Never trust a tenant
+// identifier supplied in a request header or query string.
 app.Use(async (context, next) =>
 {
     if (context.User.Identity?.IsAuthenticated == true)
     {
-        if (!Guid.TryParse(
-                context.User.FindFirst("company_id")?.Value,
-                out var companyId))
+        if (!Guid.TryParse(context.User.FindFirst("company_id")?.Value, out var companyId) ||
+            !Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
 
-        var dbContext =
-            context.RequestServices.GetRequiredService<ApexErpDbContext>();
+        var dbContext = context.RequestServices.GetRequiredService<ApexErpDbContext>();
+        bool tenantIsActive;
+        using (dbContext.SystemAccessScope("tenant resolution: validate signed token identities"))
+        {
+            var companyBelongsToTenant = await dbContext.Companies.IgnoreQueryFilters()
+                .AnyAsync(c => c.Id == companyId && c.TenantId == tenantId && c.IsActive, context.RequestAborted);
+            tenantIsActive = companyBelongsToTenant &&
+                await dbContext.CustomerOrganisations.IgnoreQueryFilters()
+                    .AnyAsync(t => t.Id == tenantId && t.IsActive, context.RequestAborted);
+        }
 
+        if (!tenantIsActive)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+
+        dbContext.CurrentTenantId = tenantId;
         dbContext.CurrentCompanyId = companyId;
         dbContext.CurrentIpAddress = context.Connection.RemoteIpAddress?.ToString();
+        await TenantSession.RefreshAsync(dbContext, context.RequestAborted);
 
         if (Guid.TryParse(
                 (context.User.FindFirst("sub") ??
-                 context.User.FindFirst(
-                     System.Security.Claims.ClaimTypes.NameIdentifier))?.Value,
+                 context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))?.Value,
                 out var userId))
         {
             dbContext.CurrentUserId = userId;
