@@ -80,25 +80,38 @@ namespace ApexERP.Application.Services
             // entity simply appear with that entity's amount only).
             var aggregated = new Dictionary<string, ConsolidatedAccountLine>();
             var accountsById = new Dictionary<Guid, GlAccount>();
+            var translatedBalancesByAccount = new Dictionary<Guid, decimal>();
+            var translatedTrialBalancesByCompany = new Dictionary<Guid, List<TrialBalanceLine>>();
+            var parentCurrency = group.First(c => c.Id == parentCompanyId).FunctionalCurrency;
 
             foreach (var company in group)
             {
-                var tb = await GetTrialBalanceIgnoringFiltersAsync(company.Id, asOfDate, ct);
-                var companyAccounts = await _db.GlAccounts.IgnoreQueryFilters().Where(a => a.CompanyId == company.Id).ToListAsync(ct);
-                foreach (var a in companyAccounts) accountsById[a.Id] = a;
+                var companyAccounts = await _db.GlAccounts.IgnoreQueryFilters()
+                    .Where(a => a.CompanyId == company.Id).ToListAsync(ct);
+                foreach (var account in companyAccounts) accountsById[account.Id] = account;
 
-                // Ownership adjustment: for a subsidiary, only the parent's share of equity rolls
-                // into "Total Group Equity"; the rest becomes Non-Controlling Interest (computed below).
-                foreach (var line in tb)
+                // IAS 21 foreign-operation translation: assets/liabilities use the closing rate;
+                // equity and income/expense movements use the rate effective on each posting date.
+                // The latter is more precise than an average-rate approximation when daily rates exist.
+                var translated = await TranslateTrialBalanceAsync(company, parentCurrency, asOfDate, companyAccounts, ct);
+                translatedTrialBalancesByCompany[company.Id] = translated.Lines;
+                foreach (var balance in translated.AccountBalances)
+                    translatedBalancesByAccount[balance.Key] = balance.Value;
+
+                foreach (var line in translated.Lines)
                 {
-                    var net = line.Debit - line.Credit; // net debit balance, consistent sign convention
+                    var net = line.Debit - line.Credit;
                     if (!aggregated.TryGetValue(line.Code, out var existing))
                     {
                         aggregated[line.Code] = new ConsolidatedAccountLine(line.Code, line.Name, line.Type, net, 0, net);
                     }
                     else
                     {
-                        aggregated[line.Code] = existing with { GroupAmount = existing.GroupAmount + net, ConsolidatedAmount = existing.ConsolidatedAmount + net };
+                        aggregated[line.Code] = existing with
+                        {
+                            GroupAmount = existing.GroupAmount + net,
+                            ConsolidatedAmount = existing.ConsolidatedAmount + net
+                        };
                     }
                 }
             }
@@ -120,9 +133,8 @@ namespace ApexERP.Application.Services
             foreach (var account in intercoAccounts.OrderBy(a => a.CompanyId).ThenBy(a => a.Code))
             {
                 if (eliminatedAccountIds.Contains(account.Id) ||
-                    !companiesById.TryGetValue(account.CompanyId, out var owner) ||
-                    !companiesById.TryGetValue(account.IntercompanyCounterpartyCompanyId!.Value, out var counterparty) ||
-                    !string.Equals(owner.FunctionalCurrency, counterparty.FunctionalCurrency, StringComparison.OrdinalIgnoreCase))
+                    !companiesById.ContainsKey(account.CompanyId) ||
+                    !companiesById.ContainsKey(account.IntercompanyCounterpartyCompanyId!.Value))
                     continue;
 
                 var reciprocal = intercoAccounts.FirstOrDefault(candidate =>
@@ -135,12 +147,12 @@ namespace ApexERP.Application.Services
 
                 if (!accountBalances.TryGetValue(account.Id, out var accountBalance))
                 {
-                    accountBalance = await GetAccountBalanceAsync(account.Id, account.CompanyId, asOfDate, ct);
+                    if (!translatedBalancesByAccount.TryGetValue(account.Id, out accountBalance)) continue;
                     accountBalances[account.Id] = accountBalance;
                 }
                 if (!accountBalances.TryGetValue(reciprocal.Id, out var reciprocalBalance))
                 {
-                    reciprocalBalance = await GetAccountBalanceAsync(reciprocal.Id, reciprocal.CompanyId, asOfDate, ct);
+                    if (!translatedBalancesByAccount.TryGetValue(reciprocal.Id, out reciprocalBalance)) continue;
                     accountBalances[reciprocal.Id] = reciprocalBalance;
                 }
 
@@ -165,6 +177,19 @@ namespace ApexERP.Application.Services
                 totalEliminations += Math.Abs(accountBalance);
             }
 
+            // The difference caused by translating foreign operations at closing and historical
+            // rates is presented in equity as the foreign-currency translation reserve (CTA).
+            var translationReserve = -aggregated.Values.Sum(l => l.ConsolidatedAmount);
+            if (translationReserve != 0m)
+            {
+                const string ctaCode = "FX-CTA";
+                if (aggregated.ContainsKey(ctaCode))
+                    throw new InvalidOperationException("The chart of accounts uses reserved code FX-CTA; rename that account before group translation.");
+                aggregated[ctaCode] = new ConsolidatedAccountLine(ctaCode,
+                    "Foreign currency translation reserve", GlAccountType.Equity,
+                    0m, 0m, translationReserve);
+            }
+
             var lines = aggregated.Values.OrderBy(l => l.Code).ToList();
             var totalAssets = lines.Where(l => l.Type == GlAccountType.Asset).Sum(l => l.ConsolidatedAmount);
             var totalLiabilities = lines.Where(l => l.Type == GlAccountType.Liability).Sum(l => -l.ConsolidatedAmount);
@@ -173,7 +198,8 @@ namespace ApexERP.Application.Services
             decimal totalNci = 0, totalGroupEquityAdj = 0;
             foreach (var sub in subsidiaries.Where(s => s.OwnershipPercentage.HasValue && s.OwnershipPercentage < 100))
             {
-                var subEquity = await GetNetEquityAsync(sub.Id, asOfDate, ct);
+                var subEquity = translatedTrialBalancesByCompany[sub.Id]
+                    .Where(l => l.Type == GlAccountType.Equity).Sum(l => l.Credit - l.Debit);
                 var ownership = sub.OwnershipPercentage!.Value / 100m;
                 var nciShare = subEquity * (1 - ownership);
                 totalNci += nciShare;
@@ -185,6 +211,95 @@ namespace ApexERP.Application.Services
 
             return new ConsolidationResult(parentCompanyId, subsidiaries.Select(s => s.Id).ToList(), asOfDate,
                 lines, totalAssets, totalLiabilities, totalGroupEquity, totalNci, totalEliminations);
+        }
+
+        private sealed record TranslatedTrialBalance(List<TrialBalanceLine> Lines, Dictionary<Guid, decimal> AccountBalances);
+
+        private async Task<TranslatedTrialBalance> TranslateTrialBalanceAsync(Company company, string groupCurrency,
+            DateTime asOfDate, List<GlAccount> accounts, CancellationToken ct)
+        {
+            var accountIds = accounts.Select(a => a.Id).ToList();
+            var asOfExclusive = ReportingDates.EndExclusive(asOfDate);
+            var movements = await _db.JournalLines.IgnoreQueryFilters()
+                .Where(l => accountIds.Contains(l.GlAccountId) && l.JournalEntry!.CompanyId == company.Id &&
+                    (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed) &&
+                    l.JournalEntry.EntryDate < asOfExclusive)
+                .Select(l => new { l.GlAccountId, l.BaseDebit, l.BaseCredit, EntryDate = l.JournalEntry!.EntryDate })
+                .ToListAsync(ct);
+
+            var functionalCurrency = company.FunctionalCurrency.Trim().ToUpperInvariant();
+            var targetCurrency = groupCurrency.Trim().ToUpperInvariant();
+            var sameCurrency = string.Equals(functionalCurrency, targetCurrency, StringComparison.OrdinalIgnoreCase);
+            var rates = new List<ExchangeRate>();
+            var inverseRates = false;
+            if (!sameCurrency)
+            {
+                rates = await _db.ExchangeRates.IgnoreQueryFilters()
+                    .Where(r => r.CompanyId == company.Id && r.FromCurrency.ToUpper() == functionalCurrency &&
+                        r.ToCurrency.ToUpper() == targetCurrency && r.RateDate < asOfExclusive && r.Rate > 0)
+                    .OrderBy(r => r.RateDate).ToListAsync(ct);
+                if (rates.Count == 0)
+                {
+                    rates = await _db.ExchangeRates.IgnoreQueryFilters()
+                        .Where(r => r.CompanyId == company.Id && r.FromCurrency.ToUpper() == targetCurrency &&
+                            r.ToCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive && r.Rate > 0)
+                        .OrderBy(r => r.RateDate).ToListAsync(ct);
+                    inverseRates = true;
+                }
+                if (rates.Count == 0)
+                    throw new InvalidOperationException($"Missing exchange rates to translate subsidiary {company.Name} from {functionalCurrency} to group currency {targetCurrency}.");
+
+                decimal RateAt(DateTime date)
+                {
+                    var rate = rates.LastOrDefault(r => r.RateDate.Date <= date.Date);
+                    if (rate == null)
+                        throw new InvalidOperationException($"No {functionalCurrency}/{targetCurrency} exchange rate is available on or before {date:yyyy-MM-dd} for subsidiary {company.Name}.");
+                    return inverseRates ? 1m / rate.Rate : rate.Rate;
+                }
+            }
+
+            var accountBalances = new Dictionary<Guid, decimal>();
+            var movementGroups = movements.GroupBy(m => m.GlAccountId).ToDictionary(g => g.Key, g => g.ToList());
+            foreach (var account in accounts)
+            {
+                if (!movementGroups.TryGetValue(account.Id, out var accountMovements))
+                    continue;
+
+                decimal translatedBalance;
+                if (sameCurrency)
+                {
+                    translatedBalance = accountMovements.Sum(m => m.BaseDebit - m.BaseCredit);
+                }
+                else if (account.Type is GlAccountType.Asset or GlAccountType.Liability)
+                {
+                    var localBalance = accountMovements.Sum(m => m.BaseDebit - m.BaseCredit);
+                    translatedBalance = localBalance * RateAt(asOfDate);
+                }
+                else
+                {
+                    // IAS 21 transaction-date rates for equity and profit-or-loss movements.
+                    translatedBalance = accountMovements.Sum(m =>
+                        (m.BaseDebit - m.BaseCredit) * RateAt(m.EntryDate));
+                }
+                accountBalances[account.Id] = translatedBalance;
+            }
+
+            var lines = new List<TrialBalanceLine>();
+            foreach (var group in accounts.GroupBy(a => a.Code))
+            {
+                var signed = group.Where(a => accountBalances.ContainsKey(a.Id))
+                    .Sum(a => accountBalances[a.Id]);
+                if (signed == 0m) continue;
+                var representative = group.First();
+                var debitNormal = representative.Type is GlAccountType.Asset or GlAccountType.Expense;
+                lines.Add(debitNormal
+                    ? new TrialBalanceLine(representative.Code, representative.Name, representative.Type,
+                        Math.Max(signed, 0m), Math.Max(-signed, 0m))
+                    : new TrialBalanceLine(representative.Code, representative.Name, representative.Type,
+                        Math.Max(-signed, 0m), Math.Max(signed, 0m)));
+            }
+
+            return new TranslatedTrialBalance(lines, accountBalances);
         }
 
         /// <summary>Returns the signed functional-currency balance for one GL account, including
