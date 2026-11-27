@@ -3,6 +3,7 @@ using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using Xunit;
 
@@ -242,6 +243,41 @@ namespace ApexERP.Tests
             var cycleError = await scope.ValidateStructureChangeAsync(caller, caller, cyclicParent);
             Assert.NotNull(cycleError);
             Assert.Contains("circular", cycleError);
+        }
+
+        [PostgresFact]
+        public async Task Tenant_capacity_lock_requires_a_transaction_and_serialises_same_tenant_purpose()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var tenantId = Guid.NewGuid();
+            var key = $"{tenantId:N}:seat-limit";
+
+            await using var first = db.NewContext(null);
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => first.AcquireTenantCapacityLockAsync(tenantId, "seat-limit"));
+
+            await using var firstTransaction = await first.Database.BeginTransactionAsync();
+            await first.AcquireTenantCapacityLockAsync(tenantId, "seat-limit");
+
+            await using var second = db.NewContext(null);
+            await using var secondTransaction = await second.Database.BeginTransactionAsync();
+            await using (var command = new NpgsqlCommand(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended(@key, 0))",
+                (NpgsqlConnection)second.Database.GetDbConnection(),
+                (NpgsqlTransaction)second.Database.CurrentTransaction!.GetDbTransaction()))
+            {
+                command.Parameters.AddWithValue("key", key);
+                var acquired = (bool)(await command.ExecuteScalarAsync())!;
+                Assert.False(acquired); // another transaction holds the same tenant/purpose lock
+            }
+
+            await secondTransaction.RollbackAsync();
+            await firstTransaction.CommitAsync();
+
+            await using var third = db.NewContext(null);
+            await using var thirdTransaction = await third.Database.BeginTransactionAsync();
+            await third.AcquireTenantCapacityLockAsync(tenantId, "seat-limit");
+            await thirdTransaction.CommitAsync();
         }
 
         // ---- PostgreSQL RLS: exercise policies as a non-owner, non-BYPASSRLS role -------------------------------
