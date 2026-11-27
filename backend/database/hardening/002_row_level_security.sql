@@ -80,16 +80,57 @@ BEGIN
         EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY', t.table_schema, t.table_name);
         EXECUTE format('ALTER TABLE %I.%I FORCE ROW LEVEL SECURITY', t.table_schema, t.table_name);
         EXECUTE format('DROP POLICY IF EXISTS apex_tenant_isolation ON %I.%I', t.table_schema, t.table_name);
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = t.table_schema AND table_name = t.table_name
+              AND column_name = 'TenantId' AND data_type = 'uuid'
+        ) THEN
+            EXECUTE format(
+                'CREATE POLICY apex_tenant_isolation ON %I.%I USING (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid) WITH CHECK (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid)',
+                t.table_schema, t.table_name);
+        ELSE
+            EXECUTE format(
+                'CREATE POLICY apex_tenant_isolation ON %I.%I USING (apex_rls_allowed("CompanyId")) WITH CHECK (apex_rls_allowed("CompanyId"))',
+                t.table_schema, t.table_name);
+        END IF;
+    END LOOP;
+END $;
+
+-- Tenant-level records without a CompanyId are scoped directly to the signed tenant.
+-- Global catalogues (plans, jurisdictions and deployment profiles) remain readable by design.
+DO $
+DECLARE t record;
+BEGIN
+    FOR t IN
+        SELECT c.table_schema, c.table_name
+        FROM information_schema.columns c
+        JOIN information_schema.tables tb
+          ON tb.table_schema = c.table_schema
+         AND tb.table_name = c.table_name
+         AND tb.table_type = 'BASE TABLE'
+        WHERE c.column_name = 'TenantId'
+          AND c.table_schema = current_schema()
+          AND c.data_type = 'uuid'
+          AND c.table_name <> 'Companies'
+          AND NOT EXISTS (
+              SELECT 1 FROM information_schema.columns cc
+              WHERE cc.table_schema = c.table_schema AND cc.table_name = c.table_name
+                AND cc.column_name = 'CompanyId' AND cc.data_type = 'uuid'
+          )
+    LOOP
+        EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY', t.table_schema, t.table_name);
+        EXECUTE format('ALTER TABLE %I.%I FORCE ROW LEVEL SECURITY', t.table_schema, t.table_name);
+        EXECUTE format('DROP POLICY IF EXISTS apex_tenant_isolation ON %I.%I', t.table_schema, t.table_name);
         EXECUTE format(
-            'CREATE POLICY apex_tenant_isolation ON %I.%I USING (apex_rls_allowed("CompanyId")) WITH CHECK (apex_rls_allowed("CompanyId"))',
+            'CREATE POLICY apex_tenant_isolation ON %I.%I USING (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid) WITH CHECK (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid)',
             t.table_schema, t.table_name);
     END LOOP;
-END $$;
+END $;
 
 
--- User records remain anchored to their home company. In a selected company, records are
--- visible only for users with an active membership in that same company. app.user_id is also
--- stamped from the validated JWT for request auditing; it is never accepted from a request.
+-- A user identity remains anchored to its home company, but may be read in another
+-- company only when the signed-in user has an active membership there. The app.user_id
+-- value is stamped from the validated JWT by TenantSession; it is never accepted from a request.
 DROP POLICY IF EXISTS apex_user_membership_access ON "Users";
 CREATE POLICY apex_user_membership_access ON "Users"
     USING (
