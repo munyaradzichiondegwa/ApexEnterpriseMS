@@ -222,18 +222,35 @@ public sealed class PlatformAdministrationController : ControllerBase
             PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true
         };
-        _db.Users.Add(user);
-        _db.CompanyMemberships.Add(new CompanyMembership
+        var transaction = _db.Database.CurrentTransaction;
+        var ownsTransaction = transaction is null;
+        if (ownsTransaction) transaction = await _db.Database.BeginTransactionAsync(ct);
+        try
         {
-            CompanyId = invitation.CompanyId, UserId = user.Id, MembershipRole = "Administrator",
-            IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow, RoleId = role.Id
-        });
-        invitation.AcceptedAt = DateTime.UtcNow;
-        invitation.AcceptedUserId = user.Id;
-        var onboarding = await _db.TenantOnboardings.SingleAsync(x => x.TenantId == invitation.TenantId, ct);
-        onboarding.Status = "AdministratorCreated";
-        onboarding.CompletedStepsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "tenant-provisioned", "initial-company-created", "initial-administrator-created" });
-        await _db.SaveChangesAsync(ct);
+            _db.Users.Add(user);
+            await _db.SaveChangesAsync(ct);
+            _db.CompanyMemberships.Add(new CompanyMembership
+            {
+                CompanyId = invitation.CompanyId, UserId = user.Id, MembershipRole = "Administrator",
+                IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow, RoleId = role.Id
+            });
+            invitation.AcceptedAt = DateTime.UtcNow;
+            invitation.AcceptedUserId = user.Id;
+            var onboarding = await _db.TenantOnboardings.SingleAsync(x => x.TenantId == invitation.TenantId, ct);
+            onboarding.Status = "AdministratorCreated";
+            onboarding.CompletedStepsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "tenant-provisioned", "initial-company-created", "initial-administrator-created" });
+            await _db.SaveChangesAsync(ct);
+            if (ownsTransaction) await transaction!.CommitAsync(ct);
+        }
+        catch
+        {
+            if (ownsTransaction && transaction is not null) await transaction.RollbackAsync(ct);
+            throw;
+        }
+        finally
+        {
+            if (ownsTransaction && transaction is not null) await transaction.DisposeAsync();
+        }
         var login = await _auth.IssueTokensAsync(user, HttpContext.Connection.RemoteIpAddress?.ToString(), null, ct);
         var sameSite = Enum.TryParse<SameSiteMode>(_configuration["Auth:CookieSameSite"], true, out var mode) ? mode : SameSiteMode.Strict;
         Response.Cookies.Append(AuthController.RefreshCookie, login.RefreshToken, new CookieOptions
