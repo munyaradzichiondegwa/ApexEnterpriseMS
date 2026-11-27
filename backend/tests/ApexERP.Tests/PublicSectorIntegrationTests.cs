@@ -282,6 +282,11 @@ namespace ApexERP.Tests
             var request = await workflows.SubmitForApprovalAsync(companyId, "PublicSectorBudgetOverride",
                 purchaseOrderId, "PurchaseOrder", submitterId, 125m, fundCentreId, "Emergency appropriation");
             await workflows.DecideAsync(companyId, request.Id, approverId, true, "Reviewed and approved.");
+            var persistedRequest = await ctx.WorkflowRequests.SingleAsync(w => w.Id == request.Id);
+            Assert.Equal(125m, persistedRequest.Amount);
+            Assert.Equal(fundCentreId, persistedRequest.FundCentreId);
+            Assert.Equal(WorkflowStatus.Approved, persistedRequest.Status);
+            Assert.Single(await ctx.WorkflowApprovals.Where(a => a.WorkflowRequestId == request.Id).ToListAsync());
 
             var commitment = await service.CommitAsync(companyId, fundCentreId, purchaseOrderId, 125m,
                 true, "Emergency appropriation", submitterId);
