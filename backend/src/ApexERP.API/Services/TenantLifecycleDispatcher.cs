@@ -54,16 +54,24 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
         using (db.SystemAccessScope("operations worker: claim tenant lifecycle job"))
         {
             var retryBefore = DateTime.UtcNow.AddMinutes(-DispatchLeaseMinutes);
+            await db.TenantLifecycleJobs
+                .Where(x => (x.Status == "Queued" || x.Status == "AwaitingProvider" || x.Status == "Dispatching") &&
+                    x.StartedAt != null && x.StartedAt < retryBefore && x.DispatchAttempts >= MaxDispatchAttempts)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.Status, "Failed")
+                    .SetProperty(x => x.CompletedAt, DateTime.UtcNow)
+                    .SetProperty(x => x.ResultSummary, $"Dispatch attempts exhausted ({MaxDispatchAttempts}) after an expired worker lease."), ct);
+
             job = await db.TenantLifecycleJobs.AsNoTracking()
-                .Where(x =>
-                    ((x.Status == "Queued" || x.Status == "AwaitingProvider") &&
+                .Where(x => x.DispatchAttempts < MaxDispatchAttempts &&
+                    (((x.Status == "Queued" || x.Status == "AwaitingProvider") &&
                         (x.StartedAt == null || x.StartedAt < retryBefore)) ||
-                    (x.Status == "Dispatching" && x.StartedAt != null && x.StartedAt < retryBefore))
+                     (x.Status == "Dispatching" && x.StartedAt != null && x.StartedAt < retryBefore)))
                 .OrderBy(x => x.CreatedAt).FirstOrDefaultAsync(ct);
             if (job is null) return;
             var claimedAt = DateTime.UtcNow;
             var claimed = await db.TenantLifecycleJobs
-                .Where(x => x.Id == job.Id &&
+                .Where(x => x.Id == job.Id && x.DispatchAttempts < MaxDispatchAttempts &&
                     (((x.Status == "Queued" || x.Status == "AwaitingProvider") &&
                         (x.StartedAt == null || x.StartedAt < retryBefore)) ||
                      (x.Status == "Dispatching" && x.StartedAt != null && x.StartedAt < retryBefore)))
