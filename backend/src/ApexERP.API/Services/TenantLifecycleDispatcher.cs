@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using ApexERP.Domain.Entities;
@@ -13,6 +14,7 @@ namespace ApexERP.API.Services;
 /// </summary>
 public sealed class TenantLifecycleDispatcher : BackgroundService
 {
+    private const int DispatchLeaseMinutes = 10;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHttpClientFactory _clients;
     private readonly IConfiguration _configuration;
@@ -50,15 +52,23 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
         TenantLifecycleJob? job;
         using (db.SystemAccessScope("operations worker: claim tenant lifecycle job"))
         {
+            var retryBefore = DateTime.UtcNow.AddMinutes(-DispatchLeaseMinutes);
             job = await db.TenantLifecycleJobs.AsNoTracking()
-                .Where(x => x.Status == "Queued" || x.Status == "AwaitingProvider")
+                .Where(x =>
+                    ((x.Status == "Queued" || x.Status == "AwaitingProvider") &&
+                        (x.StartedAt == null || x.StartedAt < retryBefore)) ||
+                    (x.Status == "Dispatching" && x.StartedAt != null && x.StartedAt < retryBefore))
                 .OrderBy(x => x.CreatedAt).FirstOrDefaultAsync(ct);
             if (job is null) return;
+            var claimedAt = DateTime.UtcNow;
             var claimed = await db.TenantLifecycleJobs
-                .Where(x => x.Id == job.Id && (x.Status == "Queued" || x.Status == "AwaitingProvider"))
+                .Where(x => x.Id == job.Id &&
+                    (((x.Status == "Queued" || x.Status == "AwaitingProvider") &&
+                        (x.StartedAt == null || x.StartedAt < retryBefore)) ||
+                     (x.Status == "Dispatching" && x.StartedAt != null && x.StartedAt < retryBefore)))
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(x => x.Status, "Dispatching")
-                    .SetProperty(x => x.StartedAt, DateTime.UtcNow), ct);
+                    .SetProperty(x => x.StartedAt, claimedAt), ct);
             if (claimed != 1) return;
         }
 
@@ -92,8 +102,13 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
             }
             else
             {
-                current.Status = "Failed"; current.CompletedAt = DateTime.UtcNow;
-                current.ResultSummary = $"Worker returned {(int)response.StatusCode}: {body[..Math.Min(body.Length, 1000)]}";
+                var transientFailure = (int)response.StatusCode >= 500 ||
+                    response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
+                current.Status = transientFailure ? "Queued" : "Failed";
+                current.CompletedAt = transientFailure ? null : DateTime.UtcNow;
+                current.StartedAt = DateTime.UtcNow;
+                current.ResultSummary = $"Worker returned {(int)response.StatusCode}: {body[..Math.Min(body.Length, 1000)]}" +
+                    (transientFailure ? $" Retry will be attempted after {DispatchLeaseMinutes} minutes." : "");
             }
             await updateDb.SaveChangesAsync(ct);
         }
@@ -103,7 +118,17 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
             var updateDb = inner.ServiceProvider.GetRequiredService<ApexErpDbContext>();
             using var system = updateDb.SystemAccessScope("operations worker: record dispatch failure");
             var current = await updateDb.TenantLifecycleJobs.SingleOrDefaultAsync(x => x.Id == job.Id, ct);
-            if (current != null) { current.Status = "Failed"; current.CompletedAt = DateTime.UtcNow; current.ResultSummary = ex.Message[..Math.Min(ex.Message.Length, 1000)]; await updateDb.SaveChangesAsync(ct); }
+            if (current != null)
+            {
+                // Dispatch is at-least-once: the worker must deduplicate on the stable jobId in
+                // the signed payload because a timeout can occur after the worker accepted it.
+                current.Status = "Queued";
+                current.StartedAt = DateTime.UtcNow;
+                current.CompletedAt = null;
+                current.ResultSummary = $"Dispatch attempt failed; retry will be attempted after {DispatchLeaseMinutes} minutes: " +
+                    ex.Message[..Math.Min(ex.Message.Length, 900)];
+                await updateDb.SaveChangesAsync(ct);
+            }
             _logger.LogError(ex, "Unable to dispatch tenant lifecycle job {JobId}.", job.Id);
         }
     }
