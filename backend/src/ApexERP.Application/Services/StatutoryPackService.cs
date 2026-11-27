@@ -117,6 +117,101 @@ public sealed class StatutoryPackService
             .OrderBy(x => x.JurisdictionCode).ThenByDescending(x => x.Version).ToList();
     }
 
+    /// <summary>
+    /// Creates a reviewable Zimbabwe 2026 baseline from ZIMRA's published 2026 PAYE tables,
+    /// corporate rates and VAT guidance. This is deliberately a Draft: specialist schedules,
+    /// exemptions, withholding rules and filing validations still require legal review.
+    /// </summary>
+    public Task<StatutoryPackDocument> CreateZimbabwe2026BaselineDraftAsync(Guid companyId, Guid preparedBy,
+        CancellationToken ct = default)
+    {
+        const string rules = """
+        {
+          "packKind": "tax-baseline",
+          "coverage": "baseline-only",
+          "approvalNotice": "DRAFT ONLY. Do not activate for statutory calculations or filing until reviewed and approved. VAT exemptions, zero-rated schedules, withholding taxes, customs, capital allowances, tax credits, special regimes and filing-specific edge cases are not fully represented.",
+          "effectiveCurrencySet": ["USD", "ZWG"],
+          "paye": {
+            "aidsLevyRate": 0.03,
+            "USD": {
+              "effectiveFrom": "2026-01-01",
+              "effectiveTo": "2026-12-31",
+              "monthly": [
+                { "from": 0, "to": 100, "rate": 0, "deduction": 0 },
+                { "from": 100.01, "to": 300, "rate": 0.20, "deduction": 20 },
+                { "from": 300.01, "to": 1000, "rate": 0.25, "deduction": 35 },
+                { "from": 1000.01, "to": 2000, "rate": 0.30, "deduction": 85 },
+                { "from": 2000.01, "to": 3000, "rate": 0.35, "deduction": 185 },
+                { "from": 3000.01, "to": null, "rate": 0.40, "deduction": 335 }
+              ],
+              "annual": [
+                { "from": 0, "to": 1200, "rate": 0, "deduction": 0 },
+                { "from": 1201, "to": 3600, "rate": 0.20, "deduction": 240 },
+                { "from": 3601, "to": 12000, "rate": 0.25, "deduction": 420 },
+                { "from": 12001, "to": 24000, "rate": 0.30, "deduction": 1020 },
+                { "from": 24001, "to": 36000, "rate": 0.35, "deduction": 2220 },
+                { "from": 36001, "to": null, "rate": 0.40, "deduction": 4020 }
+              ]
+            },
+            "ZWG": {
+              "effectiveFrom": "2026-01-01",
+              "effectiveTo": "2026-12-31",
+              "monthly": [
+                { "from": 0, "to": 2800, "rate": 0, "deduction": 0 },
+                { "from": 2800.01, "to": 8400, "rate": 0.20, "deduction": 560 },
+                { "from": 8400.01, "to": 28000, "rate": 0.25, "deduction": 980 },
+                { "from": 28000.01, "to": 56000, "rate": 0.30, "deduction": 2380 },
+                { "from": 56000.01, "to": 84000, "rate": 0.35, "deduction": 5180 },
+                { "from": 84000.01, "to": null, "rate": 0.40, "deduction": 9380 }
+              ],
+              "annual": [
+                { "from": 0, "to": 33600, "rate": 0, "deduction": 0 },
+                { "from": 33601, "to": 100800, "rate": 0.20, "deduction": 6720 },
+                { "from": 100801, "to": 336000, "rate": 0.25, "deduction": 11760 },
+                { "from": 336001, "to": 672000, "rate": 0.30, "deduction": 28560 },
+                { "from": 672001, "to": 1008000, "rate": 0.35, "deduction": 62160 },
+                { "from": 1008001, "to": null, "rate": 0.40, "deduction": 112560 }
+              ]
+            }
+          },
+          "corporateIncomeTax": {
+            "standardCompanyOrTrustRate": 0.25,
+            "pensionFundTradeOrInvestmentRate": 0.15,
+            "specialMiningLeaseRate": 0.15,
+            "licensedInvestorFirstFiveYearsRate": 0,
+            "licensedInvestorAfterFiveYearsRate": 0.25,
+            "aidsLevyRate": 0.03,
+            "note": "Special regimes and eligibility conditions must be checked against the applicable legislation."
+          },
+          "vat": {
+            "standardRate": 0.155,
+            "effectiveFrom": "2026-01-01",
+            "note": "Standard rate only. Zero-rated and exempt supplies are governed by specific statutory schedules and are not exhaustively encoded in this baseline."
+          }
+        }
+        """;
+
+        var sources = new List<StatutoryPackSource>
+        {
+            new("Zimbabwe Revenue Authority (ZIMRA)", "PAYE USD tax tables, 1 January–31 December 2026",
+                "https://www.zimra.co.zw/domestic-taxes/tax-tables?download=4523%3Ausd-paye-tax-tables-2026",
+                new DateTime(2026, 1, 1), new DateTime(2026, 1, 1)),
+            new("Zimbabwe Revenue Authority (ZIMRA)", "PAYE ZWG tax tables, 1 January–31 December 2026",
+                "https://www.zimra.co.zw/domestic-taxes/tax-tables?download=4522%3Azwg-paye-tax-tables-2026",
+                new DateTime(2026, 1, 1), new DateTime(2026, 1, 1)),
+            new("Zimbabwe Revenue Authority (ZIMRA)", "Corporate income tax rates",
+                "https://www.zimra.co.zw/domestic-taxes/corporate/tax-rates", null, new DateTime(2026, 1, 1)),
+            new("Zimbabwe Revenue Authority (ZIMRA)", "VAT mechanics and standard rate",
+                "https://www.zimra.co.zw/domestic-taxes/vat/mechanics-of-vat", null, new DateTime(2026, 1, 1)),
+            new("Zimbabwe Revenue Authority (ZIMRA)", "Public Notice 7 of 2026: VAT rate change effective 1 January 2026",
+                "https://www.zimra.co.zw/public-notices?download=4441%3Apublic-notice-07-of-2026-change-of-vat-rate-on-submission-of-return-category-a",
+                new DateTime(2026, 1, 7), new DateTime(2026, 1, 1))
+        };
+
+        return CreateDraftAsync(companyId, "ZW", "Zimbabwe", 1, new DateTime(2026, 1, 1),
+            new DateTime(2026, 12, 31), rules, sources, preparedBy, ct);
+    }
+
     public async Task<StatutoryPackDocument> GetApplicableAsync(Guid companyId, string jurisdictionCode,
         DateTime onDate, CancellationToken ct = default)
     {
