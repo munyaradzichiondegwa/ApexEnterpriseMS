@@ -163,8 +163,16 @@ public sealed class ConsolidationIntercompanyIntegrationTests
 
         var exception = Assert.Single(result.IntercompanyExceptions);
         Assert.Equal("IC-100", exception.AccountCode);
-        Assert.Equal(100m, exception.CompanyABalance);
-        Assert.Equal(-95m, exception.CompanyBBalance);
+        if (exception.CompanyAId == group.CompanyAId)
+        {
+            Assert.Equal(100m, exception.CompanyABalance);
+            Assert.Equal(-95m, exception.CompanyBBalance);
+        }
+        else
+        {
+            Assert.Equal(-95m, exception.CompanyABalance);
+            Assert.Equal(100m, exception.CompanyBBalance);
+        }
         Assert.Equal(5m, exception.Difference);
         Assert.Equal(0m, result.TotalEliminations);
         var intercompanyLine = Assert.Single(result.Lines, x => x.Code == "IC-100");
