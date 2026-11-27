@@ -98,4 +98,150 @@ public sealed class SupplyChainIntegrationTests
         Assert.Empty(await ctx.InventoryMovements.ToListAsync());
     }
 
+    private static async Task<(Guid TenantId, Guid VendorId, Guid ItemId, Guid OtherItemId)> SeedCompanyAsync(
+        TestDb db, Guid companyId)
+    {
+        var tenantId = Guid.NewGuid();
+        var vendorId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var otherItemId = Guid.NewGuid();
+        var assetAccountId = Guid.NewGuid();
+        var cogsAccountId = Guid.NewGuid();
+
+        await using var seed = db.NewContext(companyId, tenantId: tenantId);
+        seed.CustomerOrganisations.Add(new CustomerOrganisation
+        {
+            Id = tenantId, Name = "GRN test tenant", IsActive = true
+        });
+        seed.Companies.Add(new Company
+        {
+            Id = companyId, TenantId = tenantId, Name = "GRN test company",
+            BaseCurrency = "USD", FunctionalCurrency = "USD"
+        });
+        seed.Vendors.Add(new Vendor
+        {
+            Id = vendorId, TenantId = tenantId, CompanyId = companyId,
+            Code = "V-GRN", Name = "GRN Supplier", IsApproved = true, Currency = "USD"
+        });
+        seed.GlAccounts.AddRange(
+            new GlAccount
+            {
+                Id = assetAccountId, TenantId = tenantId, CompanyId = companyId,
+                Code = "1400", Name = "Inventory Asset", Type = GlAccountType.Asset, Currency = "USD"
+            },
+            new GlAccount
+            {
+                Id = cogsAccountId, TenantId = tenantId, CompanyId = companyId,
+                Code = "5000", Name = "Inventory Clearing", Type = GlAccountType.Expense, Currency = "USD"
+            });
+        seed.InventoryItems.AddRange(
+            new InventoryItem
+            {
+                Id = itemId, TenantId = tenantId, CompanyId = companyId,
+                Sku = "GRN-001", Name = "Primary item", UnitOfMeasure = "EA",
+                AssetAccountId = assetAccountId, CogsAccountId = cogsAccountId,
+                ValuationMethod = ValuationMethod.FIFO, QuantityOnHand = 0m
+            },
+            new InventoryItem
+            {
+                Id = otherItemId, TenantId = tenantId, CompanyId = companyId,
+                Sku = "GRN-002", Name = "Different item", UnitOfMeasure = "EA",
+                AssetAccountId = assetAccountId, CogsAccountId = cogsAccountId,
+                ValuationMethod = ValuationMethod.FIFO, QuantityOnHand = 0m
+            });
+        await seed.SaveChangesAsync();
+        return (tenantId, vendorId, itemId, otherItemId);
+    }
+
+    private static SupplyChainService CreateSupplyChainService(ApexErpDbContext db)
+    {
+        var audit = new AuditService(db);
+        var gl = new GlPostingService(db, audit, new JournalControlOptions());
+        return new SupplyChainService(db, new InventoryService(db, gl));
+    }
+
+    private static async Task<PurchaseOrder> CreateApprovedPoAsync(
+        TestDb db, Guid companyId, Guid tenantId, Guid vendorId, Guid itemId, decimal quantity)
+    {
+        await using var ctx = db.NewContext(companyId, tenantId: tenantId);
+        var service = CreateSupplyChainService(ctx);
+        var po = await service.CreatePurchaseOrderAsync(companyId, vendorId,
+            new DateTime(2026, 11, 27), null,
+            new[] { new PoLineRequest(itemId, quantity, 5m) });
+        return await service.ApproveAsync(companyId, po.Id, Guid.NewGuid());
+    }
+
+    [PostgresFact]
+    public async Task Invalid_later_GRN_line_rolls_back_earlier_inventory_and_GL_postings()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var companyId = Guid.NewGuid();
+        var seeded = await SeedCompanyAsync(db, companyId);
+        var po = await CreateApprovedPoAsync(db, companyId, seeded.TenantId,
+            seeded.VendorId, seeded.ItemId, 10m);
+        var poLineId = po.Lines.Single().Id;
+
+        await using (var ctx = db.NewContext(companyId, tenantId: seeded.TenantId))
+        {
+            var service = CreateSupplyChainService(ctx);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.ReceiveGoodsAsync(
+                companyId, po.Id, new DateTime(2026, 11, 27), null,
+                new[]
+                {
+                    new GrnLineRequest(poLineId, seeded.ItemId, 5m, 5m),
+                    new GrnLineRequest(poLineId, seeded.OtherItemId, 1m, 5m)
+                }));
+        }
+
+        await using var verify = db.NewContext(companyId, tenantId: seeded.TenantId);
+        var persistedPo = await verify.PurchaseOrders.Include(x => x.Lines).SingleAsync(x => x.Id == po.Id);
+        var item = await verify.InventoryItems.SingleAsync(x => x.Id == seeded.ItemId);
+        Assert.Equal(PurchaseOrderStatus.Approved, persistedPo.Status);
+        Assert.Equal(0m, persistedPo.Lines.Single().QuantityReceived);
+        Assert.Equal(0m, item.QuantityOnHand);
+        Assert.Empty(await verify.GoodsReceipts.ToListAsync());
+        Assert.Empty(await verify.InventoryMovements.ToListAsync());
+        Assert.Empty(await verify.JournalEntries.ToListAsync());
+    }
+
+    [PostgresFact]
+    public async Task Concurrent_GRNs_are_serialised_and_cannot_over_receive_a_PO_line()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var companyId = Guid.NewGuid();
+        var seeded = await SeedCompanyAsync(db, companyId);
+        var po = await CreateApprovedPoAsync(db, companyId, seeded.TenantId,
+            seeded.VendorId, seeded.ItemId, 10m);
+        var poLineId = po.Lines.Single().Id;
+
+        async Task<bool> ReceiveSixAsync()
+        {
+            await using var ctx = db.NewContext(companyId, tenantId: seeded.TenantId);
+            var service = CreateSupplyChainService(ctx);
+            try
+            {
+                await service.ReceiveGoodsAsync(companyId, po.Id, new DateTime(2026, 11, 27), null,
+                    new[] { new GrnLineRequest(poLineId, seeded.ItemId, 6m, 5m) });
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        var outcomes = await Task.WhenAll(ReceiveSixAsync(), ReceiveSixAsync());
+        Assert.Single(outcomes, x => x);
+
+        await using var verify = db.NewContext(companyId, tenantId: seeded.TenantId);
+        var persistedPo = await verify.PurchaseOrders.Include(x => x.Lines).SingleAsync(x => x.Id == po.Id);
+        var item = await verify.InventoryItems.SingleAsync(x => x.Id == seeded.ItemId);
+        Assert.Equal(6m, persistedPo.Lines.Single().QuantityReceived);
+        Assert.Equal(PurchaseOrderStatus.Partial, persistedPo.Status);
+        Assert.Equal(6m, item.QuantityOnHand);
+        Assert.Single(await verify.GoodsReceipts.ToListAsync());
+        Assert.Single(await verify.InventoryMovements.ToListAsync());
+        Assert.Single(await verify.JournalEntries.ToListAsync());
+    }
+
 }
