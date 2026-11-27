@@ -126,6 +126,18 @@ namespace ApexERP.API.Controllers
                 x => x.Id == invitation.RoleId && x.CompanyId == invitation.CompanyId, ct);
             if (company is null || tenant is null || role is null)
                 return BadRequest(new { error = "The invitation's organisation, company or role is no longer available." });
+            var subscription = await _db.TenantSubscriptions.Where(x => x.TenantId == tenant.Id).OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+            if (subscription is null || subscription.Status is not ("Active" or "Trial") ||
+                (subscription.TrialEndsAt.HasValue && subscription.TrialEndsAt.Value <= DateTime.UtcNow) ||
+                (subscription.CurrentPeriodEndsAt.HasValue && subscription.CurrentPeriodEndsAt.Value <= DateTime.UtcNow))
+                return StatusCode(402, new { error = "The tenant subscription is inactive or expired." });
+            var plan = await _db.SubscriptionPlans.SingleAsync(x => x.Id == subscription.PlanId, ct);
+            var seatLimit = subscription.SeatOverride > 0 ? subscription.SeatOverride : plan.MaxSeats;
+            var activeSeats = await _db.CompanyMemberships.IgnoreQueryFilters()
+                .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == tenant.Id && x.IsActive),
+                    m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
+                .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
+            if (activeSeats >= seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been reached.", seatLimit });
 
             var user = new User { CompanyId = company.Id, Email = invitation.Email,
                 PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
