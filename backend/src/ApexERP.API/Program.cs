@@ -407,8 +407,8 @@ app.UseCors("Frontend");
 app.UseAuthentication();
 
 // ---- Tenant and company membership revalidation ----
-// The signed claims are not sufficient by themselves: account deactivation, membership
-// revocation, role changes and tenant suspension must take effect on the next request.
+// The signed claims are not sufficient by themselves: account lockout/deactivation, membership
+// revocation, role/permission changes and tenant/company deactivation must take effect on the next request.
 app.Use(async (context, next) =>
 {
     var allowsAnonymous = context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null;
