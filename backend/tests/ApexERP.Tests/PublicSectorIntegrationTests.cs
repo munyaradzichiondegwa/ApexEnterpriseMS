@@ -494,8 +494,8 @@ namespace ApexERP.Tests
             await service.RealiseCommitmentAsync(companyId, commitment.Id, 20m);
 
             var report = await service.GetExpenditureReportAsync(companyId, 2026);
-            var vote = Assert.Single(report.Where(x => x.FundCentreId == voteId));
-            var program = Assert.Single(report.Where(x => x.FundCentreId == programId));
+            var vote = Assert.Single(report, x => x.FundCentreId == voteId);
+            var program = Assert.Single(report, x => x.FundCentreId == programId);
 
             Assert.Equal(FundCentreLevel.Vote, vote.Level);
             Assert.Null(vote.ParentCode);
