@@ -247,6 +247,22 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<TenantSlaPolicy>().HasIndex(x => x.TenantId).IsUnique();
             modelBuilder.Entity<TenantSlaIncident>().HasIndex(x => new { x.TenantId, x.IncidentNumber }).IsUnique();
             modelBuilder.Entity<TenantSlaIncident>().HasIndex(x => new { x.TenantId, x.Status, x.OpenedAt });
+            // FK indexes are explicit so the migration, snapshot and production query plan remain aligned.
+            modelBuilder.Entity<OrganisationalBranch>().HasIndex(x => x.ParentBranchId);
+            modelBuilder.Entity<CompanyMembership>().HasIndex(x => x.RoleId);
+            modelBuilder.Entity<TenantSubscription>().HasIndex(x => x.PlanId);
+            modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => x.CompanyId);
+            modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => x.CountryCode);
+            modelBuilder.Entity<TenantOnboarding>().HasIndex(x => x.DeploymentProfileId);
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.AcceptedUserId);
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.CompanyId);
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.TenantId);
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.AcceptedUserId);
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.CompanyId);
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.InvitedBy);
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.RoleId);
+            modelBuilder.Entity<Department>().HasIndex(x => x.BranchId);
+            modelBuilder.Entity<CostCentre>().HasIndex(x => x.BranchId);
             modelBuilder.Entity<TenantSlaPolicy>().Property(x => x.BusinessHoursJson).HasColumnType("jsonb");
             modelBuilder.Entity<PlatformAuditEvent>().HasIndex(x => new { x.TenantId, x.CreatedAt });
             modelBuilder.Entity<OrganisationalBranch>().Property(x => x.Code).HasMaxLength(40);
