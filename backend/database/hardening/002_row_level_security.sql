@@ -139,6 +139,7 @@ CREATE POLICY apex_user_membership_access ON "Users"
         OR EXISTS (
             SELECT 1 FROM "CompanyMemberships" m
             WHERE m."UserId" = "Users"."Id"
+              AND m."UserId" = nullif(current_setting('app.user_id', true), '')::uuid
               AND m."CompanyId" = nullif(current_setting('app.company_id', true), '')::uuid
               AND m."IsActive" = true
               AND (m."ValidFrom" IS NULL OR m."ValidFrom" <= now())
