@@ -253,17 +253,23 @@ public sealed class OrganisationManagementController : ApiControllerBase
         using var scope = _db.SystemAccessScope("tenant configuration: set jurisdiction");
         var profile = await _db.JurisdictionProfiles.SingleOrDefaultAsync(x => x.CountryCode == request.CountryCode.ToUpperInvariant() && x.IsActive, ct);
         if (profile is null) return BadRequest(new { error = "The jurisdiction is not in the configured country catalogue." });
-        var row = await _db.TenantJurisdictions.SingleOrDefaultAsync(x => x.TenantId == TenantId && x.CountryCode == profile.CountryCode, ct);
-        if (row is null) { row = new TenantJurisdiction { TenantId = TenantId, CountryCode = profile.CountryCode }; _db.TenantJurisdictions.Add(row); }
+        var targetCompanyId = request.CompanyId ?? CompanyId;
+        var targetCompany = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == targetCompanyId && x.TenantId == TenantId && x.IsActive, ct);
+        if (targetCompany is null) return BadRequest(new { error = "The jurisdiction must be assigned to an active company in this tenant." });
+        var row = await _db.TenantJurisdictions.SingleOrDefaultAsync(x => x.TenantId == TenantId && x.CompanyId == targetCompanyId && x.CountryCode == profile.CountryCode, ct);
+        if (row is null) { row = new TenantJurisdiction { TenantId = TenantId, CompanyId = targetCompanyId, CountryCode = profile.CountryCode }; _db.TenantJurisdictions.Add(row); }
         row.FunctionalCurrency = request.FunctionalCurrency.ToUpperInvariant();
         row.FiscalYearStartMonth = request.FiscalYearStartMonth;
         row.ReportingFramework = request.ReportingFramework;
         row.TaxConfigurationJson = "{}"; // Tax packs require verified, effective-dated legal configuration.
         row.IsPrimary = request.IsPrimary;
         row.ConfigurationStatus = "PendingStatutoryReview";
+        targetCompany.FunctionalCurrency = row.FunctionalCurrency;
+        targetCompany.FiscalYearStartMonth = row.FiscalYearStartMonth;
+        if (!string.IsNullOrWhiteSpace(request.Timezone)) targetCompany.Timezone = request.Timezone;
         if (request.IsPrimary)
         {
-            var others = await _db.TenantJurisdictions.Where(x => x.TenantId == TenantId && x.Id != row.Id).ToListAsync(ct);
+            var others = await _db.TenantJurisdictions.Where(x => x.TenantId == TenantId && x.CompanyId == targetCompanyId && x.Id != row.Id).ToListAsync(ct);
             foreach (var other in others) other.IsPrimary = false;
         }
         await _db.SaveChangesAsync(ct);
@@ -304,5 +310,5 @@ public sealed record CreateBranchRequest(string Code, string Name, Guid? ParentB
 public sealed record AddCompanyMemberRequest(Guid UserId, Guid RoleId);
 public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
-    string ReportingFramework, bool IsPrimary = false);
+    string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null);
 public sealed record UpdateOnboardingRequest(string[] CompletedSteps, Guid? DeploymentProfileId = null, bool Completed = false);
