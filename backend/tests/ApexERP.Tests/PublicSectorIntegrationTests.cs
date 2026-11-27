@@ -404,7 +404,7 @@ namespace ApexERP.Tests
                     BaseCurrency = "USD",
                     FunctionalCurrency = "USD"
                 });
-                seed.Vendors.Add(new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-002", Name = "Late Supplier", IsApproved = true });
+                seed.Vendors.Add(new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-002", Name = "Late Supplier", IsApproved = true, TaxClearanceValidTo = DateTime.UtcNow.AddDays(30), RegistrationValidTo = DateTime.UtcNow.AddDays(30) });
                 await seed.SaveChangesAsync();
             }
 
