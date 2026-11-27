@@ -19,7 +19,7 @@ CREATE TABLE "OrganisationalBranches" (
  "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
 CREATE UNIQUE INDEX "IX_OrganisationalBranches_CompanyId_Code" ON "OrganisationalBranches" ("CompanyId","Code");
 CREATE TABLE "CompanyMemberships" (
- "Id" uuid PRIMARY KEY, "CompanyId" uuid NOT NULL, "UserId" uuid NOT NULL, "MembershipRole" text NOT NULL,
+ "Id" uuid PRIMARY KEY, "CompanyId" uuid NOT NULL, "UserId" uuid NOT NULL, "MembershipRole" text NOT NULL, "RoleId" uuid NULL,
  "IsDefault" boolean NOT NULL, "IsActive" boolean NOT NULL, "ValidFrom" timestamptz NULL, "ValidTo" timestamptz NULL,
  "CreatedAt" timestamptz NOT NULL, "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
 CREATE UNIQUE INDEX "IX_CompanyMemberships_CompanyId_UserId" ON "CompanyMemberships" ("CompanyId","UserId");
