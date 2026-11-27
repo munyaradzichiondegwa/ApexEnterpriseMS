@@ -34,6 +34,7 @@ public sealed class FxRevaluationService
 
     public async Task<FxRevaluationPreview> PreviewAsync(Guid companyId, DateTime asOfDate, CancellationToken ct = default)
     {
+        asOfDate = DateTime.SpecifyKind(asOfDate.Date, DateTimeKind.Utc);
         var company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == companyId, ct)
             ?? throw new InvalidOperationException("Company not found.");
         var functionalCurrency = company.FunctionalCurrency.Trim().ToUpperInvariant();
@@ -113,6 +114,7 @@ public sealed class FxRevaluationService
     public Task<JournalEntry> PostAsync(Guid companyId, DateTime asOfDate, Guid fxGainAccountId,
         Guid fxLossAccountId, Guid postedBy, CancellationToken ct = default)
     {
+        asOfDate = DateTime.SpecifyKind(asOfDate.Date, DateTimeKind.Utc);
         return _db.InTransactionAsync(async token =>
         {
             await _db.AcquireTransactionLockAsync($"fx-revaluation:{companyId:N}:{asOfDate:yyyyMMdd}", token);
