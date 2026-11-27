@@ -264,6 +264,14 @@ namespace ApexERP.Tests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.AwardAsync(companyId, tenderId, vendorId, " "));
 
+            var winningVendor = await ctx.Vendors.SingleAsync(v => v.Id == vendorId);
+            winningVendor.IsApproved = false;
+            await ctx.SaveChangesAsync();
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.AwardAsync(companyId, tenderId, vendorId, "Approval was revoked after bid submission."));
+
+            winningVendor.IsApproved = true;
+            await ctx.SaveChangesAsync();
             var awarded = await service.AwardAsync(companyId, tenderId, vendorId, "Highest evaluated compliant bid.");
             Assert.Equal(TenderStatus.Awarded, awarded.Status);
             Assert.Equal(vendorId, awarded.AwardedVendorId);
