@@ -7,6 +7,8 @@ import { useAuth } from "@/lib/auth";
 
 type Company = { id: string; name: string; functionalCurrency: string; baseCurrency: string; fiscalYearStartMonth: number; sector?: string | null; isActive: boolean; parentCompanyId?: string | null };
 type Branch = { id: string; code: string; name: string; parentBranchId?: string | null; isActive: boolean };
+type Department = { id: string; name: string; branchId?: string | null; costCentreId?: string | null; managerId?: string | null };
+type CostCentre = { id: string; code: string; name: string; parentId?: string | null; branchId?: string | null; isActive: boolean };
 type Member = { id: string; userId: string; email: string; firstName: string; lastName: string; membershipRole: string; isActive: boolean };
 type Role = { id: string; name: string; isSystemRole: boolean };
 type Profile = { id: string; code: string; name: string; sector: string; configurationJson: string };
@@ -31,6 +33,8 @@ export default function OrganisationPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [costCentres, setCostCentres] = useState<CostCentre[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -47,6 +51,8 @@ export default function OrganisationPage() {
 
   const [companyForm, setCompanyForm] = useState({ name: "", currency: "USD", fiscalYearStartMonth: "1" });
   const [branchForm, setBranchForm] = useState({ code: "", name: "", parentBranchId: "" });
+  const [departmentForm, setDepartmentForm] = useState({ name: "", branchId: "", costCentreId: "" });
+  const [costCentreForm, setCostCentreForm] = useState({ code: "", name: "", parentId: "", branchId: "" });
   const [inviteForm, setInviteForm] = useState({ email: "", roleId: "" });
   const [jurisdictionForm, setJurisdictionForm] = useState({ countryCode: "ZW", functionalCurrency: "ZWG", baseCurrency: "ZWG", fiscalYearStartMonth: "1", reportingFramework: "IFRS", timezone: "Africa/Harare" });
 
@@ -80,12 +86,16 @@ export default function OrganisationPage() {
 
   async function loadCompany(companyId: string) {
     if (!companyId) return;
-    const [branchResult, memberResult, roleResult] = await Promise.allSettled([
+    const [branchResult, memberResult, roleResult, departmentResult, costCentreResult] = await Promise.allSettled([
       api.get(`/organisation/companies/${companyId}/branches`),
       api.get(`/organisation/companies/${companyId}/members`),
       api.get(`/organisation/companies/${companyId}/roles`),
+      api.get(`/organisation/companies/${companyId}/departments`),
+      api.get(`/organisation/companies/${companyId}/cost-centres`),
     ]);
     if (branchResult.status === "fulfilled") setBranches(branchResult.value.data);
+    if (departmentResult.status === "fulfilled") setDepartments(departmentResult.value.data);
+    if (costCentreResult.status === "fulfilled") setCostCentres(costCentreResult.value.data);
     if (memberResult.status === "fulfilled") setMembers(memberResult.value.data);
     if (roleResult.status === "fulfilled") {
       setRoles(roleResult.value.data);
@@ -127,6 +137,32 @@ export default function OrganisationPage() {
       await loadCompany(selectedCompanyId);
       setBranchForm({ code: "", name: "", parentBranchId: "" });
       setNotice("Branch created.");
+    } catch (e) { setError(extractErrorMessage(e)); } finally { finish(); }
+  }
+
+  async function createDepartment(event: FormEvent) {
+    event.preventDefault(); if (!selectedCompanyId) return; begin();
+    try {
+      await api.post(`/organisation/companies/${selectedCompanyId}/departments`, {
+        name: departmentForm.name, branchId: departmentForm.branchId || null,
+        costCentreId: departmentForm.costCentreId || null,
+      });
+      await loadCompany(selectedCompanyId);
+      setDepartmentForm({ name: "", branchId: "", costCentreId: "" });
+      setNotice("Department created.");
+    } catch (e) { setError(extractErrorMessage(e)); } finally { finish(); }
+  }
+
+  async function createCostCentre(event: FormEvent) {
+    event.preventDefault(); if (!selectedCompanyId) return; begin();
+    try {
+      await api.post(`/organisation/companies/${selectedCompanyId}/cost-centres`, {
+        code: costCentreForm.code, name: costCentreForm.name,
+        parentId: costCentreForm.parentId || null, branchId: costCentreForm.branchId || null,
+      });
+      await loadCompany(selectedCompanyId);
+      setCostCentreForm({ code: "", name: "", parentId: "", branchId: "" });
+      setNotice("Cost centre created.");
     } catch (e) { setError(extractErrorMessage(e)); } finally { finish(); }
   }
 
@@ -195,7 +231,7 @@ export default function OrganisationPage() {
       {notice && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 p-3 mb-4 text-sm break-words">{notice}</div>}
 
       <div className="flex flex-wrap gap-2 mb-5">
-        {["overview", "companies", "branches", "members", "jurisdiction", "onboarding"].map((item) =>
+        {["overview", "companies", "branches", "departments", "cost-centres", "members", "jurisdiction", "onboarding"].map((item) =>
           <button key={item} type="button" onClick={() => setTab(item)}
             className={`rounded-lg px-3 py-2 text-sm font-medium ${tab === item ? "bg-brand-700 text-white" : "bg-white border text-slate-600"}`}>
             {item[0].toUpperCase() + item.slice(1)}
@@ -255,6 +291,41 @@ export default function OrganisationPage() {
             <label className="text-sm">Branch name<input className="input mt-1" required value={branchForm.name} onChange={(e) => setBranchForm({ ...branchForm, name: e.target.value })} /></label>
             <label className="text-sm">Parent branch<select className="input mt-1" value={branchForm.parentBranchId} onChange={(e) => setBranchForm({ ...branchForm, parentBranchId: e.target.value })}><option value="">No parent</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
             <button className="btn-primary" disabled={busy}>Add branch</button>
+          </form>
+        </section>
+      )}
+
+      {tab === "departments" && (
+        <section className="card">
+          <h2 className="font-semibold mb-3">Departments — {selectedCompany?.name}</h2>
+          <div className="overflow-x-auto mb-5">
+            <table className="table-base"><thead><tr><th>Name</th><th>Branch</th><th>Cost centre</th></tr></thead>
+              <tbody>{departments.map((x) => <tr key={x.id}><td>{x.name}</td><td>{branches.find((b) => b.id === x.branchId)?.name ?? "—"}</td><td>{costCentres.find((c) => c.id === x.costCentreId)?.code ?? "—"}</td></tr>)}</tbody>
+            </table>
+          </div>
+          <form onSubmit={createDepartment} className="grid gap-3 md:grid-cols-4 items-end">
+            <label className="text-sm">Department name<input className="input mt-1" required value={departmentForm.name} onChange={(e) => setDepartmentForm({ ...departmentForm, name: e.target.value })} /></label>
+            <label className="text-sm">Branch<select className="input mt-1" value={departmentForm.branchId} onChange={(e) => setDepartmentForm({ ...departmentForm, branchId: e.target.value })}><option value="">No branch</option>{branches.filter((b) => b.isActive).map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></label>
+            <label className="text-sm">Cost centre<select className="input mt-1" value={departmentForm.costCentreId} onChange={(e) => setDepartmentForm({ ...departmentForm, costCentreId: e.target.value })}><option value="">No cost centre</option>{costCentres.filter((x) => x.isActive).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</select></label>
+            <button className="btn-primary" disabled={busy}>Add department</button>
+          </form>
+        </section>
+      )}
+
+      {tab === "cost-centres" && (
+        <section className="card">
+          <h2 className="font-semibold mb-3">Cost centres — {selectedCompany?.name}</h2>
+          <div className="overflow-x-auto mb-5">
+            <table className="table-base"><thead><tr><th>Code</th><th>Name</th><th>Parent</th><th>Branch</th><th>Status</th></tr></thead>
+              <tbody>{costCentres.map((x) => <tr key={x.id}><td>{x.code}</td><td>{x.name}</td><td>{costCentres.find((p) => p.id === x.parentId)?.name ?? "—"}</td><td>{branches.find((b) => b.id === x.branchId)?.name ?? "—"}</td><td>{x.isActive ? "Active" : "Inactive"}</td></tr>)}</tbody>
+            </table>
+          </div>
+          <form onSubmit={createCostCentre} className="grid gap-3 md:grid-cols-5 items-end">
+            <label className="text-sm">Code<input className="input mt-1" required value={costCentreForm.code} onChange={(e) => setCostCentreForm({ ...costCentreForm, code: e.target.value.toUpperCase() })} /></label>
+            <label className="text-sm">Name<input className="input mt-1" required value={costCentreForm.name} onChange={(e) => setCostCentreForm({ ...costCentreForm, name: e.target.value })} /></label>
+            <label className="text-sm">Parent<select className="input mt-1" value={costCentreForm.parentId} onChange={(e) => setCostCentreForm({ ...costCentreForm, parentId: e.target.value })}><option value="">No parent</option>{costCentres.filter((x) => x.isActive).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</select></label>
+            <label className="text-sm">Branch<select className="input mt-1" value={costCentreForm.branchId} onChange={(e) => setCostCentreForm({ ...costCentreForm, branchId: e.target.value })}><option value="">No branch</option>{branches.filter((b) => b.isActive).map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></label>
+            <button className="btn-primary" disabled={busy}>Add cost centre</button>
           </form>
         </section>
       )}
