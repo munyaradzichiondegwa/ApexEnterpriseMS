@@ -80,6 +80,18 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("Purchase order not found in this company.");
                 if (purchaseOrder.Status != PurchaseOrderStatus.Approved || purchaseOrder.FundCentreId != fundCentreId)
                     throw new InvalidOperationException("A commitment requires an approved purchase order assigned to the same fund centre.");
+                if (allowOverride)
+                {
+                    var overrideApproval = await _db.WorkflowRequests.Include(w => w.Approvals)
+                        .FirstOrDefaultAsync(w => w.CompanyId == companyId &&
+                            w.RequestType == "PublicSectorBudgetOverride" && w.ReferenceTable == "PurchaseOrder" &&
+                            w.ReferenceId == purchaseOrderId && w.SubmittedBy == actorId &&
+                            w.Notes == overrideReason!.Trim() && w.Status == WorkflowStatus.Approved &&
+                            w.ApprovalChainId != null, token);
+                    if (overrideApproval == null || overrideApproval.Approvals.Count == 0 ||
+                        overrideApproval.Approvals.Any(a => !a.Approved))
+                        throw new InvalidOperationException("A budget override requires independent approval through the configured PublicSectorBudgetOverride approval chain before commitment.");
+                }
                 if (amount != purchaseOrder.Total)
                     throw new InvalidOperationException("The commitment amount must equal the approved purchase order total.");
                 if (await _db.Commitments.AnyAsync(c => c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId, token))
