@@ -121,6 +121,10 @@ namespace ApexERP.Application.Services
             var winningBid = await _db.TenderBids.FirstOrDefaultAsync(b => b.CompanyId == companyId &&
                 b.TenderNoticeId == tenderNoticeId && b.VendorId == winningVendorId && !b.IsLateRejected, ct)
                 ?? throw new InvalidOperationException("The selected vendor has no eligible bid for this tender.");
+            var winningVendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == winningVendorId && v.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("The selected vendor is no longer registered in this company.");
+            if (!winningVendor.IsApproved)
+                throw new InvalidOperationException("A vendor whose approval has been revoked cannot receive a tender award.");
             if (winningBid.TotalScore <= 0)
                 throw new InvalidOperationException("The selected bid must be evaluated before award.");
             tender.Status = TenderStatus.Awarded;
