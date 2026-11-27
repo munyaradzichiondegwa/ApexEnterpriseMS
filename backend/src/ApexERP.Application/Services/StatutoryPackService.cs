@@ -421,7 +421,7 @@ public sealed class StatutoryPackService
                     RatePct = (code == "NSSA_EMPLOYEE" ? employeeRate : employerRate) * 100m,
                     Ceiling = nssaCeiling, Currency = currency, EffectiveFrom = document.EffectiveFrom,
                     EffectiveTo = document.EffectiveTo, SourceReference = source.Title + " — " + source.Url,
-                    CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy, ApprovedAt = document.ApprovedAt
+                    CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy
                 });
             }
 
