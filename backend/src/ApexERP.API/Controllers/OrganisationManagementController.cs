@@ -131,6 +131,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             OwnershipPercentage = request.OwnershipPercentage, IsPublicSectorEntity = request.IsPublicSectorEntity
         };
         _db.Companies.Add(company);
+        await _db.SaveChangesAsync(ct);
         var roleMap = new Dictionary<Guid, Guid>();
         foreach (var oldRole in sourceRoles)
         {
@@ -139,6 +140,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             _db.Roles.Add(newRole);
             roleMap[oldRole.Id] = newRole.Id;
         }
+        await _db.SaveChangesAsync(ct);
         var currentRoleId = Guid.TryParse(User.FindFirst("role_id")?.Value, out var rid) ? rid : sourceRoles.FirstOrDefault(x => x.Name == User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value)?.Id;
         Guid? targetRole = currentRoleId.HasValue && roleMap.TryGetValue(currentRoleId.Value, out var mapped)
             ? mapped : roleMap.Values.Select(x => (Guid?)x).FirstOrDefault();
