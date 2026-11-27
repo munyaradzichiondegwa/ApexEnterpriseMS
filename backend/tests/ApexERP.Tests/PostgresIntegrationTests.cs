@@ -141,6 +141,8 @@ namespace ApexERP.Tests
             var companyB1 = Guid.NewGuid();
             var memberUserId = Guid.NewGuid();
             var unrelatedUserId = Guid.NewGuid();
+            var memberUserId = Guid.NewGuid();
+            var unrelatedUserId = Guid.NewGuid();
 
             await using (var seed = db.NewContext(null))
             {
@@ -265,15 +267,15 @@ namespace ApexERP.Tests
                     new Company { Id = companyA1, TenantId = tenantA, Name = "RLS A1" },
                     new Company { Id = companyA2, TenantId = tenantA, Name = "RLS A2" },
                     new Company { Id = companyB1, TenantId = tenantB, Name = "RLS B1" });
-                var homeRole = new Role { CompanyId = companyA1, TenantId = tenantA, Name = "Home role", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
-                var subsidiaryRole = new Role { CompanyId = companyA2, TenantId = tenantA, Name = "Subsidiary role", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
+                var homeRole = new Role { CompanyId = companyA1, Name = "Home role", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
+                var subsidiaryRole = new Role { CompanyId = companyA2, Name = "Subsidiary role", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
                 seed.Roles.AddRange(homeRole, subsidiaryRole);
                 seed.Users.AddRange(
-                    new User { Id = memberUserId, CompanyId = companyA1, TenantId = tenantA, Email = "rls-member@example.com", PasswordHash = "test", FirstName = "RLS", LastName = "Member", RoleId = homeRole.Id, IsActive = true },
-                    new User { Id = unrelatedUserId, CompanyId = companyA1, TenantId = tenantA, Email = "rls-unrelated@example.com", PasswordHash = "test", FirstName = "RLS", LastName = "Unrelated", RoleId = homeRole.Id, IsActive = true });
+                    new User { Id = memberUserId, CompanyId = companyA1, Email = "rls-member@example.com", PasswordHash = "test", FirstName = "RLS", LastName = "Member", RoleId = homeRole.Id, IsActive = true },
+                    new User { Id = unrelatedUserId, CompanyId = companyA1, Email = "rls-unrelated@example.com", PasswordHash = "test", FirstName = "RLS", LastName = "Unrelated", RoleId = homeRole.Id, IsActive = true });
                 seed.CompanyMemberships.Add(new CompanyMembership
                 {
-                    CompanyId = companyA2, TenantId = tenantA, UserId = memberUserId, RoleId = subsidiaryRole.Id,
+                    CompanyId = companyA2, UserId = memberUserId, RoleId = subsidiaryRole.Id,
                     MembershipRole = "Subsidiary role", IsActive = true, ValidFrom = DateTime.UtcNow
                 });
                 var plan = new SubscriptionPlan { Id = Guid.NewGuid(), Code = "RLS-TEST", Name = "RLS test", MaxSeats = 10, MaxCompanies = 5, ModuleCodesJson = "[\"*\"]", Currency = "USD", IsActive = true };
