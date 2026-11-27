@@ -8,7 +8,9 @@ import { useAuth } from "@/lib/auth";
 type Company = { id: string; name: string; functionalCurrency: string; baseCurrency: string; fiscalYearStartMonth: number; sector?: string | null; isActive: boolean; parentCompanyId?: string | null };
 type Branch = { id: string; code: string; name: string; parentBranchId?: string | null; isActive: boolean };
 type Department = { id: string; name: string; branchId?: string | null; costCentreId?: string | null; managerId?: string | null; isActive: boolean };
-type CostCentre = { id: string; code: string; name: string; parentId?: string | null; branchId?: string | null; isActive: boolean };
+type CostCentre = { id: string; code: string; name: string; parentId?: string | null; branchId?: string | null; segmentId?: string | null; isActive: boolean };
+type Segment = { id: string; code: string; name: string; isActive: boolean };
+type Employee = { id: string; employeeNo: string; firstName: string; lastName: string; isActive: boolean };
 type Member = { id: string; userId: string; email: string; firstName: string; lastName: string; membershipRole: string; isActive: boolean };
 type Role = { id: string; name: string; isSystemRole: boolean };
 type Profile = { id: string; code: string; name: string; sector: string; configurationJson: string };
@@ -35,6 +37,8 @@ export default function OrganisationPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [costCentres, setCostCentres] = useState<CostCentre[]>([]);
+  const [segments, setSegments] = useState<Segment[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -51,8 +55,8 @@ export default function OrganisationPage() {
 
   const [companyForm, setCompanyForm] = useState({ name: "", currency: "USD", fiscalYearStartMonth: "1" });
   const [branchForm, setBranchForm] = useState({ code: "", name: "", parentBranchId: "" });
-  const [departmentForm, setDepartmentForm] = useState({ name: "", branchId: "", costCentreId: "" });
-  const [costCentreForm, setCostCentreForm] = useState({ code: "", name: "", parentId: "", branchId: "" });
+  const [departmentForm, setDepartmentForm] = useState({ name: "", branchId: "", costCentreId: "", managerId: "" });
+  const [costCentreForm, setCostCentreForm] = useState({ code: "", name: "", parentId: "", branchId: "", segmentId: "" });
   const [editingBranchId, setEditingBranchId] = useState("");
   const [editingDepartmentId, setEditingDepartmentId] = useState("");
   const [editingCostCentreId, setEditingCostCentreId] = useState("");
@@ -89,16 +93,20 @@ export default function OrganisationPage() {
 
   async function loadCompany(companyId: string) {
     if (!companyId) return;
-    const [branchResult, memberResult, roleResult, departmentResult, costCentreResult] = await Promise.allSettled([
+    const [branchResult, memberResult, roleResult, departmentResult, costCentreResult, segmentResult, employeeResult] = await Promise.allSettled([
       api.get(`/organisation/companies/${companyId}/branches`),
       api.get(`/organisation/companies/${companyId}/members`),
       api.get(`/organisation/companies/${companyId}/roles`),
       api.get(`/organisation/companies/${companyId}/departments`),
       api.get(`/organisation/companies/${companyId}/cost-centres`),
+      api.get(`/organisation/companies/${companyId}/segments`),
+      api.get(`/organisation/companies/${companyId}/employees`),
     ]);
     if (branchResult.status === "fulfilled") setBranches(branchResult.value.data);
     if (departmentResult.status === "fulfilled") setDepartments(departmentResult.value.data);
     if (costCentreResult.status === "fulfilled") setCostCentres(costCentreResult.value.data);
+    if (segmentResult.status === "fulfilled") setSegments(segmentResult.value.data);
+    if (employeeResult.status === "fulfilled") setEmployees(employeeResult.value.data);
     if (memberResult.status === "fulfilled") setMembers(memberResult.value.data);
     if (roleResult.status === "fulfilled") {
       setRoles(roleResult.value.data);
@@ -148,10 +156,10 @@ export default function OrganisationPage() {
     try {
       await api.post(`/organisation/companies/${selectedCompanyId}/departments`, {
         name: departmentForm.name, branchId: departmentForm.branchId || null,
-        costCentreId: departmentForm.costCentreId || null,
+        costCentreId: departmentForm.costCentreId || null, managerId: departmentForm.managerId || null,
       });
       await loadCompany(selectedCompanyId);
-      setDepartmentForm({ name: "", branchId: "", costCentreId: "" });
+      setDepartmentForm({ name: "", branchId: "", costCentreId: "", managerId: "" });
       setNotice("Department created.");
     } catch (e) { setError(extractErrorMessage(e)); } finally { finish(); }
   }
@@ -162,9 +170,10 @@ export default function OrganisationPage() {
       await api.post(`/organisation/companies/${selectedCompanyId}/cost-centres`, {
         code: costCentreForm.code, name: costCentreForm.name,
         parentId: costCentreForm.parentId || null, branchId: costCentreForm.branchId || null,
+        segmentId: costCentreForm.segmentId || null,
       });
       await loadCompany(selectedCompanyId);
-      setCostCentreForm({ code: "", name: "", parentId: "", branchId: "" });
+      setCostCentreForm({ code: "", name: "", parentId: "", branchId: "", segmentId: "" });
       setNotice("Cost centre created.");
     } catch (e) { setError(extractErrorMessage(e)); } finally { finish(); }
   }
@@ -192,9 +201,10 @@ export default function OrganisationPage() {
     try {
       await api.put(`/organisation/companies/${selectedCompanyId}/departments/${editingDepartmentId}`, {
         name: departmentForm.name, branchId: departmentForm.branchId || null, costCentreId: departmentForm.costCentreId || null,
+        managerId: departmentForm.managerId || null, clearManager: !departmentForm.managerId,
       });
       await loadCompany(selectedCompanyId); setEditingDepartmentId("");
-      setDepartmentForm({ name: "", branchId: "", costCentreId: "" }); setNotice("Department updated.");
+      setDepartmentForm({ name: "", branchId: "", costCentreId: "", managerId: "" }); setNotice("Department updated.");
     } catch (e) { setError(extractErrorMessage(e)); } finally { finish(); }
   }
 
@@ -210,9 +220,10 @@ export default function OrganisationPage() {
     try {
       await api.put(`/organisation/companies/${selectedCompanyId}/cost-centres/${editingCostCentreId}`, {
         code: costCentreForm.code, name: costCentreForm.name, parentId: costCentreForm.parentId || null, branchId: costCentreForm.branchId || null,
+        segmentId: costCentreForm.segmentId || null, clearSegment: !costCentreForm.segmentId,
       });
       await loadCompany(selectedCompanyId); setEditingCostCentreId("");
-      setCostCentreForm({ code: "", name: "", parentId: "", branchId: "" }); setNotice("Cost centre updated.");
+      setCostCentreForm({ code: "", name: "", parentId: "", branchId: "", segmentId: "" }); setNotice("Cost centre updated.");
     } catch (e) { setError(extractErrorMessage(e)); } finally { finish(); }
   }
 
@@ -357,14 +368,15 @@ export default function OrganisationPage() {
         <section className="card">
           <h2 className="font-semibold mb-3">Departments — {selectedCompany?.name}</h2>
           <div className="overflow-x-auto mb-5">
-            <table className="table-base"><thead><tr><th>Name</th><th>Branch</th><th>Cost centre</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody>{departments.map((x) => <tr key={x.id}><td>{x.name}</td><td>{branches.find((b) => b.id === x.branchId)?.name ?? "—"}</td><td>{costCentres.find((c) => c.id === x.costCentreId)?.code ?? "—"}</td><td>{x.isActive ? "Active" : "Inactive"}</td><td className="whitespace-nowrap"><button type="button" className="text-brand-700 mr-3" onClick={() => { setEditingDepartmentId(x.id); setDepartmentForm({ name: x.name, branchId: x.branchId ?? "", costCentreId: x.costCentreId ?? "" }); }}>Edit</button>{x.isActive && <button type="button" className="text-red-700" disabled={busy} onClick={() => deactivateDepartment(x.id)}>Deactivate</button>}</td></tr>)}</tbody>
+            <table className="table-base"><thead><tr><th>Name</th><th>Manager</th><th>Branch</th><th>Cost centre</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>{departments.map((x) => <tr key={x.id}><td>{x.name}</td><td>{employees.find((e) => e.id === x.managerId)?.employeeNo ?? "—"}</td><td>{branches.find((b) => b.id === x.branchId)?.name ?? "—"}</td><td>{costCentres.find((c) => c.id === x.costCentreId)?.code ?? "—"}</td><td>{x.isActive ? "Active" : "Inactive"}</td><td className="whitespace-nowrap"><button type="button" className="text-brand-700 mr-3" onClick={() => { setEditingDepartmentId(x.id); setDepartmentForm({ name: x.name, branchId: x.branchId ?? "", costCentreId: x.costCentreId ?? "", managerId: x.managerId ?? "" }); }}>Edit</button>{x.isActive && <button type="button" className="text-red-700" disabled={busy} onClick={() => deactivateDepartment(x.id)}>Deactivate</button>}</td></tr>)}</tbody>
             </table>
           </div>
           <form onSubmit={editingDepartmentId ? saveDepartment : createDepartment} className="grid gap-3 md:grid-cols-4 items-end">
             <label className="text-sm">Department name<input className="input mt-1" required value={departmentForm.name} onChange={(e) => setDepartmentForm({ ...departmentForm, name: e.target.value })} /></label>
             <label className="text-sm">Branch<select className="input mt-1" value={departmentForm.branchId} onChange={(e) => setDepartmentForm({ ...departmentForm, branchId: e.target.value })}><option value="">No branch</option>{branches.filter((b) => b.isActive).map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></label>
             <label className="text-sm">Cost centre<select className="input mt-1" value={departmentForm.costCentreId} onChange={(e) => setDepartmentForm({ ...departmentForm, costCentreId: e.target.value })}><option value="">No cost centre</option>{costCentres.filter((x) => x.isActive).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</select></label>
+            <label className="text-sm">Manager<select className="input mt-1" value={departmentForm.managerId} onChange={(e) => setDepartmentForm({ ...departmentForm, managerId: e.target.value })}><option value="">No manager</option>{employees.filter((x) => x.isActive).map((x) => <option key={x.id} value={x.id}>{x.employeeNo} — {x.firstName} {x.lastName}</option>)}</select></label>
             <button className="btn-primary" disabled={busy}>{editingDepartmentId ? "Save department" : "Add department"}</button>
             {editingDepartmentId && <button type="button" className="btn-secondary" onClick={() => { setEditingDepartmentId(""); setDepartmentForm({ name: "", branchId: "", costCentreId: "" }); }}>Cancel edit</button>}
           </form>
@@ -375,8 +387,8 @@ export default function OrganisationPage() {
         <section className="card">
           <h2 className="font-semibold mb-3">Cost centres — {selectedCompany?.name}</h2>
           <div className="overflow-x-auto mb-5">
-            <table className="table-base"><thead><tr><th>Code</th><th>Name</th><th>Parent</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody>{costCentres.map((x) => <tr key={x.id}><td>{x.code}</td><td>{x.name}</td><td>{costCentres.find((p) => p.id === x.parentId)?.name ?? "—"}</td><td>{branches.find((b) => b.id === x.branchId)?.name ?? "—"}</td><td>{x.isActive ? "Active" : "Inactive"}</td><td className="whitespace-nowrap"><button type="button" className="text-brand-700 mr-3" onClick={() => { setEditingCostCentreId(x.id); setCostCentreForm({ code: x.code, name: x.name, parentId: x.parentId ?? "", branchId: x.branchId ?? "" }); }}>Edit</button>{x.isActive && <button type="button" className="text-red-700" disabled={busy} onClick={() => deactivateCostCentre(x.id)}>Deactivate</button>}</td></tr>)}</tbody>
+            <table className="table-base"><thead><tr><th>Code</th><th>Name</th><th>Parent</th><th>Branch</th><th>Segment</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>{costCentres.map((x) => <tr key={x.id}><td>{x.code}</td><td>{x.name}</td><td>{costCentres.find((p) => p.id === x.parentId)?.name ?? "—"}</td><td>{branches.find((b) => b.id === x.branchId)?.name ?? "—"}</td><td>{segments.find((s) => s.id === x.segmentId)?.code ?? "—"}</td><td>{x.isActive ? "Active" : "Inactive"}</td><td className="whitespace-nowrap"><button type="button" className="text-brand-700 mr-3" onClick={() => { setEditingCostCentreId(x.id); setCostCentreForm({ code: x.code, name: x.name, parentId: x.parentId ?? "", branchId: x.branchId ?? "", segmentId: x.segmentId ?? "" }); }}>Edit</button>{x.isActive && <button type="button" className="text-red-700" disabled={busy} onClick={() => deactivateCostCentre(x.id)}>Deactivate</button>}</td></tr>)}</tbody>
             </table>
           </div>
           <form onSubmit={editingCostCentreId ? saveCostCentre : createCostCentre} className="grid gap-3 md:grid-cols-5 items-end">
@@ -384,6 +396,7 @@ export default function OrganisationPage() {
             <label className="text-sm">Name<input className="input mt-1" required value={costCentreForm.name} onChange={(e) => setCostCentreForm({ ...costCentreForm, name: e.target.value })} /></label>
             <label className="text-sm">Parent<select className="input mt-1" value={costCentreForm.parentId} onChange={(e) => setCostCentreForm({ ...costCentreForm, parentId: e.target.value })}><option value="">No parent</option>{costCentres.filter((x) => x.isActive && x.id !== editingCostCentreId).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</select></label>
             <label className="text-sm">Branch<select className="input mt-1" value={costCentreForm.branchId} onChange={(e) => setCostCentreForm({ ...costCentreForm, branchId: e.target.value })}><option value="">No branch</option>{branches.filter((b) => b.isActive).map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></label>
+            <label className="text-sm">Segment<select className="input mt-1" value={costCentreForm.segmentId} onChange={(e) => setCostCentreForm({ ...costCentreForm, segmentId: e.target.value })}><option value="">No segment</option>{segments.filter((x) => x.isActive).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</select></label>
             <button className="btn-primary" disabled={busy}>{editingCostCentreId ? "Save cost centre" : "Add cost centre"}</button>
             {editingCostCentreId && <button type="button" className="btn-secondary" onClick={() => { setEditingCostCentreId(""); setCostCentreForm({ code: "", name: "", parentId: "", branchId: "" }); }}>Cancel edit</button>}
           </form>
