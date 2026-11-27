@@ -244,4 +244,78 @@ public sealed class SupplyChainIntegrationTests
         Assert.Single(await verify.JournalEntries.ToListAsync());
     }
 
+    [PostgresFact]
+    public async Task AP_invoice_inherits_fund_centre_grant_and_active_commitment_from_its_po()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var companyId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var vendorId = Guid.NewGuid();
+        var fundCentreId = Guid.NewGuid();
+        var grantId = Guid.NewGuid();
+        var poId = Guid.NewGuid();
+        var commitmentId = Guid.NewGuid();
+        var expenseAccountId = Guid.NewGuid();
+
+        await using (var seed = db.NewContext(companyId))
+        {
+            seed.Companies.Add(new Company
+            {
+                Id = companyId, Name = "AP commitment linkage test",
+                BaseCurrency = "USD", FunctionalCurrency = "USD"
+            });
+            seed.Suppliers.Add(new Supplier
+            {
+                Id = supplierId, CompanyId = companyId, Code = "SUP-AP-01",
+                Name = "AP commitment supplier", Currency = "USD"
+            });
+            seed.Vendors.Add(new Vendor
+            {
+                Id = vendorId, CompanyId = companyId, Code = "VEN-AP-01",
+                Name = "AP commitment vendor"
+            });
+            seed.GlAccounts.Add(new GlAccount
+            {
+                Id = expenseAccountId, CompanyId = companyId, Code = "5200",
+                Name = "Programme Expense", Type = GlAccountType.Expense, Currency = "USD"
+            });
+            seed.FundCentres.Add(new FundCentre
+            {
+                Id = fundCentreId, CompanyId = companyId, Code = "VOTE-AP",
+                Name = "AP Vote", Level = FundCentreLevel.Vote,
+                FinancialYear = 2026, AppropriationAmount = 1000m
+            });
+            seed.PurchaseOrders.Add(new PurchaseOrder
+            {
+                Id = poId, CompanyId = companyId, VendorId = vendorId,
+                PoNo = "PO-AP-LINK", IssueDate = new DateTime(2026, 3, 1),
+                Status = PurchaseOrderStatus.Approved, Total = 100m,
+                FundCentreId = fundCentreId, GrantId = grantId
+            });
+            seed.Commitments.Add(new Commitment
+            {
+                Id = commitmentId, CompanyId = companyId, FundCentreId = fundCentreId,
+                PurchaseOrderId = poId, Amount = 100m, RealisedAmount = 0m,
+                Status = CommitmentStatus.Active, CommittedDate = new DateTime(2026, 3, 1)
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var ctx = db.NewContext(companyId);
+        var audit = new AuditService(ctx);
+        var gl = new GlPostingService(ctx, audit, new JournalControlOptions());
+        var publicSector = new PublicSectorService(ctx, audit);
+        var ap = new ApService(ctx, gl, publicSector: publicSector);
+
+        var invoice = await ap.CreateInvoiceAsync(companyId, supplierId, new DateTime(2026, 3, 10),
+            "USD", 1m,
+            new[] { new ApInvoiceLineRequest("Programme delivery", 1m, 75m, null, expenseAccountId) },
+            purchaseOrderId: poId);
+
+        Assert.Equal(fundCentreId, invoice.FundCentreId);
+        Assert.Equal(grantId, invoice.GrantId);
+        Assert.Equal(commitmentId, invoice.CommitmentId);
+        Assert.Equal(poId, invoice.PurchaseOrderId);
+    }
+
 }
