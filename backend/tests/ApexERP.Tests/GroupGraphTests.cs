@@ -1,4 +1,5 @@
 using ApexERP.Application.Services;
+using ApexERP.Domain.Entities;
 using Xunit;
 
 namespace ApexERP.Tests
@@ -15,6 +16,34 @@ namespace ApexERP.Tests
         {
             [A] = null, [B] = A, [C] = B, [D] = null, [E] = null
         };
+
+        [Fact]
+        public void Effective_group_ownership_compounds_indirect_subsidiary_percentages()
+        {
+            var parent = new Company { Id = A };
+            var subsidiary = new Company { Id = B, ParentCompanyId = A, OwnershipPercentage = 80m };
+            var grandchild = new Company { Id = C, ParentCompanyId = B, OwnershipPercentage = 70m };
+
+            Assert.Equal(0.80m, ConsolidationService.CalculateEffectiveGroupOwnershipPercentage(
+                new[] { parent, subsidiary, grandchild }, A, B));
+            Assert.Equal(0.56m, ConsolidationService.CalculateEffectiveGroupOwnershipPercentage(
+                new[] { parent, subsidiary, grandchild }, A, C));
+        }
+
+        [Fact]
+        public void Effective_group_ownership_rejects_incomplete_or_invalid_chains()
+        {
+            var parent = new Company { Id = A };
+            var missing = new Company { Id = B, ParentCompanyId = A };
+            var invalid = new Company { Id = C, ParentCompanyId = A, OwnershipPercentage = 101m };
+
+            Assert.Null(ConsolidationService.CalculateEffectiveGroupOwnershipPercentage(
+                new[] { parent, missing }, A, B));
+            Assert.Null(ConsolidationService.CalculateEffectiveGroupOwnershipPercentage(
+                new[] { parent, invalid }, A, C));
+            Assert.Null(ConsolidationService.CalculateEffectiveGroupOwnershipPercentage(
+                new[] { parent, missing }, A, D));
+        }
 
         [Fact]
         public void Consolidation_eliminates_only_exact_reciprocal_balances()
