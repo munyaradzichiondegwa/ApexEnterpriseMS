@@ -358,7 +358,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         {
             var cc = await _db.CostCentres.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.CostCentreId && x.CompanyId == companyId && x.IsActive, ct);
             if (cc is null) return BadRequest(new { error = "Cost centre must be active and belong to the same company." });
-            if (request.BranchId.HasValue && cc.BranchId.HasValue && cc.BranchId != request.BranchId)
+            if (cc.BranchId.HasValue && cc.BranchId != request.BranchId)
                 return BadRequest(new { error = "The department branch must match the selected cost centre branch." });
         }
         if (request.ManagerId.HasValue && !await _db.Employees.IgnoreQueryFilters()
