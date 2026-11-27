@@ -162,7 +162,7 @@ public sealed class StatutoryPackService
         {
           "packKind": "tax-baseline",
           "coverage": "baseline-only",
-          "approvalNotice": "DRAFT ONLY. Do not activate for statutory calculations or filing until reviewed and approved. VAT exemptions, zero-rated schedules, withholding taxes, customs, capital allowances, tax credits, special regimes and filing-specific edge cases are not fully represented.",
+          "approvalNotice": "DRAFT ONLY. Do not activate for statutory calculations or filing until reviewed and approved. NSSA ZWG insurable ceiling and APWCS industry-specific premiums are not included. VAT exemptions, zero-rated schedules, withholding taxes, customs, capital allowances, tax credits, special regimes and filing-specific edge cases are not fully represented.",
           "effectiveCurrencySet": ["USD", "ZWG"],
           "paye": {
             "aidsLevyRate": 0.03,
@@ -207,6 +207,9 @@ public sealed class StatutoryPackService
               ]
             }
           },
+          "nssa": {
+            "USD": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 700, "effectiveFrom": "2024-06-01" }
+          },
           "corporateIncomeTax": {
             "standardCompanyOrTrustRate": 0.25,
             "pensionFundTradeOrInvestmentRate": 0.15,
@@ -238,7 +241,11 @@ public sealed class StatutoryPackService
                 "https://www.zimra.co.zw/domestic-taxes/vat/mechanics-of-vat", null, new DateTime(2026, 1, 1)),
             new("Zimbabwe Revenue Authority (ZIMRA)", "Public Notice 7 of 2026: VAT rate change effective 1 January 2026",
                 "https://www.zimra.co.zw/public-notices?download=4441%3Apublic-notice-07-of-2026-change-of-vat-rate-on-submission-of-return-category-a",
-                new DateTime(2026, 1, 7), new DateTime(2026, 1, 1))
+                new DateTime(2026, 1, 7), new DateTime(2026, 1, 1)),
+            new("National Social Security Authority (NSSA)", "Pension and Other Benefits Scheme contribution rates and USD ceiling",
+                "https://www.nssa.org.zw/contributions/", null, new DateTime(2026, 1, 1)),
+            new("National Social Security Authority (NSSA)", "Schedule of insurable earnings",
+                "https://www.nssa.org.zw/scheduleofinsurableearnings/", null, new DateTime(2024, 6, 1))
         };
 
         return CreateDraftAsync(companyId, "ZW", "Zimbabwe", 1, new DateTime(2026, 1, 1),
@@ -295,6 +302,9 @@ public sealed class StatutoryPackService
         if (levyRate is < 0m or > 1m)
             throw new InvalidOperationException("The AIDS Levy rate must be expressed as a fraction between zero and one.");
 
+        if (!parsed.RootElement.TryGetProperty("nssa", out var nssa) || nssa.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("A complete statutory pack must include NSSA rates and ceilings for each payroll currency.");
+
         foreach (var currency in new[] { "USD", "ZWG" })
         {
             if (!paye.TryGetProperty(currency, out var currencyRules) ||
@@ -343,13 +353,45 @@ public sealed class StatutoryPackService
             foreach (var previous in previousLevyRates)
                 previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
 
-            var source = document.Sources.FirstOrDefault(x => x.Title.Contains(currency, StringComparison.OrdinalIgnoreCase))
-                ?? document.Sources.First();
+            var source = document.Sources.FirstOrDefault(x => x.Authority.Contains("NSSA", StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException("An official NSSA source reference is required for a complete payroll statutory pack.");
+            if (!nssa.TryGetProperty(currency, out var nssaCurrency))
+                throw new InvalidOperationException($"A complete statutory pack must include NSSA employee and employer rates and ceiling for {currency}.");
+            var employeeRate = nssaCurrency.GetProperty("employeeRate").GetDecimal();
+            var employerRate = nssaCurrency.GetProperty("employerRate").GetDecimal();
+            var ceilingElement = nssaCurrency.GetProperty("ceiling");
+            decimal? nssaCeiling = ceilingElement.ValueKind == JsonValueKind.Null ? null : ceilingElement.GetDecimal();
+            if (employeeRate is < 0m or > 1m || employerRate is < 0m or > 1m ||
+                (nssaCeiling.HasValue && nssaCeiling.Value <= 0m))
+                throw new InvalidOperationException($"NSSA rates or ceiling for {currency} are invalid.");
+
+            foreach (var code in new[] { "NSSA_EMPLOYEE", "NSSA_EMPLOYER" })
+            {
+                if (await _db.StatutoryRates.AnyAsync(r => r.CompanyId == companyId && r.Code == code &&
+                    r.Currency == currency && r.EffectiveFrom == document.EffectiveFrom, ct))
+                    throw new InvalidOperationException($"A {code} rate for {currency} already exists with this effective date.");
+                var previousRates = await _db.StatutoryRates.Where(r => r.CompanyId == companyId &&
+                    r.Code == code && r.Currency == currency && r.EffectiveFrom < document.EffectiveFrom &&
+                    (!r.EffectiveTo.HasValue || r.EffectiveTo >= document.EffectiveFrom)).ToListAsync(ct);
+                foreach (var previous in previousRates)
+                    previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
+
+                _db.StatutoryRates.Add(new StatutoryRate
+                {
+                    CompanyId = companyId, Code = code,
+                    RatePct = (code == "NSSA_EMPLOYEE" ? employeeRate : employerRate) * 100m,
+                    Ceiling = nssaCeiling, Currency = currency, EffectiveFrom = document.EffectiveFrom,
+                    EffectiveTo = document.EffectiveTo, SourceReference = source.Title + " — " + source.Url,
+                    CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy, ApprovedAt = document.ApprovedAt
+                });
+            }
+
             _db.StatutoryRates.Add(new StatutoryRate
             {
                 CompanyId = companyId, Code = "AIDS_LEVY", RatePct = levyRate * 100m,
                 Currency = currency, EffectiveFrom = document.EffectiveFrom, EffectiveTo = document.EffectiveTo,
-                SourceReference = source.Title + " — " + source.Url,
+                SourceReference = document.Sources.FirstOrDefault(x => x.Title.Contains(currency, StringComparison.OrdinalIgnoreCase))?.Url
+                    ?? document.Sources.First().Url,
                 CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy, ApprovedAt = document.ApprovedAt
             });
         }
