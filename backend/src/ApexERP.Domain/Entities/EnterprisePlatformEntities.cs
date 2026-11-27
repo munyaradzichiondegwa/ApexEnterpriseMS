@@ -16,6 +16,7 @@ public sealed class CompanyMembership : TenantEntity
 {
     public Guid UserId { get; set; }
     public string MembershipRole { get; set; } = "Member";
+    public Guid? RoleId { get; set; }
     public bool IsDefault { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime? ValidFrom { get; set; }
