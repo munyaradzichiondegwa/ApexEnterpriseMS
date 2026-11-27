@@ -53,6 +53,7 @@ namespace ApexERP.Domain.Entities
         public string Code { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public Guid? ParentId { get; set; }
+        public Guid? BranchId { get; set; }
         public bool IsActive { get; set; } = true;
         /// <summary>Optional IFRS 8 operating segment this cost centre rolls up into.</summary>
         public Guid? SegmentId { get; set; }

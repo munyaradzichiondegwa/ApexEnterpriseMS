@@ -1,4 +1,10 @@
 using ApexERP.Application.Security;
+using ApexERP.Infrastructure.Data;
+using ApexERP.Domain.Entities;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+using ApexERP.API.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -11,6 +17,8 @@ namespace ApexERP.API.Controllers
     public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
     public record ConfirmMfaRequest(string Code);
     public record DisableMfaRequest(string Password, string Code);
+    public record SwitchCompanyRequest(Guid CompanyId);
+    public record AcceptCompanyInvitationRequest(string Token, string Email, string Password, string FirstName, string LastName);
 
     [ApiController]
     [Route("api/v1/auth")]
@@ -20,8 +28,9 @@ namespace ApexERP.API.Controllers
         private readonly AuthService _auth;
         private readonly IConfiguration _config;
         private readonly IWebHostEnvironment _env;
+        private readonly ApexErpDbContext _db;
 
-        public AuthController(AuthService auth, IConfiguration config, IWebHostEnvironment env) { _auth = auth; _config = config; _env = env; }
+        public AuthController(AuthService auth, IConfiguration config, IWebHostEnvironment env, ApexErpDbContext db) { _auth = auth; _config = config; _env = env; _db = db; }
 
         // By default the refresh token lives only in an HttpOnly cookie (JavaScript can never read it) and is not returned in the body.
         private bool CookieOnly => _config.GetValue("Auth:RefreshTokenCookieOnly", true);
@@ -91,6 +100,60 @@ namespace ApexERP.API.Controllers
             return Ok(new { loggedOut = true });
         }
 
+
+        [HttpPost("accept-company-invitation")]
+        [AllowAnonymous]
+        [EnableRateLimiting("auth")]
+        public async Task<IActionResult> AcceptCompanyInvitation(AcceptCompanyInvitationRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.Email))
+                return BadRequest(new { error = "Invitation token and email are required." });
+            var passwordProblem = PasswordPolicy.Validate(request.Password, request.Email);
+            if (passwordProblem != null) return BadRequest(new { error = passwordProblem });
+            using var scope = _db.SystemAccessScope("onboarding: accept company user invitation");
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)));
+            var invitation = await _db.CompanyUserInvitations.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
+            if (invitation is null || invitation.AcceptedAt.HasValue || invitation.ExpiresAt <= DateTime.UtcNow ||
+                !string.Equals(invitation.Email, request.Email.Trim(), StringComparison.OrdinalIgnoreCase))
+                return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+            if (await _db.Users.IgnoreQueryFilters().AnyAsync(x => x.Email == invitation.Email, ct))
+                return Conflict(new { error = "An account with this email already exists." });
+            var company = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(
+                x => x.Id == invitation.CompanyId && x.TenantId == invitation.TenantId && x.IsActive, ct);
+            var tenant = await _db.CustomerOrganisations.IgnoreQueryFilters().SingleOrDefaultAsync(
+                x => x.Id == invitation.TenantId && x.IsActive, ct);
+            var role = await _db.Roles.IgnoreQueryFilters().SingleOrDefaultAsync(
+                x => x.Id == invitation.RoleId && x.CompanyId == invitation.CompanyId, ct);
+            if (company is null || tenant is null || role is null)
+                return BadRequest(new { error = "The invitation's organisation, company or role is no longer available." });
+            var subscription = await _db.TenantSubscriptions.Where(x => x.TenantId == tenant.Id).OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+            if (subscription is null || subscription.Status is not ("Active" or "Trial") ||
+                (subscription.TrialEndsAt.HasValue && subscription.TrialEndsAt.Value <= DateTime.UtcNow) ||
+                (subscription.CurrentPeriodEndsAt.HasValue && subscription.CurrentPeriodEndsAt.Value <= DateTime.UtcNow))
+                return StatusCode(402, new { error = "The tenant subscription is inactive or expired." });
+            var plan = await _db.SubscriptionPlans.SingleAsync(x => x.Id == subscription.PlanId, ct);
+            var seatLimit = subscription.SeatOverride > 0 ? subscription.SeatOverride : plan.MaxSeats;
+            var activeSeats = await _db.CompanyMemberships.IgnoreQueryFilters()
+                .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == tenant.Id && x.IsActive),
+                    m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
+                .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
+            if (activeSeats >= seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been reached.", seatLimit });
+
+            var user = new User { CompanyId = company.Id, Email = invitation.Email,
+                PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
+                LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true };
+            _db.Users.Add(user);
+            var existingMemberships = await _db.CompanyMemberships.IgnoreQueryFilters().CountAsync(x => x.UserId == user.Id && x.IsActive, ct);
+            _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
+                MembershipRole = role.Name, RoleId = role.Id, IsDefault = existingMemberships == 0,
+                IsActive = true, ValidFrom = DateTime.UtcNow });
+            invitation.AcceptedAt = DateTime.UtcNow;
+            invitation.AcceptedUserId = user.Id;
+            await _db.SaveChangesAsync(ct);
+            var login = await _auth.IssueTokensAsync(user, Ip, null, ct);
+            return Ok(Deliver(login));
+        }
+
         [HttpGet("me")]
         [Authorize]
         public IActionResult Me()
@@ -105,6 +168,42 @@ namespace ApexERP.API.Controllers
                 role = (User.FindFirst("role") ?? User.FindFirst(System.Security.Claims.ClaimTypes.Role))?.Value,
                 permissions
             });
+        }
+
+
+        [HttpGet("companies")]
+        [Authorize]
+        [AuthenticatedOnly]
+        public async Task<IActionResult> MyCompanies(CancellationToken ct)
+        {
+            var userId = CurrentUserId;
+            var homeCompanyId = Guid.Parse(User.FindFirst("company_id")!.Value);
+            var tenantId = Guid.Parse(User.FindFirst("tenant_id")!.Value);
+            using var scope = _db.SystemAccessScope("authentication: list companies available to signed-in user");
+            var rows = await _db.Companies.IgnoreQueryFilters().AsNoTracking()
+                .Where(c => c.TenantId == tenantId &&
+                    (c.Id == homeCompanyId || _db.CompanyMemberships.IgnoreQueryFilters().Any(m =>
+                        m.CompanyId == c.Id && m.UserId == userId && m.IsActive &&
+                        (!m.ValidFrom.HasValue || m.ValidFrom <= DateTime.UtcNow) &&
+                        (!m.ValidTo.HasValue || m.ValidTo > DateTime.UtcNow))))
+                .OrderBy(c => c.Name)
+                .Select(c => new { c.Id, c.Name, c.FunctionalCurrency, c.IsActive, IsCurrent = c.Id == homeCompanyId })
+                .ToListAsync(ct);
+            return Ok(rows);
+        }
+
+        [HttpPost("switch-company")]
+        [Authorize]
+        [AuthenticatedOnly]
+        [EnableRateLimiting("auth")]
+        public async Task<IActionResult> SwitchCompany(SwitchCompanyRequest request, CancellationToken ct)
+        {
+            try
+            {
+                var result = await _auth.IssueTokensForCompanyAsync(CurrentUserId, request.CompanyId, Ip, null, ct);
+                return Ok(Deliver(result));
+            }
+            catch (UnauthorizedAccessException ex) { return Forbid(); }
         }
 
         private Guid CurrentUserId => Guid.Parse((User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))!.Value);

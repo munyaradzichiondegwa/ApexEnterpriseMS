@@ -3,6 +3,7 @@
 import { useState } from "react";
 import AppShell from "@/components/AppShell";
 import { api, extractErrorMessage } from "@/lib/api";
+import FinancialTrendPanel from "@/components/FinancialTrendPanel";
 
 type Tab = "tb" | "is" | "bs" | "equity" | "cashflow" | "notes";
 
@@ -58,6 +59,8 @@ export default function ReportsPage() {
         <div><label className="label">To / As Of</label><input className="input" type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></div>
         <button className="btn-primary" onClick={() => selectTab(tab)}>Refresh</button>
       </div>
+
+      <FinancialTrendPanel from={range.from} to={range.to} />
 
       <div className="flex flex-wrap gap-2 mb-6">
         {TABS.map((t) => (

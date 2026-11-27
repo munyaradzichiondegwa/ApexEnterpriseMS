@@ -9,6 +9,7 @@ namespace ApexERP.Domain.Entities
         public string Name { get; set; } = string.Empty;
         public Guid? ManagerId { get; set; }
         public Guid? CostCentreId { get; set; }
+        public Guid? BranchId { get; set; }
         /// <summary>Public Sector (Module 16): fund centre this department's payroll cost is charged against.</summary>
         public Guid? FundCentreId { get; set; }
         /// <summary>Grants & NGO (Module 15): grant this department's payroll cost is charged against.</summary>

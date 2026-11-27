@@ -16,6 +16,7 @@ public sealed class CompanyMembership : TenantEntity
 {
     public Guid UserId { get; set; }
     public string MembershipRole { get; set; } = "Member";
+    public Guid? RoleId { get; set; }
     public bool IsDefault { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime? ValidFrom { get; set; }
@@ -68,6 +69,7 @@ public sealed class JurisdictionProfile : BaseEntity
 public sealed class TenantJurisdiction : BaseEntity
 {
     public Guid TenantId { get; set; }
+    public Guid? CompanyId { get; set; }
     public string CountryCode { get; set; } = "";
     public string FunctionalCurrency { get; set; } = "USD";
     public int FiscalYearStartMonth { get; set; } = 1;
@@ -157,4 +159,49 @@ public sealed class TenantLifecycleJob : BaseEntity
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public string? ResultSummary { get; set; }
+}
+
+/// <summary>Expiring invitation for a tenant user to join a specific legal company and role.</summary>
+public sealed class CompanyUserInvitation : BaseEntity
+{
+    public Guid TenantId { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid RoleId { get; set; }
+    public string Email { get; set; } = "";
+    public string TokenHash { get; set; } = "";
+    public DateTime ExpiresAt { get; set; }
+    public Guid InvitedBy { get; set; }
+    public DateTime? AcceptedAt { get; set; }
+    public Guid? AcceptedUserId { get; set; }
+}
+
+/// <summary>Contracted service-level objectives for a tenant, measured from operational probes and incidents.</summary>
+public sealed class TenantSlaPolicy : BaseEntity
+{
+    public Guid TenantId { get; set; }
+    public string SupportTier { get; set; } = "Standard";
+    public decimal AvailabilityTargetPercent { get; set; } = 99.5m;
+    public int ResponseTargetMinutes { get; set; } = 240;
+    public int ResolutionTargetMinutes { get; set; } = 2880;
+    public int MonitoringWindowDays { get; set; } = 30;
+    public string BusinessTimeZone { get; set; } = "UTC";
+    public string BusinessHoursJson { get; set; } = "{}";
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>Support incident with response and resolution timestamps for SLA measurement.</summary>
+public sealed class TenantSlaIncident : BaseEntity
+{
+    public Guid TenantId { get; set; }
+    public string IncidentNumber { get; set; } = "";
+    public string Severity { get; set; } = "Medium";
+    public string Status { get; set; } = "Open";
+    public string Summary { get; set; } = "";
+    public DateTime OpenedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? FirstResponseAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+    public int ResponseTargetMinutes { get; set; }
+    public int ResolutionTargetMinutes { get; set; }
+    public Guid? AssignedTo { get; set; }
+    public string? ResolutionNotes { get; set; }
 }

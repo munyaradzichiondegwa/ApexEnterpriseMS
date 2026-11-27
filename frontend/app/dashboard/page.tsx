@@ -6,6 +6,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { Stat, Section, DataTable, Badge } from "@/components/ui";
 import { fmtMoney, fmtDate } from "@/lib/format";
+import FinancialTrendPanel from "@/components/FinancialTrendPanel";
 
 export default function DashboardPage() {
   const [balanceSheet, setBalanceSheet] = useState<any>(null);
@@ -64,6 +65,8 @@ export default function DashboardPage() {
           <div className="text-2xl font-bold mt-1">{lowStock.length}</div>
         </div>
       </div>
+
+      <FinancialTrendPanel from={new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10)} to={new Date().toISOString().slice(0, 10)} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="card">

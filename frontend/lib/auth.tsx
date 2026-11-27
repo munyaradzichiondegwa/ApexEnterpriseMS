@@ -146,6 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [startSession]
   );
 
+
   const refreshProfile = useCallback(async () => {
     const outcome = await refreshSession();
     if (outcome.ok) {

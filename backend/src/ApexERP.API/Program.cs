@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using ApexERP.API.Authorization;
 using ApexERP.API.Extensions;
 using ApexERP.API.Filters;
+using ApexERP.API.Services;
 using ApexERP.Application.Security;
 using ApexERP.Application.Services;
 using ApexERP.Infrastructure.Data;
@@ -24,6 +25,21 @@ var jwtSecret = builder.Configuration["Jwt:Secret"];
 var jwtIssuer = builder.Configuration["Jwt:Issuer"];
 var connectionString = builder.Configuration.GetConnectionString("Default");
 var frontendOrigins = builder.Configuration["Frontend:Origin"];
+var platformIssuer = builder.Configuration["PlatformJwt:Issuer"] ?? "ApexERP.Platform";
+var platformAudience = builder.Configuration["PlatformJwt:Audience"] ?? "ApexERP.Platform.Api";
+var platformPublicKeyPem = builder.Configuration["PlatformJwt:PublicKeyPem"];
+Microsoft.IdentityModel.Tokens.SecurityKey platformSigningKey;
+if (!string.IsNullOrWhiteSpace(platformPublicKeyPem))
+{
+    var platformRsa = System.Security.Cryptography.RSA.Create();
+    platformRsa.ImportFromPem(platformPublicKeyPem);
+    platformSigningKey = new RsaSecurityKey(platformRsa);
+}
+else
+{
+    // No platform identity can authenticate until an external platform issuer public key is configured.
+    platformSigningKey = new SymmetricSecurityKey(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+}
 
 var configProblems = StartupConfigValidator.Validate(
     new StartupConfig(jwtSecret, jwtIssuer, connectionString, frontendOrigins), isDevelopment);
@@ -65,6 +81,9 @@ builder.Services.AddScoped<SupplyChainService>();
 builder.Services.AddScoped<CrmService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<AuditService>();
+builder.Services.AddScoped<IEmailDeliveryService, SmtpEmailDeliveryService>();
+builder.Services.AddHttpClient(nameof(TenantLifecycleDispatcher));
+builder.Services.AddHostedService<TenantLifecycleDispatcher>();
 
 // Full IFRS statement suite (Necessary Financial Reports 3, 4, 5)
 builder.Services.AddScoped<StatementOfChangesInEquityService>();
@@ -158,12 +177,32 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var hasCompany = Guid.TryParse(principal?.FindFirst("company_id")?.Value, out _);
                 var hasTenant = Guid.TryParse(principal?.FindFirst("tenant_id")?.Value, out _);
 
-                var isPlatformAdmin = principal?.FindFirst("platform_admin")?.Value == "true";
-                if (isRefresh || (!isPlatformAdmin && (!hasTenant || !hasCompany)))
+                if (isRefresh || !hasTenant || !hasCompany)
                 {
                     context.Fail("The token is not valid for API access.");
                 }
 
+                return Task.CompletedTask;
+            }
+        };
+    })
+    .AddJwtBearer("PlatformBearer", opts =>
+    {
+        opts.MapInboundClaims = false;
+        opts.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true, ValidIssuer = platformIssuer,
+            ValidateAudience = true, ValidAudience = platformAudience,
+            ValidateIssuerSigningKey = true, IssuerSigningKey = platformSigningKey,
+            ValidateLifetime = true, ClockSkew = TimeSpan.FromSeconds(30),
+            NameClaimType = "sub", RoleClaimType = "role"
+        };
+        opts.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                if (context.Principal?.FindFirst("platform_admin")?.Value != "true")
+                    context.Fail("A dedicated platform administrator identity is required.");
                 return Task.CompletedTask;
             }
         };
@@ -175,7 +214,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization(options =>
 {
     // Reserved for a separately governed platform identity; tenant SUPER_ADMIN is not equivalent.
-    options.AddPolicy("PlatformAdmin", policy => policy.RequireAuthenticatedUser().RequireClaim("platform_admin", "true"));
+    options.AddPolicy("PlatformAdmin", policy =>
+    {
+        policy.AddAuthenticationSchemes("PlatformBearer");
+        policy.RequireAuthenticatedUser();
+        policy.RequireClaim("platform_admin", "true");
+    });
 });
 
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
@@ -368,7 +412,7 @@ app.UseAuthentication();
 // identifier supplied in a request header or query string.
 app.Use(async (context, next) =>
 {
-    if (context.User.Identity?.IsAuthenticated == true && context.User.FindFirst("platform_admin")?.Value != "true")
+    if (context.User.Identity?.IsAuthenticated == true)
     {
         if (!Guid.TryParse(context.User.FindFirst("company_id")?.Value, out var companyId) ||
             !Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId))
@@ -397,7 +441,6 @@ app.Use(async (context, next) =>
         dbContext.CurrentTenantId = tenantId;
         dbContext.CurrentCompanyId = companyId;
         dbContext.CurrentIpAddress = context.Connection.RemoteIpAddress?.ToString();
-        await TenantSession.RefreshAsync(dbContext, context.RequestAborted);
 
         if (Guid.TryParse(
                 (context.User.FindFirst("sub") ??
@@ -406,10 +449,13 @@ app.Use(async (context, next) =>
         {
             dbContext.CurrentUserId = userId;
         }
+        await TenantSession.RefreshAsync(dbContext, context.RequestAborted);
     }
 
     await next();
 });
+
+app.UseMiddleware<ApexERP.API.Middleware.SubscriptionEntitlementMiddleware>();
 
 app.UseRateLimiter();   // after authentication so the global limit can key on the signed-in user
 app.UseAuthorization();

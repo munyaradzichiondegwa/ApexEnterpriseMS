@@ -197,10 +197,13 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<DeploymentProfile> DeploymentProfiles => Set<DeploymentProfile>();
         public DbSet<TenantOnboarding> TenantOnboardings => Set<TenantOnboarding>();
         public DbSet<TenantAdministratorInvitation> TenantAdministratorInvitations => Set<TenantAdministratorInvitation>();
+        public DbSet<CompanyUserInvitation> CompanyUserInvitations => Set<CompanyUserInvitation>();
         public DbSet<PlatformAuditEvent> PlatformAuditEvents => Set<PlatformAuditEvent>();
         public DbSet<TenantSupportGrant> TenantSupportGrants => Set<TenantSupportGrant>();
         public DbSet<TenantOperationalCheck> TenantOperationalChecks => Set<TenantOperationalCheck>();
         public DbSet<TenantLifecycleJob> TenantLifecycleJobs => Set<TenantLifecycleJob>();
+        public DbSet<TenantSlaPolicy> TenantSlaPolicies => Set<TenantSlaPolicy>();
+        public DbSet<TenantSlaIncident> TenantSlaIncidents => Set<TenantSlaIncident>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -225,18 +228,26 @@ namespace ApexERP.Infrastructure.Data
             // Enterprise platform constraints. Platform catalogue/audit rows are deliberately
             // outside tenant query filters and must only be exposed through platform-admin policies.
             modelBuilder.Entity<OrganisationalBranch>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique();
+            modelBuilder.Entity<Department>().HasIndex(x => new { x.CompanyId, x.BranchId });
+            modelBuilder.Entity<CostCentre>().HasIndex(x => new { x.CompanyId, x.BranchId });
             modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.CompanyId, x.UserId }).IsUnique();
             modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.UserId, x.IsActive });
             modelBuilder.Entity<SubscriptionPlan>().HasIndex(x => x.Code).IsUnique();
             modelBuilder.Entity<TenantSubscription>().HasIndex(x => new { x.TenantId, x.Status });
             modelBuilder.Entity<DeploymentProfile>().HasIndex(x => x.Code).IsUnique();
             modelBuilder.Entity<JurisdictionProfile>().HasIndex(x => x.CountryCode).IsUnique();
-            modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => new { x.TenantId, x.CountryCode }).IsUnique();
+            modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => new { x.TenantId, x.CompanyId, x.CountryCode }).IsUnique();
             modelBuilder.Entity<TenantOnboarding>().HasIndex(x => x.TenantId).IsUnique();
             modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.TokenHash).IsUnique();
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.TokenHash).IsUnique();
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => new { x.TenantId, x.Email, x.AcceptedAt });
             modelBuilder.Entity<TenantSupportGrant>().HasIndex(x => new { x.TenantId, x.Status, x.ExpiresAt });
             modelBuilder.Entity<TenantOperationalCheck>().HasIndex(x => new { x.TenantId, x.CheckCode, x.CheckedAt });
             modelBuilder.Entity<TenantLifecycleJob>().HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
+            modelBuilder.Entity<TenantSlaPolicy>().HasIndex(x => x.TenantId).IsUnique();
+            modelBuilder.Entity<TenantSlaIncident>().HasIndex(x => new { x.TenantId, x.IncidentNumber }).IsUnique();
+            modelBuilder.Entity<TenantSlaIncident>().HasIndex(x => new { x.TenantId, x.Status, x.OpenedAt });
+            modelBuilder.Entity<TenantSlaPolicy>().Property(x => x.BusinessHoursJson).HasColumnType("jsonb");
             modelBuilder.Entity<PlatformAuditEvent>().HasIndex(x => new { x.TenantId, x.CreatedAt });
             modelBuilder.Entity<OrganisationalBranch>().Property(x => x.Code).HasMaxLength(40);
             modelBuilder.Entity<SubscriptionPlan>().Property(x => x.ModuleCodesJson).HasColumnType("jsonb");
@@ -350,7 +361,11 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<OrganisationalBranch>(modelBuilder);
             ApplyTenantFilter<CompanyMembership>(modelBuilder);
             ApplyTenantFilter<Role>(modelBuilder);
-            ApplyTenantFilter<User>(modelBuilder);
+            modelBuilder.Entity<User>().HasQueryFilter(u => CurrentCompanyId != null &&
+                (u.CompanyId == CurrentCompanyId || (CurrentUserId != null && CompanyMemberships.Any(m =>
+                    m.UserId == u.Id && m.CompanyId == CurrentCompanyId && m.IsActive &&
+                    (!m.ValidFrom.HasValue || m.ValidFrom <= DateTime.UtcNow) &&
+                    (!m.ValidTo.HasValue || m.ValidTo > DateTime.UtcNow)))));
             ApplyTenantFilter<AuditLogEntry>(modelBuilder);
             ApplyTenantFilter<WorkflowRequest>(modelBuilder);
             ApplyTenantFilter<GlAccount>(modelBuilder);

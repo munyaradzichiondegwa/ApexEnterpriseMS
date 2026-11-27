@@ -66,6 +66,74 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("OrganisationalBranches");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.TenantSlaPolicy", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("TenantId").HasColumnType("uuid");
+                    b.Property<string>("SupportTier").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("AvailabilityTargetPercent").HasColumnType("numeric(20,6)");
+                    b.Property<int>("ResponseTargetMinutes").HasColumnType("integer");
+                    b.Property<int>("ResolutionTargetMinutes").HasColumnType("integer");
+                    b.Property<int>("MonitoringWindowDays").HasColumnType("integer");
+                    b.Property<string>("BusinessTimeZone").IsRequired().HasColumnType("text");
+                    b.Property<string>("BusinessHoursJson").IsRequired().HasColumnType("jsonb");
+                    b.Property<bool>("IsActive").HasColumnType("boolean");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("TenantId").IsUnique();
+                    b.ToTable("TenantSlaPolicies");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.TenantSlaIncident", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("TenantId").HasColumnType("uuid");
+                    b.Property<string>("IncidentNumber").IsRequired().HasColumnType("text");
+                    b.Property<string>("Severity").IsRequired().HasColumnType("text");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<string>("Summary").IsRequired().HasColumnType("text");
+                    b.Property<DateTime>("OpenedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("FirstResponseAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("ResolvedAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("ResponseTargetMinutes").HasColumnType("integer");
+                    b.Property<int>("ResolutionTargetMinutes").HasColumnType("integer");
+                    b.Property<Guid?>("AssignedTo").HasColumnType("uuid");
+                    b.Property<string>("ResolutionNotes").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("TenantId", "IncidentNumber").IsUnique();
+                    b.HasIndex("TenantId", "Status", "OpenedAt");
+                    b.ToTable("TenantSlaIncidents");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.CompanyUserInvitation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("TenantId").HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("RoleId").HasColumnType("uuid");
+                    b.Property<string>("Email").IsRequired().HasColumnType("text");
+                    b.Property<string>("TokenHash").IsRequired().HasColumnType("text");
+                    b.Property<DateTime>("ExpiresAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid>("InvitedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("AcceptedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("AcceptedUserId").HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("TokenHash").IsUnique();
+                    b.HasIndex("TenantId", "Email", "AcceptedAt");
+                    b.ToTable("CompanyUserInvitations");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.CompanyMembership", b =>
                 {
                     b.Property<Guid>("Id")
@@ -76,6 +144,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RoleId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("MembershipRole")
@@ -294,6 +365,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("CompanyId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("CountryCode")
                         .IsRequired()
                         .HasColumnType("text");
@@ -334,7 +408,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "CountryCode")
+                    b.HasIndex("TenantId", "CompanyId", "CountryCode")
                         .IsUnique();
 
                     b.ToTable("TenantJurisdictions");
@@ -2633,6 +2707,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("ParentId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("BranchId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("SegmentId")
                         .HasColumnType("uuid");
 
@@ -2643,6 +2720,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "BranchId");
 
                     b.ToTable("CostCentres");
                 });
@@ -2829,6 +2908,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("CostCentreId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("BranchId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2855,6 +2937,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "BranchId");
 
                     b.ToTable("Departments");
                 });
