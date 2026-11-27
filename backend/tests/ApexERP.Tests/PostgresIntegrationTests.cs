@@ -183,10 +183,12 @@ namespace ApexERP.Tests
             var tenantA = Guid.NewGuid();
             var tenantB = Guid.NewGuid();
             var caller = Guid.NewGuid();
+            var tenantAChild = Guid.NewGuid();
             var childWithExternalParent = Guid.NewGuid();
             var consentingParent = Guid.NewGuid();
             var unlinkedParent = Guid.NewGuid();
             var cyclicParent = Guid.NewGuid();
+            var foreignChild = Guid.NewGuid();
 
             await using (var seed = db.NewContext(null))
             {
@@ -195,10 +197,12 @@ namespace ApexERP.Tests
                     new CustomerOrganisation { Id = tenantB, Name = "Group tenant B" });
                 seed.Companies.AddRange(
                     new Company { Id = caller, TenantId = tenantA, Name = "Independent customer" },
+                    new Company { Id = tenantAChild, TenantId = tenantA, Name = "Tenant A subsidiary", ParentCompanyId = caller },
                     new Company { Id = childWithExternalParent, TenantId = tenantA, Name = "Tenant child with external parent", ParentCompanyId = consentingParent },
                     new Company { Id = consentingParent, TenantId = tenantB, Name = "Consenting parent" },
                     new Company { Id = unlinkedParent, TenantId = tenantB, Name = "Unlinked parent" },
-                    new Company { Id = cyclicParent, TenantId = tenantB, Name = "Cyclic parent", ParentCompanyId = caller });
+                    new Company { Id = cyclicParent, TenantId = tenantB, Name = "Cyclic parent", ParentCompanyId = caller },
+                    new Company { Id = foreignChild, TenantId = tenantB, Name = "Foreign child", ParentCompanyId = caller });
                 seed.Customers.Add(new Customer
                 {
                     CompanyId = consentingParent,
@@ -213,8 +217,13 @@ namespace ApexERP.Tests
             var scope = new GroupScopeService(context);
 
             var visible = await scope.GetVisibleCompanyIdsAsync(caller);
-            Assert.Equal(new[] { caller }, visible.OrderBy(x => x).ToArray());
+            Assert.Equal(new[] { caller, tenantAChild }, visible.OrderBy(x => x).ToArray());
             Assert.DoesNotContain(consentingParent, visible);
+            Assert.DoesNotContain(foreignChild, visible);
+
+            var consolidation = new ConsolidationService(context, new ReportingService(context), scope);
+            var consolidatedGroup = await consolidation.GetGroupStructureAsync(caller);
+            Assert.Equal(new[] { caller, tenantAChild }, consolidatedGroup.Select(x => x.Id).OrderBy(x => x).ToArray());
 
             await using var childContext = db.NewContext(childWithExternalParent, tenantId: tenantA);
             var childScope = new GroupScopeService(childContext);
