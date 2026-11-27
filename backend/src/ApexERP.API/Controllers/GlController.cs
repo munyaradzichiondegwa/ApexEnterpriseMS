@@ -265,8 +265,16 @@ namespace ApexERP.API.Controllers
                 query = query.Where(r => r.FromCurrency == fromCurrency.Trim().ToUpperInvariant());
             if (!string.IsNullOrWhiteSpace(toCurrency))
                 query = query.Where(r => r.ToCurrency == toCurrency.Trim().ToUpperInvariant());
-            if (fromDate.HasValue) query = query.Where(r => r.RateDate >= fromDate.Value.Date);
-            if (toDate.HasValue) query = query.Where(r => r.RateDate < toDate.Value.Date.AddDays(1));
+            if (fromDate.HasValue)
+            {
+                var fromUtc = DateTime.SpecifyKind(fromDate.Value.Date, DateTimeKind.Utc);
+                query = query.Where(r => r.RateDate >= fromUtc);
+            }
+            if (toDate.HasValue)
+            {
+                var toUtcExclusive = DateTime.SpecifyKind(toDate.Value.Date.AddDays(1), DateTimeKind.Utc);
+                query = query.Where(r => r.RateDate < toUtcExclusive);
+            }
             return Ok(await query.OrderByDescending(r => r.RateDate)
                 .ThenBy(r => r.FromCurrency).ThenBy(r => r.ToCurrency).ToListAsync());
         }
@@ -280,17 +288,18 @@ namespace ApexERP.API.Controllers
                 var to = request.ToCurrency.Trim().ToUpperInvariant();
                 if (from.Length != 3 || to.Length != 3 || from == to || request.Rate <= 0m)
                     return BadRequest(new { error = "Provide two different three-letter currency codes and a positive exchange rate." });
+                var rateDate = DateTime.SpecifyKind(request.RateDate.Date, DateTimeKind.Utc);
                 await _db.InTransactionAsync(async token =>
                 {
-                    await _db.AcquireTransactionLockAsync($"fx-rate:{CompanyId:N}:{from}:{to}:{request.RateDate:yyyyMMdd}", token);
+                    await _db.AcquireTransactionLockAsync($"fx-rate:{CompanyId:N}:{from}:{to}:{rateDate:yyyyMMdd}", token);
                     var existing = await _db.ExchangeRates.FirstOrDefaultAsync(r => r.CompanyId == CompanyId &&
-                        r.FromCurrency == from && r.ToCurrency == to && r.RateDate == request.RateDate.Date, token);
+                        r.FromCurrency == from && r.ToCurrency == to && r.RateDate == rateDate, token);
                     var before = existing == null ? null : new { existing.FromCurrency, existing.ToCurrency,
                         existing.RateDate, existing.Rate, existing.IsManualOverride };
                     if (existing == null)
                     {
                         existing = new ExchangeRate { CompanyId = CompanyId, FromCurrency = from,
-                            ToCurrency = to, RateDate = request.RateDate.Date, Rate = request.Rate,
+                            ToCurrency = to, RateDate = rateDate, Rate = request.Rate,
                             IsManualOverride = request.IsManualOverride };
                         _db.ExchangeRates.Add(existing);
                     }
@@ -305,7 +314,7 @@ namespace ApexERP.API.Controllers
                     await _db.SaveChangesAsync(token);
                 });
                 return Ok(await _db.ExchangeRates.FirstAsync(r => r.CompanyId == CompanyId &&
-                    r.FromCurrency == from && r.ToCurrency == to && r.RateDate == request.RateDate.Date));
+                    r.FromCurrency == from && r.ToCurrency == to && r.RateDate == rateDate));
             });
 
         [HttpGet("fx-revaluation/preview")]
