@@ -27,13 +27,16 @@ namespace ApexERP.API.Controllers
         private readonly GlPostingService _gl;
         private readonly PeriodCloseService _close;
         private readonly GovernanceService _gov;
+        private readonly FxRevaluationService _fxRevaluation;
 
-        public GlController(ApexErpDbContext db, GlPostingService gl, PeriodCloseService close, GovernanceService gov)
+        public GlController(ApexErpDbContext db, GlPostingService gl, PeriodCloseService close,
+            GovernanceService gov, FxRevaluationService fxRevaluation)
         {
             _db = db;
             _gl = gl;
             _close = close;
             _gov = gov;
+            _fxRevaluation = fxRevaluation;
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -244,6 +247,19 @@ namespace ApexERP.API.Controllers
                 await _db.SaveChangesAsync();
                 return Ok(account);
             });
+
+        public record FxRevaluationPostRequest(DateTime AsOfDate, Guid FxGainAccountId, Guid FxLossAccountId);
+
+        [HttpGet("fx-revaluation/preview")]
+        [HasPermission(Permissions.GlJournalsCreate)]
+        public Task<IActionResult> PreviewFxRevaluation([FromQuery] DateTime asOfDate) =>
+            Run(async () => Ok(await _fxRevaluation.PreviewAsync(CompanyId, asOfDate)));
+
+        [HttpPost("fx-revaluation/post")]
+        [HasPermission(Permissions.GlJournalsPost)]
+        public Task<IActionResult> PostFxRevaluation([FromBody] FxRevaluationPostRequest request) =>
+            Run(async () => Ok(await _fxRevaluation.PostAsync(CompanyId, request.AsOfDate,
+                request.FxGainAccountId, request.FxLossAccountId, UserId)));
 
         [HttpPost("journal-entries/{id}/reject")]
         [HasPermission(Permissions.GlJournalsApprove)]
