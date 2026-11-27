@@ -20,7 +20,7 @@ namespace ApexERP.API.Controllers;
 [ApiController]
 [Route("api/platform")]
 [Authorize(AuthenticationSchemes = "PlatformBearer", Policy = "PlatformAdmin")]
-[AuthenticatedOnly]
+[ModulePermissionExempt]
 public sealed class PlatformAdministrationController : ControllerBase
 {
     private readonly ApexErpDbContext _db;
