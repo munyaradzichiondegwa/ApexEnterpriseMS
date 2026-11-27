@@ -177,7 +177,7 @@ namespace ApexERP.Tests
             replacementRole.PermissionsJson = "[\"reports.financial.read\",\"ap.write\"]";
             await context.SaveChangesAsync();
             Assert.False(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id,
-                replacementRole.Id, replacementRole.Name, "[\\"reports.financial.read\\"]"));
+                                replacementRole.Id, replacementRole.Name, "[\"reports.financial.read\"]"));
             Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id,
                 replacementRole.Id, replacementRole.Name, replacementRole.PermissionsJson));
 
