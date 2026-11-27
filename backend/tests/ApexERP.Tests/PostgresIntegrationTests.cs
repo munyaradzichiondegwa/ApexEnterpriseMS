@@ -29,6 +29,7 @@ namespace ApexERP.Tests
     {
         private readonly string _serverConnection;
         private readonly string _name;
+        private string? _rlsRole;
         public string ConnectionString { get; }
 
         private TestDb(string serverConnection, string name)
@@ -62,10 +63,22 @@ namespace ApexERP.Tests
             };
         }
 
+        public async Task ExecuteDatabaseAsync(string sql) => await Execute(ConnectionString, sql);
+
+        public async Task CreateReadOnlyRlsRoleAsync(string role)
+        {
+            _rlsRole = role;
+            await Execute(_serverConnection, $"CREATE ROLE \"{role}\" NOLOGIN NOBYPASSRLS");
+            await Execute(_serverConnection, $"GRANT CONNECT ON DATABASE \"{_name}\" TO \"{role}\"");
+            await Execute(ConnectionString,
+                $"GRANT USAGE ON SCHEMA public TO \"{role}\"; GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{role}\"");
+        }
+
         public async ValueTask DisposeAsync()
         {
             NpgsqlConnection.ClearAllPools();
             await Execute(_serverConnection, $"DROP DATABASE IF EXISTS \"{_name}\" WITH (FORCE)");
+            if (_rlsRole != null) await Execute(_serverConnection, $"DROP ROLE IF EXISTS \"{_rlsRole}\"");
         }
 
         private static async Task Execute(string connectionString, string sql)
@@ -153,6 +166,133 @@ namespace ApexERP.Tests
                 Assert.Single(await otherTenant.Companies.ToListAsync());
                 Assert.Equal(tenantB, (await otherTenant.Companies.SingleAsync()).TenantId);
             }
+        }
+
+        // ---- PostgreSQL RLS: exercise policies as a non-owner, non-BYPASSRLS role -------------------------------
+
+        [PostgresFact]
+        public async Task Row_level_security_fails_closed_and_enforces_tenant_and_company_boundaries()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var tenantA = Guid.NewGuid();
+            var tenantB = Guid.NewGuid();
+            var companyA1 = Guid.NewGuid();
+            var companyA2 = Guid.NewGuid();
+            var companyB1 = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(null))
+            {
+                seed.CustomerOrganisations.AddRange(
+                    new CustomerOrganisation { Id = tenantA, Name = "RLS Tenant A" },
+                    new CustomerOrganisation { Id = tenantB, Name = "RLS Tenant B" });
+                seed.Companies.AddRange(
+                    new Company { Id = companyA1, TenantId = tenantA, Name = "RLS A1" },
+                    new Company { Id = companyA2, TenantId = tenantA, Name = "RLS A2" },
+                    new Company { Id = companyB1, TenantId = tenantB, Name = "RLS B1" });
+                seed.GlAccounts.AddRange(
+                    new GlAccount { CompanyId = companyA1, Code = "RLS1000", Name = "A1 Cash", Type = GlAccountType.Asset },
+                    new GlAccount { CompanyId = companyA2, Code = "RLS1000", Name = "A2 Cash", Type = GlAccountType.Asset },
+                    new GlAccount { CompanyId = companyB1, Code = "RLS1000", Name = "B1 Cash", Type = GlAccountType.Asset });
+                await seed.SaveChangesAsync();
+            }
+
+            var rlsSql = ReadRepositoryFile("backend/database/hardening/002_row_level_security.sql");
+            await db.ExecuteDatabaseAsync(rlsSql);
+
+            var role = "apex_rls_" + Guid.NewGuid().ToString("N");
+            await db.CreateReadOnlyRlsRoleAsync(role);
+
+            await using var connection = new NpgsqlConnection(db.ConnectionString);
+            await connection.OpenAsync();
+            try
+            {
+                await using (var setRole = connection.CreateCommand())
+                {
+                    setRole.CommandText = $"SET ROLE \"{role}\"";
+                    await setRole.ExecuteNonQueryAsync();
+                }
+
+                async Task<long> CountAsync(string table)
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = $"SELECT COUNT(*) FROM \"{table}\"";
+                    return (long)(await command.ExecuteScalarAsync())!;
+                }
+
+                async Task SetContextAsync(Guid? tenant, Guid? company, bool bypass = false)
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = "SELECT set_config('app.tenant_id', @tenant, false), set_config('app.company_id', @company, false), set_config('app.rls_bypass', @bypass, false)";
+                    command.Parameters.AddWithValue("@tenant", tenant?.ToString() ?? string.Empty);
+                    command.Parameters.AddWithValue("@company", company?.ToString() ?? string.Empty);
+                    command.Parameters.AddWithValue("@bypass", bypass ? "on" : "off");
+                    await command.ExecuteNonQueryAsync();
+                }
+
+                // A normal application role is not the table owner, is not a superuser and cannot bypass RLS.
+                await using (var roleCheck = connection.CreateCommand())
+                {
+                    roleCheck.CommandText = "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user";
+                    await using var reader = await roleCheck.ExecuteReaderAsync();
+                    Assert.True(await reader.ReadAsync());
+                    Assert.False(reader.GetBoolean(0));
+                    Assert.False(reader.GetBoolean(1));
+                }
+
+                Assert.Equal(0, await CountAsync("Companies"));
+                Assert.Equal(0, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(0, await CountAsync("GlAccounts"));
+
+                await SetContextAsync(tenantA, companyA1);
+                Assert.Equal(2, await CountAsync("Companies"));                 // all legal entities in this tenant
+                Assert.Equal(1, await CountAsync("CustomerOrganisations"));    // only this tenant
+                Assert.Equal(1, await CountAsync("GlAccounts"));                // only the selected company
+
+                await SetContextAsync(tenantA, companyA2);
+                Assert.Equal(2, await CountAsync("Companies"));
+                Assert.Equal(1, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(1, await CountAsync("GlAccounts"));                // company A2 only
+
+                await SetContextAsync(tenantB, companyA1);
+                Assert.Equal(1, await CountAsync("Companies"));                 // tenant B only
+                Assert.Equal(1, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(0, await CountAsync("GlAccounts"));                // A1 does not belong to tenant B
+
+                await SetContextAsync(null, null, bypass: true);
+                Assert.Equal(3, await CountAsync("Companies"));
+                Assert.Equal(2, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(3, await CountAsync("GlAccounts"));
+
+                await using var flags = connection.CreateCommand();
+                flags.CommandText = @"SELECT COUNT(*), bool_and(relrowsecurity), bool_and(relforcerowsecurity)
+                    FROM pg_class
+                    WHERE relname IN ('Companies', 'CustomerOrganisations', 'GlAccounts')";
+                await using var flagReader = await flags.ExecuteReaderAsync();
+                Assert.True(await flagReader.ReadAsync());
+                Assert.Equal(3, flagReader.GetInt64(0));
+                Assert.True(flagReader.GetBoolean(1));
+                Assert.True(flagReader.GetBoolean(2));
+            }
+            finally
+            {
+                await using var reset = connection.CreateCommand();
+                reset.CommandText = "RESET ROLE";
+                await reset.ExecuteNonQueryAsync();
+                NpgsqlConnection.ClearPool(connection);
+            }
+        }
+
+        private static string ReadRepositoryFile(string relativePath)
+        {
+            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            while (directory != null)
+            {
+                var candidate = Path.Combine(directory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(candidate)) return File.ReadAllText(candidate);
+                directory = directory.Parent;
+            }
+
+            throw new FileNotFoundException($"Could not locate repository file '{relativePath}'.");
         }
 
         // ---- audit finding 9: tenant isolation fails closed ------------------------------------------------------------
