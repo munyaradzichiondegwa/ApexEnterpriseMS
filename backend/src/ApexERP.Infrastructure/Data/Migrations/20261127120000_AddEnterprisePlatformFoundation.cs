@@ -98,6 +98,44 @@ SELECT gen_random_uuid(), u."CompanyId", u."Id", COALESCE(r."Name",'Member'), u.
 FROM "Users" u
 LEFT JOIN "Roles" r ON r."Id" = u."RoleId"
 ON CONFLICT ("CompanyId","UserId") DO NOTHING;
+
+-- Baseline jurisdiction metadata only. These records contain no tax rates or legal interpretations.
+INSERT INTO "JurisdictionProfiles"
+ ("Id","CountryCode","CountryName","DefaultCurrency","DefaultTimeZone","DefaultReportingFramework","IsActive","CreatedAt")
+VALUES
+ (gen_random_uuid(),'ZW','Zimbabwe','ZWG','Africa/Harare','IFRS',true,now()),
+ (gen_random_uuid(),'ZA','South Africa','ZAR','Africa/Johannesburg','IFRS',true,now()),
+ (gen_random_uuid(),'BW','Botswana','BWP','Africa/Gaborone','IFRS',true,now()),
+ (gen_random_uuid(),'ZM','Zambia','ZMW','Africa/Lusaka','IFRS',true,now()),
+ (gen_random_uuid(),'KE','Kenya','KES','Africa/Nairobi','IFRS',true,now()),
+ (gen_random_uuid(),'TZ','Tanzania','TZS','Africa/Dar_es_Salaam','IFRS',true,now()),
+ (gen_random_uuid(),'UG','Uganda','UGX','Africa/Kampala','IFRS',true,now()),
+ (gen_random_uuid(),'NG','Nigeria','NGN','Africa/Lagos','IFRS',true,now()),
+ (gen_random_uuid(),'GH','Ghana','GHS','Africa/Accra','IFRS',true,now()),
+ (gen_random_uuid(),'GB','United Kingdom','GBP','Europe/London','IFRS',true,now()),
+ (gen_random_uuid(),'US','United States','USD','America/New_York','US-GAAP',true,now()),
+ (gen_random_uuid(),'AU','Australia','AUD','Australia/Sydney','IFRS',true,now()),
+ (gen_random_uuid(),'IN','India','INR','Asia/Kolkata','Ind AS',true,now()),
+ (gen_random_uuid(),'CA','Canada','CAD','America/Toronto','ASPE/IFRS',true,now())
+ON CONFLICT ("CountryCode") DO NOTHING;
+
+-- Sector templates are starting configurations, not separate product editions or legal/statutory packs.
+INSERT INTO "DeploymentProfiles"
+ ("Id","Code","Name","Sector","ConfigurationJson","IsActive","CreatedAt")
+VALUES
+ (gen_random_uuid(),'COMMERCIAL_SME','Commercial SME','COMMERCIAL',
+  '{"features":["general-ledger","accounts-receivable","accounts-payable","cash-bank","inventory","fixed-assets","payroll","procurement","crm"],"reportingFramework":"IFRS","multiEntity":false,"multiCurrency":true,"approvalWorkflow":"standard"}'::jsonb,true,now()),
+ (gen_random_uuid(),'COMMERCIAL_ENTERPRISE','Commercial Enterprise','COMMERCIAL',
+  '{"features":["general-ledger","accounts-receivable","accounts-payable","cash-bank","inventory","fixed-assets","payroll","procurement","crm","projects","manufacturing","consolidation","intercompany"],"reportingFramework":"IFRS","multiEntity":true,"multiCurrency":true,"approvalWorkflow":"tiered"}'::jsonb,true,now()),
+ (gen_random_uuid(),'MDA','Ministry / Department / Agency','PUBLIC_SECTOR',
+  '{"features":["general-ledger","appropriations","fund-accounting","commitments","procurement","tenders","budget-control","audit-trail"],"reportingFrameworkOptions":["IPSAS","CashBasisIPSAS","IFRS"],"accountingBasis":"REQUIRES_CONFIGURATION","multiEntity":true,"approvalWorkflow":"public-sector"}'::jsonb,true,now()),
+ (gen_random_uuid(),'SOE','State-Owned Enterprise','STATE_OWNED',
+  '{"features":["general-ledger","budget-control","procurement","tenders","public-sector-governance","consolidation","intercompany"],"reportingFrameworkOptions":["IFRS","IPSAS"],"accountingBasis":"REQUIRES_CONFIGURATION","multiEntity":true,"approvalWorkflow":"board-and-public-sector"}'::jsonb,true,now()),
+ (gen_random_uuid(),'NGO_DEVELOPMENT','NGO / Development Organisation','NON_PROFIT',
+  '{"features":["general-ledger","fund-accounting","grants","donor-restrictions","sub-awards","project-accounting","procurement","audit-trail"],"reportingFramework":"REQUIRES_CONFIGURATION","multiEntity":true,"multiCurrency":true,"approvalWorkflow":"donor-and-board"}'::jsonb,true,now()),
+ (gen_random_uuid(),'MULTINATIONAL_GROUP','Multinational Group','MULTINATIONAL',
+  '{"features":["general-ledger","multi-company","branches","multi-currency","multi-jurisdiction","consolidation","intercompany","group-reporting","transfer-pricing-data"],"reportingFramework":"IFRS","multiEntity":true,"multiCurrency":true,"multiJurisdiction":true,"approvalWorkflow":"group"}'::jsonb,true,now())
+ON CONFLICT ("Code") DO NOTHING;
 """);
     }
 
