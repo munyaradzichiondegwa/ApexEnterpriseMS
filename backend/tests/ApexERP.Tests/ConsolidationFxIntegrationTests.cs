@@ -60,7 +60,7 @@ public sealed class ConsolidationFxIntegrationTests
                 new AccountingPeriod
                 {
                     Id = periodId, CompanyId = subsidiaryId, Year = 2026, PeriodNo = 1,
-                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 2, 1),
+                    StartDate = new DateTime(2025, 12, 1), EndDate = new DateTime(2026, 1, 31),
                     Status = PeriodStatus.Open
                 });
             var journal = new JournalEntry
@@ -135,7 +135,7 @@ public sealed class ConsolidationFxIntegrationTests
         Assert.True(parentPeriodEvidence.IsPeriodEndAligned);
         Assert.True(parentPeriodEvidence.IsGroupPeriodAligned);
         var subsidiaryPeriodEvidence = Assert.Single(result.PeriodEvidence, x => x.CompanyId == subsidiaryId);
-        Assert.False(subsidiaryPeriodEvidence.IsPeriodEndAligned);
+        Assert.True(subsidiaryPeriodEvidence.IsPeriodEndAligned);
         Assert.False(subsidiaryPeriodEvidence.IsGroupPeriodAligned);
         Assert.Contains("differs from parent", subsidiaryPeriodEvidence.Status);
     }
