@@ -131,7 +131,8 @@ public sealed class StatutoryPackService
             if (conflicts.Any(x => x.EffectiveFrom.Date >= document.EffectiveFrom.Date))
                 throw new InvalidOperationException("A published pack already takes effect on or after this date. New versions must advance the jurisdiction's effective timeline.");
 
-            await ApplyPayrollRulesAsync(companyId, document, token);
+            ValidateJurisdictionRules(document);
+            await ApplyApprovedRulesAsync(companyId, document, token);
             var published = document with { Status = "Published", PublishedAt = DateTime.UtcNow };
             setting.Value = JsonSerializer.Serialize(published);
             _audit.Record(companyId, publisherId, "StatutoryPack.Published", "Statutory", nameof(StatutoryPackDocument),
@@ -291,7 +292,45 @@ public sealed class StatutoryPackService
         }, ct);
     }
 
-    private async Task ApplyPayrollRulesAsync(Guid companyId, StatutoryPackDocument document, CancellationToken ct)
+    private static void ValidateJurisdictionRules(StatutoryPackDocument document)
+    {
+        if (!string.Equals(document.JurisdictionCode, "ZW", StringComparison.OrdinalIgnoreCase))
+            return;
+        using var parsed = JsonDocument.Parse(document.RulesJson);
+        var root = parsed.RootElement;
+        foreach (var section in new[] { "paye", "nssa", "corporateIncomeTax", "vat" })
+            if (!root.TryGetProperty(section, out var value) || value.ValueKind != JsonValueKind.Object)
+                throw new InvalidOperationException($"A publishable Zimbabwe pack must include the {section} section.");
+
+        foreach (var currency in new[] { "USD", "ZWG" })
+        {
+            if (!root.GetProperty("paye").TryGetProperty(currency, out var payeCurrency) ||
+                !payeCurrency.TryGetProperty("monthly", out var bands) || bands.ValueKind != JsonValueKind.Array || bands.GetArrayLength() == 0)
+                throw new InvalidOperationException($"A publishable Zimbabwe pack must include PAYE monthly bands for {currency}.");
+            if (!root.GetProperty("nssa").TryGetProperty(currency, out var nssaCurrency) ||
+                !nssaCurrency.TryGetProperty("employeeRate", out _) ||
+                !nssaCurrency.TryGetProperty("employerRate", out _) ||
+                !nssaCurrency.TryGetProperty("ceiling", out _))
+                throw new InvalidOperationException($"A publishable Zimbabwe pack must include NSSA employee/employer rates and a ceiling for {currency}.");
+        }
+
+        var vat = root.GetProperty("vat");
+        if (!vat.TryGetProperty("standardRate", out var vatRate) || vatRate.GetDecimal() is < 0m or > 1m ||
+            !vat.TryGetProperty("zeroRatedSupplies", out var zeroRated) || zeroRated.ValueKind != JsonValueKind.Array ||
+            !vat.TryGetProperty("exemptSupplies", out var exempt) || exempt.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("A publishable Zimbabwe pack must include the VAT standard rate, zero-rated supply schedule and exemption schedule.");
+
+        var corporate = root.GetProperty("corporateIncomeTax");
+        if (!corporate.TryGetProperty("standardCompanyOrTrustRate", out var corporateRate) ||
+            corporateRate.GetDecimal() is < 0m or > 1m)
+            throw new InvalidOperationException("A publishable Zimbabwe pack must include a valid standard corporate income-tax rate.");
+
+        if (!document.Sources.Any(x => x.Authority.Contains("ZIMRA", StringComparison.OrdinalIgnoreCase)) ||
+            !document.Sources.Any(x => x.Authority.Contains("NSSA", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("A publishable Zimbabwe pack must cite official ZIMRA and NSSA sources.");
+    }
+
+    private async Task ApplyApprovedRulesAsync(Guid companyId, StatutoryPackDocument document, CancellationToken ct)
     {
         using var parsed = JsonDocument.Parse(document.RulesJson);
         if (!parsed.RootElement.TryGetProperty("paye", out var paye) || paye.ValueKind != JsonValueKind.Object)
@@ -396,7 +435,47 @@ public sealed class StatutoryPackService
             });
         }
 
-        _audit.Record(companyId, document.ApprovedBy!.Value, "StatutoryPack.PayrollRulesActivated", "Payroll",
+        var vat = parsed.RootElement.GetProperty("vat");
+        var vatRate = vat.GetProperty("standardRate").GetDecimal();
+        var existingVatCodes = await _db.TaxCodes.Where(t => t.CompanyId == companyId &&
+            t.Code == "VAT_STANDARD" && t.Type == TaxType.VAT && t.EffectiveFrom < document.EffectiveFrom &&
+            (!t.EffectiveTo.HasValue || t.EffectiveTo >= document.EffectiveFrom)).ToListAsync(ct);
+        if (await _db.TaxCodes.AnyAsync(t => t.CompanyId == companyId && t.Code == "VAT_STANDARD" &&
+            t.Type == TaxType.VAT && t.EffectiveFrom == document.EffectiveFrom, ct))
+            throw new InvalidOperationException("A standard VAT tax code already exists with this effective date.");
+        foreach (var previous in existingVatCodes)
+            previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
+        _db.TaxCodes.Add(new TaxCode
+        {
+            CompanyId = companyId, Code = "VAT_STANDARD", Name = "Standard VAT",
+            Rate = vatRate, Type = TaxType.VAT, IsActive = true,
+            EffectiveFrom = document.EffectiveFrom, EffectiveTo = document.EffectiveTo, CreatedBy = document.CreatedBy
+        });
+
+        var corporateRate = parsed.RootElement.GetProperty("corporateIncomeTax")
+            .GetProperty("standardCompanyOrTrustRate").GetDecimal();
+        var corporateSource = document.Sources.FirstOrDefault(x => x.Authority.Contains("ZIMRA", StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("An official ZIMRA source reference is required for corporate income tax.");
+        foreach (var currency in new[] { "USD", "ZWG" })
+        {
+            if (await _db.StatutoryRates.AnyAsync(r => r.CompanyId == companyId && r.Code == "CORPORATE_INCOME_TAX" &&
+                r.Currency == currency && r.EffectiveFrom == document.EffectiveFrom, ct))
+                throw new InvalidOperationException($"A corporate income-tax rate for {currency} already exists with this effective date.");
+            var previousRates = await _db.StatutoryRates.Where(r => r.CompanyId == companyId &&
+                r.Code == "CORPORATE_INCOME_TAX" && r.Currency == currency && r.EffectiveFrom < document.EffectiveFrom &&
+                (!r.EffectiveTo.HasValue || r.EffectiveTo >= document.EffectiveFrom)).ToListAsync(ct);
+            foreach (var previous in previousRates)
+                previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
+            _db.StatutoryRates.Add(new StatutoryRate
+            {
+                CompanyId = companyId, Code = "CORPORATE_INCOME_TAX", RatePct = corporateRate * 100m,
+                Currency = currency, EffectiveFrom = document.EffectiveFrom, EffectiveTo = document.EffectiveTo,
+                SourceReference = corporateSource.Title + " — " + corporateSource.Url,
+                CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy, ApprovedAt = document.ApprovedAt
+            });
+        }
+
+        _audit.Record(companyId, document.ApprovedBy!.Value, "StatutoryPack.RulesActivated", "Tax",
             nameof(StatutoryPackDocument), Guid.Empty, null,
             new { document.JurisdictionCode, document.Version, currencies = new[] { "USD", "ZWG" } });
     }
