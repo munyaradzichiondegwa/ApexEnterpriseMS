@@ -110,5 +110,6 @@ CREATE POLICY apex_user_membership_access ON "Users"
     WITH CHECK (
         coalesce(current_setting('app.rls_bypass', true), '') = 'on'
         OR apex_rls_allowed("CompanyId")
+    );
 
 COMMIT;
