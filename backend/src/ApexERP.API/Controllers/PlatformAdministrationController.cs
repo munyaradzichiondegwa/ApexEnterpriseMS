@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using ApexERP.Domain.Entities;
+using ApexERP.Application.Security;
 using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,7 +19,8 @@ namespace ApexERP.API.Controllers;
 public sealed class PlatformAdministrationController : ControllerBase
 {
     private readonly ApexErpDbContext _db;
-    public PlatformAdministrationController(ApexErpDbContext db) => _db = db;
+    private readonly AuthService _auth;
+    public PlatformAdministrationController(ApexErpDbContext db, AuthService auth) { _db = db; _auth = auth; }
 
     [HttpGet("plans")]
     public async Task<IActionResult> Plans(CancellationToken ct)
@@ -81,6 +83,8 @@ public sealed class PlatformAdministrationController : ControllerBase
         };
         _db.CustomerOrganisations.Add(tenant);
         _db.Companies.Add(company);
+        var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\\"*\\"]" };
+        _db.Roles.Add(adminRole);
         _db.TenantSubscriptions.Add(new TenantSubscription
         {
             TenantId = tenant.Id, PlanId = plan.Id, Status = request.TrialDays > 0 ? "Trial" : "Active",
@@ -152,6 +156,54 @@ public sealed class PlatformAdministrationController : ControllerBase
         return Ok(new { sub.Id, sub.Status, sub.SuspendedAt, sub.CancelledAt });
     }
 
+
+    [HttpPost("invitations/accept")]
+    [AllowAnonymous]
+    public async Task<IActionResult> AcceptAdministratorInvitation([FromBody] AcceptInvitationRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.Email) ||
+            string.IsNullOrWhiteSpace(request.FirstName) || string.IsNullOrWhiteSpace(request.LastName))
+            return BadRequest(new { error = "Invitation token, email, first name and last name are required." });
+        var passwordProblem = PasswordPolicy.Validate(request.Password, request.Email);
+        if (passwordProblem != null) return BadRequest(new { error = passwordProblem });
+
+        using var scope = _db.SystemAccessScope("onboarding: accept initial administrator invitation");
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)));
+        var invitation = await _db.TenantAdministratorInvitations.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
+        if (invitation is null || invitation.AcceptedAt != null || invitation.ExpiresAt <= DateTime.UtcNow ||
+            !string.Equals(invitation.Email, request.Email.Trim(), StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+
+        if (await _db.Users.IgnoreQueryFilters().AnyAsync(x => x.Email == invitation.Email, ct))
+            return Conflict(new { error = "An account with this email already exists. Ask the platform administrator to issue a user invitation." });
+
+        var role = await _db.Roles.IgnoreQueryFilters().SingleOrDefaultAsync(
+            x => x.CompanyId == invitation.CompanyId && x.Name == "Administrator" && x.IsSystemRole, ct);
+        if (role is null) return StatusCode(500, new { error = "Initial administrator role is missing." });
+
+        var user = new User
+        {
+            CompanyId = invitation.CompanyId, Email = invitation.Email,
+            PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
+            LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true
+        };
+        _db.Users.Add(user);
+        _db.CompanyMemberships.Add(new CompanyMembership
+        {
+            CompanyId = invitation.CompanyId, UserId = user.Id, MembershipRole = "Administrator",
+            IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow, RoleId = role.Id
+        });
+        invitation.AcceptedAt = DateTime.UtcNow;
+        invitation.AcceptedUserId = user.Id;
+        var onboarding = await _db.TenantOnboardings.SingleAsync(x => x.TenantId == invitation.TenantId, ct);
+        onboarding.Status = "AdministratorCreated";
+        onboarding.CompletedStepsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "tenant-provisioned", "initial-company-created", "initial-administrator-created" });
+        await _db.SaveChangesAsync(ct);
+        var login = await _auth.IssueTokensAsync(user, HttpContext.Connection.RemoteIpAddress?.ToString(), null, ct);
+        return Ok(new { accessToken = login.AccessToken, expiresAt = login.ExpiresAt, userId = login.UserId,
+            tenantId = invitation.TenantId, companyId = invitation.CompanyId, role = login.Role, permissions = login.Permissions });
+    }
+
     private async Task AuditAsync(string action, string targetType, string targetId, object? details, CancellationToken ct)
     {
         _db.PlatformAuditEvents.Add(new PlatformAuditEvent
@@ -171,3 +223,4 @@ public sealed record ProvisionTenantRequest(string OrganisationName, string? Leg
     string AdministratorEmail, Guid PlanId, int TrialDays = 30, int FiscalYearStartMonth = 1,
     string? Currency = "USD", string? TimeZone = "UTC", string? Sector = null);
 public sealed record SubscriptionLifecycleRequest(string Status);
+public sealed record AcceptInvitationRequest(string Token, string Email, string Password, string FirstName, string LastName);
