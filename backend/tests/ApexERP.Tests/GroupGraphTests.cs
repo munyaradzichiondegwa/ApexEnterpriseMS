@@ -17,6 +17,15 @@ namespace ApexERP.Tests
         };
 
         [Fact]
+        public void Consolidation_eliminates_only_exact_reciprocal_balances()
+        {
+            Assert.True(ConsolidationService.AreReciprocalBalancesMatched(100m, -100m));
+            Assert.True(ConsolidationService.AreReciprocalBalancesMatched(100m, -100.005m));
+            Assert.False(ConsolidationService.AreReciprocalBalancesMatched(100m, -99m));
+            Assert.False(ConsolidationService.AreReciprocalBalancesMatched(100m, 100m));
+        }
+
+        [Fact]
         public void Descendants_walks_down_the_tree()
         {
             AssertSameMembers(new[] { B, C }, GroupGraph.Descendants(Map(), A));
