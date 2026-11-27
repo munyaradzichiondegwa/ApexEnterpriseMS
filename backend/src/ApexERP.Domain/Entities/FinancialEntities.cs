@@ -123,6 +123,8 @@ namespace ApexERP.Domain.Entities
         public DateTime RateDate { get; set; }
         public decimal Rate { get; set; }
         public bool IsManualOverride { get; set; }
+        public string RateSource { get; set; } = "Unspecified";
+        public string? SourceReference { get; set; }
     }
 
     public class TaxCode : TenantEntity
