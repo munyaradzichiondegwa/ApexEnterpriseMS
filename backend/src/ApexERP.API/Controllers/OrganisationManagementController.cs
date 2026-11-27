@@ -354,7 +354,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
     {
         if (DenyManagement() is { } denied) return denied;
         if (string.IsNullOrWhiteSpace(request.CountryCode) || request.CountryCode.Length != 2 || request.FiscalYearStartMonth is < 1 or > 12 ||
-            string.IsNullOrWhiteSpace(request.FunctionalCurrency) || request.FunctionalCurrency.Length != 3) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
+            string.IsNullOrWhiteSpace(request.FunctionalCurrency) || request.FunctionalCurrency.Length != 3 ||
+            (request.BaseCurrency is not null && request.BaseCurrency.Length != 3)) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
         using var scope = _db.SystemAccessScope("tenant configuration: set jurisdiction");
         var profile = await _db.JurisdictionProfiles.SingleOrDefaultAsync(x => x.CountryCode == request.CountryCode.ToUpperInvariant() && x.IsActive, ct);
         if (profile is null) return BadRequest(new { error = "The jurisdiction is not in the configured country catalogue." });
@@ -370,6 +371,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         row.IsPrimary = request.IsPrimary;
         row.ConfigurationStatus = "PendingStatutoryReview";
         targetCompany.FunctionalCurrency = row.FunctionalCurrency;
+        targetCompany.BaseCurrency = (request.BaseCurrency ?? profile.DefaultCurrency).ToUpperInvariant();
         targetCompany.FiscalYearStartMonth = row.FiscalYearStartMonth;
         if (!string.IsNullOrWhiteSpace(request.Timezone)) targetCompany.Timezone = request.Timezone;
         if (request.IsPrimary)
@@ -447,5 +449,5 @@ public sealed record AssignBranchRequest(Guid? BranchId);
 public sealed record AddCompanyMemberRequest(Guid UserId, Guid RoleId);
 public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
-    string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null);
+    string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null, string? BaseCurrency = null);
 public sealed record UpdateOnboardingRequest(string[] CompletedSteps, Guid? DeploymentProfileId = null, bool Completed = false);
