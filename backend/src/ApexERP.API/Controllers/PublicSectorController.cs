@@ -102,6 +102,14 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> SubmitBid(Guid id, SubmitBidRequest req) =>
             Ok(await _tender.SubmitBidAsync(CompanyId, id, req.VendorId, req.PriceAmount));
 
+        [HttpPost("tenders/{id}/evaluation")]
+        [HasPermission(Permissions.PublicSectorTendersAward)]
+        public async Task<IActionResult> BeginTenderEvaluation(Guid id)
+        {
+            try { return Ok(await _tender.BeginEvaluationAsync(CompanyId, id)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
         [HttpPost("tenders/bids/{bidId}/score")]
         public async Task<IActionResult> ScoreBid(Guid bidId, ScoreBidRequest req)
         {
