@@ -1,5 +1,8 @@
 using ApexERP.Application.Security;
 using ApexERP.Infrastructure.Data;
+using ApexERP.Domain.Entities;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using ApexERP.API.Authorization;
 using Microsoft.AspNetCore.Authorization;
@@ -15,6 +18,7 @@ namespace ApexERP.API.Controllers
     public record ConfirmMfaRequest(string Code);
     public record DisableMfaRequest(string Password, string Code);
     public record SwitchCompanyRequest(Guid CompanyId);
+    public record AcceptCompanyInvitationRequest(string Token, string Email, string Password, string FirstName, string LastName);
 
     [ApiController]
     [Route("api/v1/auth")]
@@ -94,6 +98,48 @@ namespace ApexERP.API.Controllers
             await _auth.LogoutAsync(Request.Cookies[RefreshCookie] ?? req?.RefreshToken);
             Response.Cookies.Delete(RefreshCookie, new CookieOptions { Path = "/" });
             return Ok(new { loggedOut = true });
+        }
+
+
+        [HttpPost("accept-company-invitation")]
+        [AllowAnonymous]
+        [EnableRateLimiting("auth")]
+        public async Task<IActionResult> AcceptCompanyInvitation(AcceptCompanyInvitationRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.Email))
+                return BadRequest(new { error = "Invitation token and email are required." });
+            var passwordProblem = PasswordPolicy.Validate(request.Password, request.Email);
+            if (passwordProblem != null) return BadRequest(new { error = passwordProblem });
+            using var scope = _db.SystemAccessScope("onboarding: accept company user invitation");
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)));
+            var invitation = await _db.CompanyUserInvitations.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
+            if (invitation is null || invitation.AcceptedAt.HasValue || invitation.ExpiresAt <= DateTime.UtcNow ||
+                !string.Equals(invitation.Email, request.Email.Trim(), StringComparison.OrdinalIgnoreCase))
+                return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+            if (await _db.Users.IgnoreQueryFilters().AnyAsync(x => x.Email == invitation.Email, ct))
+                return Conflict(new { error = "An account with this email already exists." });
+            var company = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(
+                x => x.Id == invitation.CompanyId && x.TenantId == invitation.TenantId && x.IsActive, ct);
+            var tenant = await _db.CustomerOrganisations.IgnoreQueryFilters().SingleOrDefaultAsync(
+                x => x.Id == invitation.TenantId && x.IsActive, ct);
+            var role = await _db.Roles.IgnoreQueryFilters().SingleOrDefaultAsync(
+                x => x.Id == invitation.RoleId && x.CompanyId == invitation.CompanyId, ct);
+            if (company is null || tenant is null || role is null)
+                return BadRequest(new { error = "The invitation's organisation, company or role is no longer available." });
+
+            var user = new User { CompanyId = company.Id, Email = invitation.Email,
+                PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
+                LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true };
+            _db.Users.Add(user);
+            var existingMemberships = await _db.CompanyMemberships.IgnoreQueryFilters().CountAsync(x => x.UserId == user.Id && x.IsActive, ct);
+            _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
+                MembershipRole = role.Name, RoleId = role.Id, IsDefault = existingMemberships == 0,
+                IsActive = true, ValidFrom = DateTime.UtcNow });
+            invitation.AcceptedAt = DateTime.UtcNow;
+            invitation.AcceptedUserId = user.Id;
+            await _db.SaveChangesAsync(ct);
+            var login = await _auth.IssueTokensAsync(user, Ip, null, ct);
+            return Ok(Deliver(login));
         }
 
         [HttpGet("me")]
