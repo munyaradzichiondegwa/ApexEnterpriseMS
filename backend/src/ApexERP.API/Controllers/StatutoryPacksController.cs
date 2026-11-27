@@ -16,6 +16,14 @@ public sealed class StatutoryPacksController : ApiControllerBase
 
     public StatutoryPacksController(StatutoryPackService packs) => _packs = packs;
 
+    [HttpPost("seed/zw-2026")]
+    [HasPermission(Permissions.ControlsGovernanceManage)]
+    public async Task<IActionResult> SeedZimbabwe2026Baseline()
+    {
+        try { return Ok(await _packs.CreateZimbabwe2026BaselineDraftAsync(CompanyId, UserId)); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
+
     [HttpGet]
     [HasPermission(Permissions.ControlsGovernanceManage)]
     public async Task<IActionResult> List([FromQuery] string? jurisdictionCode) =>
