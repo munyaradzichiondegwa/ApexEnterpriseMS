@@ -28,7 +28,11 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Customer not found.");
 
             var taxCodeIds = lineRequests.Where(l => l.TaxCodeId.HasValue).Select(l => l.TaxCodeId!.Value).Distinct().ToList();
-            var taxCodes = await _db.TaxCodes.Where(t => taxCodeIds.Contains(t.Id)).ToDictionaryAsync(t => t.Id, ct);
+            var taxCodes = await _db.TaxCodes.Where(t => t.CompanyId == companyId && taxCodeIds.Contains(t.Id) &&
+                t.IsActive && t.EffectiveFrom <= invoiceDate && (!t.EffectiveTo.HasValue || t.EffectiveTo >= invoiceDate))
+                .ToDictionaryAsync(t => t.Id, ct);
+            if (taxCodeIds.Any(id => !taxCodes.ContainsKey(id)))
+                throw new InvalidOperationException("One or more selected tax codes are inactive or not effective on the invoice date.");
 
             var lines = new List<ArInvoiceLine>();
             decimal subtotal = 0, vatTotal = 0;
