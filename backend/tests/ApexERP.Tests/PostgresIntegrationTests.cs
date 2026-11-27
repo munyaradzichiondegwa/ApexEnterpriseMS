@@ -431,16 +431,6 @@ namespace ApexERP.Tests
                 Assert.Equal(0L, await CountAsync("Users"));
 
                 await SetContextAsync(tenantB, companyA1);
-                await using (var policyDebug = connection.CreateCommand())
-                {
-                    policyDebug.CommandText = "SELECT coalesce(qual, '<no policy>') FROM pg_policies WHERE tablename = 'TenantJurisdictions' AND policyname = 'apex_tenant_isolation'";
-                    Console.WriteLine("TenantJurisdictions RLS policy: " + (await policyDebug.ExecuteScalarAsync())?.ToString());
-                }
-                await using (var rowDebug = connection.CreateCommand())
-                {
-                    rowDebug.CommandText = "SELECT coalesce(string_agg(\"CompanyId\"::text || ':' || \"TenantId\"::text, ','), '<no visible rows>') FROM \"TenantJurisdictions\"";
-                    Console.WriteLine("TenantJurisdictions visible rows: " + (await rowDebug.ExecuteScalarAsync())?.ToString());
-                }
                 Assert.Equal(1L, await CountAsync("Companies"));                 // tenant B only
                 Assert.Equal(1L, await CountAsync("CustomerOrganisations"));
                 Assert.Equal(0L, await CountAsync("GlAccounts"));                // A1 does not belong to tenant B
