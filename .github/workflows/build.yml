@@ -108,7 +108,7 @@ jobs:
           cat /tmp/api.log; exit 1
       - name: Backup and restore round-trip
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16 >/dev/null
           export PGHOST=localhost PGUSER=apexerp PGDATABASE=apexerp_ci BACKUP_DIR=/tmp/backups
           bash scripts/backup.sh
           bash scripts/restore-test.sh
