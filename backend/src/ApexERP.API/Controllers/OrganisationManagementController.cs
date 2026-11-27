@@ -235,6 +235,65 @@ public sealed class OrganisationManagementController : ApiControllerBase
         return CreatedAtAction(nameof(Branches), new { companyId }, new { branch.Id, branch.Code, branch.Name });
     }
 
+    [HttpPut("companies/{companyId:guid}/branches/{branchId:guid}")]
+    public async Task<IActionResult> UpdateBranch(Guid companyId, Guid branchId, [FromBody] UpdateBranchRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) ||
+            request.Code.Trim().Length > 40 || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Branch code (maximum 40 characters) and name (maximum 200 characters) are required." });
+        using var scope = _db.SystemAccessScope("tenant administration: update branch");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var branch = await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == branchId && x.CompanyId == companyId, ct);
+        if (branch is null) return NotFound();
+        var code = request.Code.Trim().ToUpperInvariant();
+        if (await _db.OrganisationalBranches.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Id != branchId && x.Code == code, ct))
+            return Conflict(new { error = "A branch with this code already exists in the company." });
+        if (request.ParentBranchId == branchId) return BadRequest(new { error = "A branch cannot be its own parent." });
+        if (request.ParentBranchId.HasValue)
+        {
+            var seen = new HashSet<Guid> { branchId };
+            var cursor = request.ParentBranchId;
+            while (cursor.HasValue)
+            {
+                if (!seen.Add(cursor.Value)) return BadRequest(new { error = "The parent selection would create a circular branch hierarchy." });
+                var parent = await _db.OrganisationalBranches.IgnoreQueryFilters()
+                    .SingleOrDefaultAsync(x => x.Id == cursor.Value && x.CompanyId == companyId && x.IsActive, ct);
+                if (parent is null) return BadRequest(new { error = "Parent branch must be active and belong to the same company." });
+                cursor = parent.ParentBranchId;
+            }
+        }
+        branch.Code = code;
+        branch.Name = request.Name.Trim();
+        branch.ParentBranchId = request.ParentBranchId;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { branch.Id, branch.Code, branch.Name, branch.ParentBranchId, branch.IsActive });
+    }
+
+    [HttpPut("companies/{companyId:guid}/branches/{branchId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateBranch(Guid companyId, Guid branchId, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        using var scope = _db.SystemAccessScope("tenant administration: deactivate branch");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var branch = await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == branchId && x.CompanyId == companyId, ct);
+        if (branch is null) return NotFound();
+        if (!branch.IsActive) return Ok(new { deactivated = true, branchId });
+        var hasChildren = await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.ParentBranchId == branchId && x.IsActive, ct);
+        var hasDepartments = await _db.Departments.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.BranchId == branchId && x.IsActive, ct);
+        var hasCostCentres = await _db.CostCentres.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.BranchId == branchId && x.IsActive, ct);
+        if (hasChildren || hasDepartments || hasCostCentres)
+            return Conflict(new { error = "Reassign or deactivate active child branches, departments and cost centres before deactivating this branch." });
+        branch.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { deactivated = true, branchId });
+    }
+
     [HttpGet("companies/{companyId:guid}/departments")]
     public async Task<IActionResult> Departments(Guid companyId, CancellationToken ct)
     {
@@ -242,7 +301,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
         var rows = await _db.Departments.IgnoreQueryFilters().AsNoTracking()
             .Where(x => x.CompanyId == companyId).OrderBy(x => x.Name)
-            .Select(x => new { x.Id, x.Name, x.ManagerId, x.CostCentreId, x.BranchId, x.FundCentreId, x.GrantId })
+            .Select(x => new { x.Id, x.Name, x.ManagerId, x.CostCentreId, x.BranchId, x.FundCentreId, x.GrantId, x.IsActive })
             .ToListAsync(ct);
         return Ok(rows);
     }
@@ -271,6 +330,58 @@ public sealed class OrganisationManagementController : ApiControllerBase
         _db.Departments.Add(department);
         await _db.SaveChangesAsync(ct);
         return CreatedAtAction(nameof(Departments), new { companyId }, new { department.Id, department.Name });
+    }
+
+    [HttpPut("companies/{companyId:guid}/departments/{departmentId:guid}")]
+    public async Task<IActionResult> UpdateDepartment(Guid companyId, Guid departmentId, [FromBody] UpdateDepartmentRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Department name is required and must not exceed 200 characters." });
+        using var scope = _db.SystemAccessScope("tenant administration: update department");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var department = await _db.Departments.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == departmentId && x.CompanyId == companyId, ct);
+        if (department is null) return NotFound();
+        var name = request.Name.Trim();
+        if (await _db.Departments.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Id != departmentId && x.Name.ToLower() == name.ToLower(), ct))
+            return Conflict(new { error = "A department with this name already exists in the company." });
+        if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Branch must be active and belong to the same company." });
+        if (request.CostCentreId.HasValue)
+        {
+            var cc = await _db.CostCentres.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.CostCentreId && x.CompanyId == companyId && x.IsActive, ct);
+            if (cc is null) return BadRequest(new { error = "Cost centre must be active and belong to the same company." });
+            if (request.BranchId.HasValue && cc.BranchId.HasValue && cc.BranchId != request.BranchId)
+                return BadRequest(new { error = "The department branch must match the selected cost centre branch." });
+        }
+        if (request.ManagerId.HasValue && !await _db.Employees.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.ManagerId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Department manager must be an active employee of the same company." });
+        department.Name = name;
+        department.BranchId = request.BranchId;
+        department.CostCentreId = request.CostCentreId;
+        department.ManagerId = request.ManagerId;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { department.Id, department.Name, department.BranchId, department.CostCentreId, department.ManagerId, department.IsActive });
+    }
+
+    [HttpPut("companies/{companyId:guid}/departments/{departmentId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateDepartment(Guid companyId, Guid departmentId, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        using var scope = _db.SystemAccessScope("tenant administration: deactivate department");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var department = await _db.Departments.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == departmentId && x.CompanyId == companyId, ct);
+        if (department is null) return NotFound();
+        if (!department.IsActive) return Ok(new { deactivated = true, departmentId });
+        if (await _db.Employees.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.DepartmentId == departmentId && x.IsActive, ct))
+            return Conflict(new { error = "Reassign or deactivate active employees before deactivating this department." });
+        department.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { deactivated = true, departmentId });
     }
 
     [HttpGet("companies/{companyId:guid}/cost-centres")]
@@ -310,6 +421,75 @@ public sealed class OrganisationManagementController : ApiControllerBase
         _db.CostCentres.Add(costCentre);
         await _db.SaveChangesAsync(ct);
         return CreatedAtAction(nameof(CostCentres), new { companyId }, new { costCentre.Id, costCentre.Code, costCentre.Name });
+    }
+
+    [HttpPut("companies/{companyId:guid}/cost-centres/{costCentreId:guid}")]
+    public async Task<IActionResult> UpdateCostCentre(Guid companyId, Guid costCentreId, [FromBody] UpdateCostCentreRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) ||
+            request.Code.Trim().Length > 40 || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Cost-centre code (maximum 40 characters) and name (maximum 200 characters) are required." });
+        using var scope = _db.SystemAccessScope("tenant administration: update cost centre");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var centre = await _db.CostCentres.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == costCentreId && x.CompanyId == companyId, ct);
+        if (centre is null) return NotFound();
+        var code = request.Code.Trim().ToUpperInvariant();
+        if (await _db.CostCentres.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Id != costCentreId && x.Code == code, ct))
+            return Conflict(new { error = "A cost centre with this code already exists in the company." });
+        if (request.ParentId == costCentreId) return BadRequest(new { error = "A cost centre cannot be its own parent." });
+        if (request.ParentId.HasValue)
+        {
+            var seen = new HashSet<Guid> { costCentreId };
+            var cursor = request.ParentId;
+            while (cursor.HasValue)
+            {
+                if (!seen.Add(cursor.Value)) return BadRequest(new { error = "The parent selection would create a circular cost-centre hierarchy." });
+                var parent = await _db.CostCentres.IgnoreQueryFilters()
+                    .SingleOrDefaultAsync(x => x.Id == cursor.Value && x.CompanyId == companyId && x.IsActive, ct);
+                if (parent is null) return BadRequest(new { error = "Parent cost centre must be active and belong to the same company." });
+                cursor = parent.ParentId;
+            }
+        }
+        if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Branch must be active and belong to the same company." });
+        if (request.SegmentId.HasValue && !await _db.Segments.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.SegmentId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Segment must be active and belong to the same company." });
+        if (request.ParentId.HasValue && request.BranchId.HasValue)
+        {
+            var parentBranch = await _db.CostCentres.IgnoreQueryFilters().Where(x => x.Id == request.ParentId && x.CompanyId == companyId)
+                .Select(x => x.BranchId).SingleAsync(ct);
+            if (parentBranch.HasValue && parentBranch != request.BranchId)
+                return BadRequest(new { error = "A child cost centre must use the same branch as its parent." });
+        }
+        centre.Code = code; centre.Name = request.Name.Trim(); centre.ParentId = request.ParentId;
+        centre.BranchId = request.BranchId; centre.SegmentId = request.SegmentId;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { centre.Id, centre.Code, centre.Name, centre.ParentId, centre.BranchId, centre.SegmentId, centre.IsActive });
+    }
+
+    [HttpPut("companies/{companyId:guid}/cost-centres/{costCentreId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateCostCentre(Guid companyId, Guid costCentreId, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        using var scope = _db.SystemAccessScope("tenant administration: deactivate cost centre");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var centre = await _db.CostCentres.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == costCentreId && x.CompanyId == companyId, ct);
+        if (centre is null) return NotFound();
+        if (!centre.IsActive) return Ok(new { deactivated = true, costCentreId });
+        var hasChildren = await _db.CostCentres.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.ParentId == costCentreId && x.IsActive, ct);
+        var hasDepartments = await _db.Departments.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.CostCentreId == costCentreId && x.IsActive, ct);
+        if (hasChildren || hasDepartments)
+            return Conflict(new { error = "Reassign or deactivate active child cost centres and departments before deactivating this cost centre." });
+        centre.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { deactivated = true, costCentreId });
     }
 
     [HttpGet("companies/{companyId:guid}/members")]
@@ -575,6 +755,9 @@ public sealed record CreateBranchRequest(string Code, string Name, Guid? ParentB
 public sealed record AssignBranchRequest(Guid? BranchId);
 public sealed record CreateDepartmentRequest(string Name, Guid? BranchId = null, Guid? CostCentreId = null, Guid? ManagerId = null);
 public sealed record CreateCostCentreRequest(string Code, string Name, Guid? ParentId = null, Guid? BranchId = null, Guid? SegmentId = null);
+public sealed record UpdateBranchRequest(string Code, string Name, Guid? ParentBranchId = null);
+public sealed record UpdateDepartmentRequest(string Name, Guid? BranchId = null, Guid? CostCentreId = null, Guid? ManagerId = null);
+public sealed record UpdateCostCentreRequest(string Code, string Name, Guid? ParentId = null, Guid? BranchId = null, Guid? SegmentId = null);
 public sealed record AddCompanyMemberRequest(Guid UserId, Guid RoleId);
 public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
