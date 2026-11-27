@@ -70,8 +70,8 @@ namespace ApexERP.Tests
             _rlsRole = role;
             await Execute(_serverConnection, $"CREATE ROLE \"{role}\" NOLOGIN NOBYPASSRLS");
             await Execute(_serverConnection, $"GRANT CONNECT ON DATABASE \"{_name}\" TO \"{role}\"");
-            await Execute(ConnectionString,
-                $"GRANT USAGE ON SCHEMA public TO \"{role}\"; GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{role}\"");
+            await Execute(ConnectionString, $"GRANT USAGE ON SCHEMA public TO \"{role}\"");
+            await Execute(ConnectionString, $"GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{role}\"");
         }
 
         public async ValueTask DisposeAsync()
