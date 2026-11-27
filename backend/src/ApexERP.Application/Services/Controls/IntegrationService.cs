@@ -161,9 +161,11 @@ namespace ApexERP.Application.Services
                     msg.ResultReceiptId = receipt.Id; msg.Status = "Processed"; msg.LastError = p.Amount > apply ? $"Overpayment of {p.Amount - apply:N2} not applied; refund or allocate manually." : null;
                 }
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                msg.LastError = ex.Message;
+                // Provider messages are claimed before processing. Persist every failure as retryable
+                // or dead-lettered so an unexpected database/service exception cannot strand a message.
+                msg.LastError = ex.Message[..Math.Min(ex.Message.Length, 2000)];
                 msg.NextAttemptAt = WebhookSignature.NextAttempt(msg.Attempts - 1, DateTime.UtcNow);
                 msg.Status = msg.NextAttemptAt == null ? "DeadLetter" : "Failed";
             }
@@ -173,15 +175,58 @@ namespace ApexERP.Application.Services
         /// <summary>Retries failed messages whose back-off has elapsed. Run by the background scheduler.</summary>
         public async Task<int> RetryDueAsync(Guid companyId, CancellationToken ct = default)
         {
-            var due = await _db.IntegrationMessages.Where(m => m.CompanyId == companyId && m.Status == "Failed" && m.NextAttemptAt != null && m.NextAttemptAt <= DateTime.UtcNow).ToListAsync(ct);
-            var n = 0;
-            foreach (var m in due)
+            var now = DateTime.UtcNow;
+            var dueIds = await _db.IntegrationMessages
+                .Where(m => m.CompanyId == companyId && m.Status == "Failed" &&
+                    m.NextAttemptAt != null && m.NextAttemptAt <= now)
+                .OrderBy(m => m.NextAttemptAt)
+                .Select(m => m.Id)
+                .Take(100)
+                .ToListAsync(ct);
+
+            var processed = 0;
+            foreach (var id in dueIds)
             {
-                var endpoint = await _db.IntegrationEndpoints.FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == m.Provider, ct);
-                if (endpoint == null || !_adapters.TryGetValue(endpoint.Provider, out var adapter)) continue;
-                await ProcessAsync(m, adapter.Parse(m.PayloadJson), endpoint, ct); n++;
+                // Atomic compare-and-set claim: multiple scheduler instances may see the same
+                // due IDs, but only one can move a message from Failed to Processing.
+                var claimed = await _db.IntegrationMessages
+                    .Where(m => m.Id == id && m.CompanyId == companyId && m.Status == "Failed" &&
+                        m.NextAttemptAt != null && m.NextAttemptAt <= now)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(m => m.Status, "Processing")
+                        .SetProperty(m => m.NextAttemptAt, (DateTime?)null), ct);
+                if (claimed == 0) continue;
+
+                var message = await _db.IntegrationMessages
+                    .SingleOrDefaultAsync(m => m.Id == id && m.CompanyId == companyId, ct);
+                if (message == null) continue;
+
+                var endpoint = await _db.IntegrationEndpoints
+                    .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == message.Provider && e.IsActive, ct);
+                if (endpoint == null || !_adapters.TryGetValue(message.Provider, out var adapter))
+                {
+                    message.Status = "Failed";
+                    message.NextAttemptAt = now.AddMinutes(5);
+                    message.LastError = "The integration endpoint is missing, inactive, or has no registered provider adapter.";
+                    await _db.SaveChangesAsync(ct);
+                    continue;
+                }
+
+                try
+                {
+                    await ProcessAsync(message, adapter.Parse(message.PayloadJson), endpoint, ct);
+                    processed++;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    message.Attempts++;
+                    message.LastError = ex.Message[..Math.Min(ex.Message.Length, 2000)];
+                    message.NextAttemptAt = WebhookSignature.NextAttempt(message.Attempts - 1, DateTime.UtcNow);
+                    message.Status = message.NextAttemptAt == null ? "DeadLetter" : "Failed";
+                    await _db.SaveChangesAsync(ct);
+                }
             }
-            return n;
+            return processed;
         }
 
         /// <summary>Puts a dead-lettered message back in the queue after the cause has been fixed (e.g. the invoice now exists).</summary>
