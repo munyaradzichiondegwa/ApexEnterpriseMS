@@ -218,13 +218,18 @@ public sealed class OrganisationManagementController : ApiControllerBase
     public async Task<IActionResult> CreateBranch(Guid companyId, [FromBody] CreateBranchRequest request, CancellationToken ct)
     {
         if (DenyManagement() is { } denied) return denied;
-        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name)) return BadRequest();
+        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) ||
+            request.Code.Trim().Length > 40 || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Branch code (maximum 40 characters) and name (maximum 200 characters) are required." });
         using var scope = _db.SystemAccessScope("tenant administration: create branch");
         if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var branchCode = request.Code.Trim().ToUpperInvariant();
+        if (await _db.OrganisationalBranches.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Code == branchCode, ct))
+            return Conflict(new { error = "A branch with this code already exists in the company." });
         if (request.ParentBranchId.HasValue &&
             !await _db.OrganisationalBranches.IgnoreQueryFilters().AnyAsync(x => x.Id == request.ParentBranchId && x.CompanyId == companyId && x.IsActive, ct))
             return BadRequest(new { error = "Parent branch must belong to the same company." });
-        var branch = new OrganisationalBranch { CompanyId = companyId, Code = request.Code.Trim().ToUpperInvariant(), Name = request.Name.Trim(), ParentBranchId = request.ParentBranchId };
+        var branch = new OrganisationalBranch { CompanyId = companyId, Code = branchCode, Name = request.Name.Trim(), ParentBranchId = request.ParentBranchId };
         _db.OrganisationalBranches.Add(branch);
         await _db.SaveChangesAsync(ct);
         return CreatedAtAction(nameof(Branches), new { companyId }, new { branch.Id, branch.Code, branch.Name });
