@@ -417,7 +417,7 @@ public sealed class PlatformAdministrationController : ControllerBase
         if (request.AvailabilityTargetPercent is <= 0 or > 100 || request.ResponseTargetMinutes < 1 ||
             request.ResolutionTargetMinutes < request.ResponseTargetMinutes || request.MonitoringWindowDays is < 1 or > 90)
             return BadRequest(new { error = "SLA targets are outside permitted ranges." });
-        try { using var _ = JsonDocument.Parse(request.BusinessHoursJson ?? "{}"); _ = TimeZoneInfo.FindSystemTimeZoneById(request.BusinessTimeZone ?? "UTC"); }
+        try { using var parsedHours = JsonDocument.Parse(request.BusinessHoursJson ?? "{}"); _ = TimeZoneInfo.FindSystemTimeZoneById(request.BusinessTimeZone ?? "UTC"); }
         catch { return BadRequest(new { error = "Business hours JSON or time zone is invalid." }); }
         using var scope = _db.SystemAccessScope("platform admin: configure tenant SLA policy");
         if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
