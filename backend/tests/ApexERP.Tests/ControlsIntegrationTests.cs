@@ -377,6 +377,20 @@ namespace ApexERP.Tests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 evidence.DownloadAsync(companyA, foreignEvidence.Id, Approver));
             Assert.Single(await evidence.ListAsync(companyA, nameof(ControlException), ownTarget.Id));
+
+            // Simulate storage corruption after upload. A fresh company-scoped read must
+            // report the hash mismatch rather than silently treating the bytes as verified.
+            await using (var corrupt = db.NewContext(null))
+            {
+                var stored = await corrupt.AuditEvidenceReferences.SingleAsync(x => x.Id == attached.Id);
+                stored.Content = Encoding.UTF8.GetBytes("tampered evidence");
+                await corrupt.SaveChangesAsync();
+            }
+            await using var reloadedCompanyA = db.NewContext(companyA, Approver);
+            var reloadedEvidence = new EvidenceService(reloadedCompanyA, new AuditService(reloadedCompanyA));
+            var (tamperedFile, integrityOk) = await reloadedEvidence.DownloadAsync(companyA, attached.Id, Approver);
+            Assert.False(integrityOk);
+            Assert.NotEqual(attached.Sha256, Convert.ToHexString(SHA256.HashData(tamperedFile.Content)));
         }
 
         // ---- idempotency table ---------------------------------------------------------------------------------------------
