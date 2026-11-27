@@ -43,11 +43,11 @@ CREATE TABLE "JurisdictionProfiles" (
  "CreatedAt" timestamptz NOT NULL, "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
 CREATE UNIQUE INDEX "IX_JurisdictionProfiles_CountryCode" ON "JurisdictionProfiles" ("CountryCode");
 CREATE TABLE "TenantJurisdictions" (
- "Id" uuid PRIMARY KEY, "TenantId" uuid NOT NULL, "CountryCode" text NOT NULL, "FunctionalCurrency" text NOT NULL,
+ "Id" uuid PRIMARY KEY, "TenantId" uuid NOT NULL, "CompanyId" uuid NULL, "CountryCode" text NOT NULL, "FunctionalCurrency" text NOT NULL,
  "FiscalYearStartMonth" integer NOT NULL, "ReportingFramework" text NOT NULL, "TaxConfigurationJson" jsonb NOT NULL,
  "IsPrimary" boolean NOT NULL, "ConfigurationStatus" text NOT NULL,
  "CreatedAt" timestamptz NOT NULL, "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
-CREATE UNIQUE INDEX "IX_TenantJurisdictions_TenantId_CountryCode" ON "TenantJurisdictions" ("TenantId","CountryCode");
+CREATE UNIQUE INDEX "IX_TenantJurisdictions_TenantId_CompanyId_CountryCode" ON "TenantJurisdictions" ("TenantId","CompanyId","CountryCode");
 CREATE TABLE "DeploymentProfiles" (
  "Id" uuid PRIMARY KEY, "Code" text NOT NULL, "Name" text NOT NULL, "Sector" text NOT NULL, "ConfigurationJson" jsonb NOT NULL,
  "IsActive" boolean NOT NULL, "CreatedAt" timestamptz NOT NULL, "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
