@@ -7144,10 +7144,6 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("FundCentreId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("ApexERP.Domain.Entities.ApprovalChain", null)
-                        .WithMany()
-                        .HasForeignKey("ApprovalChainId")
-                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.WorkflowApproval", b =>
