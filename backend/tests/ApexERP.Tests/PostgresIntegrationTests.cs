@@ -239,29 +239,29 @@ namespace ApexERP.Tests
                     Assert.False(reader.GetBoolean(1));
                 }
 
-                Assert.Equal(0, await CountAsync("Companies"));
-                Assert.Equal(0, await CountAsync("CustomerOrganisations"));
-                Assert.Equal(0, await CountAsync("GlAccounts"));
+                Assert.Equal(0L, await CountAsync("Companies"));
+                Assert.Equal(0L, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(0L, await CountAsync("GlAccounts"));
 
                 await SetContextAsync(tenantA, companyA1);
-                Assert.Equal(2, await CountAsync("Companies"));                 // all legal entities in this tenant
-                Assert.Equal(1, await CountAsync("CustomerOrganisations"));    // only this tenant
-                Assert.Equal(1, await CountAsync("GlAccounts"));                // only the selected company
+                Assert.Equal(2L, await CountAsync("Companies"));                 // all legal entities in this tenant
+                Assert.Equal(1L, await CountAsync("CustomerOrganisations"));    // only this tenant
+                Assert.Equal(1L, await CountAsync("GlAccounts"));                // only the selected company
 
                 await SetContextAsync(tenantA, companyA2);
-                Assert.Equal(2, await CountAsync("Companies"));
-                Assert.Equal(1, await CountAsync("CustomerOrganisations"));
-                Assert.Equal(1, await CountAsync("GlAccounts"));                // company A2 only
+                Assert.Equal(2L, await CountAsync("Companies"));
+                Assert.Equal(1L, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(1L, await CountAsync("GlAccounts"));                // company A2 only
 
                 await SetContextAsync(tenantB, companyA1);
-                Assert.Equal(1, await CountAsync("Companies"));                 // tenant B only
-                Assert.Equal(1, await CountAsync("CustomerOrganisations"));
-                Assert.Equal(0, await CountAsync("GlAccounts"));                // A1 does not belong to tenant B
+                Assert.Equal(1L, await CountAsync("Companies"));                 // tenant B only
+                Assert.Equal(1L, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(0L, await CountAsync("GlAccounts"));                // A1 does not belong to tenant B
 
                 await SetContextAsync(null, null, bypass: true);
-                Assert.Equal(3, await CountAsync("Companies"));
-                Assert.Equal(2, await CountAsync("CustomerOrganisations"));
-                Assert.Equal(3, await CountAsync("GlAccounts"));
+                Assert.Equal(3L, await CountAsync("Companies"));
+                Assert.Equal(2L, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(3L, await CountAsync("GlAccounts"));
 
                 await using var flags = connection.CreateCommand();
                 flags.CommandText = @"SELECT COUNT(*), bool_and(relrowsecurity), bool_and(relforcerowsecurity)
@@ -269,7 +269,7 @@ namespace ApexERP.Tests
                     WHERE relname IN ('Companies', 'CustomerOrganisations', 'GlAccounts')";
                 await using var flagReader = await flags.ExecuteReaderAsync();
                 Assert.True(await flagReader.ReadAsync());
-                Assert.Equal(3, flagReader.GetInt64(0));
+                Assert.Equal(3L, flagReader.GetInt64(0));
                 Assert.True(flagReader.GetBoolean(1));
                 Assert.True(flagReader.GetBoolean(2));
             }
