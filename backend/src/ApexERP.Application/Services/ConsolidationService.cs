@@ -6,11 +6,13 @@ using Microsoft.EntityFrameworkCore;
 namespace ApexERP.Application.Services
 {
     public record ConsolidatedAccountLine(string Code, string Name, GlAccountType Type, decimal GroupAmount, decimal EliminatedAmount, decimal ConsolidatedAmount);
+    public record IntercompanyEliminationException(Guid CompanyAId, Guid CompanyBId, string AccountCode,
+        decimal CompanyABalance, decimal CompanyBBalance, decimal Difference, string Reason);
     public record ConsolidationResult(
         Guid ParentCompanyId, List<Guid> SubsidiaryCompanyIds, DateTime AsOfDate,
         List<ConsolidatedAccountLine> Lines,
         decimal TotalAssets, decimal TotalLiabilities, decimal TotalGroupEquity, decimal TotalNonControllingInterest,
-        decimal TotalEliminations);
+        decimal TotalEliminations, IReadOnlyList<IntercompanyEliminationException> IntercompanyExceptions);
 
     /// <summary>
     /// PRD Module 2 ("As a Group Accountant, I want to consolidate the GL of multiple companies
@@ -124,6 +126,8 @@ namespace ApexERP.Application.Services
             var companiesById = group.ToDictionary(c => c.Id);
             var eliminatedAccountIds = new HashSet<Guid>();
             var accountBalances = new Dictionary<Guid, decimal>();
+            var intercompanyExceptions = new List<IntercompanyEliminationException>();
+            var reportedExceptionKeys = new HashSet<(Guid CompanyA, Guid CompanyB, string AccountCode)>();
             decimal totalEliminations = 0;
 
             // Never eliminate a one-sided or unmatched intercompany balance. A valid elimination
@@ -137,19 +141,38 @@ namespace ApexERP.Application.Services
                     !companiesById.ContainsKey(account.IntercompanyCounterpartyCompanyId!.Value))
                     continue;
 
-                var reciprocal = intercoAccounts.FirstOrDefault(candidate =>
-                    candidate.Id != account.Id &&
-                    candidate.CompanyId == account.IntercompanyCounterpartyCompanyId.Value &&
-                    candidate.IntercompanyCounterpartyCompanyId == account.CompanyId &&
-                    string.Equals(candidate.Code, account.Code, StringComparison.OrdinalIgnoreCase));
-                if (reciprocal == null || eliminatedAccountIds.Contains(reciprocal.Id))
-                    continue;
-
                 if (!accountBalances.TryGetValue(account.Id, out var accountBalance))
                 {
                     if (!translatedBalancesByAccount.TryGetValue(account.Id, out accountBalance)) continue;
                     accountBalances[account.Id] = accountBalance;
                 }
+
+                var reciprocal = intercoAccounts.FirstOrDefault(candidate =>
+                    candidate.Id != account.Id &&
+                    candidate.CompanyId == account.IntercompanyCounterpartyCompanyId.Value &&
+                    candidate.IntercompanyCounterpartyCompanyId == account.CompanyId &&
+                    string.Equals(candidate.Code, account.Code, StringComparison.OrdinalIgnoreCase));
+                var companyA = account.CompanyId.CompareTo(account.IntercompanyCounterpartyCompanyId.Value) < 0
+                    ? account.CompanyId : account.IntercompanyCounterpartyCompanyId.Value;
+                var companyB = companyA == account.CompanyId ? account.IntercompanyCounterpartyCompanyId.Value : account.CompanyId;
+                var exceptionKey = (companyA, companyB, account.Code.ToUpperInvariant());
+
+                if (reciprocal == null)
+                {
+                    if (reportedExceptionKeys.Add(exceptionKey))
+                    {
+                        intercompanyExceptions.Add(new IntercompanyEliminationException(
+                            companyA, companyB, account.Code,
+                            account.CompanyId == companyA ? accountBalance : 0m,
+                            account.CompanyId == companyB ? accountBalance : 0m,
+                            accountBalance,
+                            "No reciprocal intercompany account with the same code and counterparty was found."));
+                    }
+                    continue;
+                }
+                if (eliminatedAccountIds.Contains(reciprocal.Id))
+                    continue;
+
                 if (!accountBalances.TryGetValue(reciprocal.Id, out var reciprocalBalance))
                 {
                     if (!translatedBalancesByAccount.TryGetValue(reciprocal.Id, out reciprocalBalance)) continue;
@@ -157,7 +180,18 @@ namespace ApexERP.Application.Services
                 }
 
                 if (!AreReciprocalBalancesMatched(accountBalance, reciprocalBalance))
+                {
+                    if (reportedExceptionKeys.Add(exceptionKey))
+                    {
+                        intercompanyExceptions.Add(new IntercompanyEliminationException(
+                            companyA, companyB, account.Code,
+                            account.CompanyId == companyA ? accountBalance : reciprocalBalance,
+                            account.CompanyId == companyB ? accountBalance : reciprocalBalance,
+                            accountBalance + reciprocalBalance,
+                            "Reciprocal balances do not agree within the one-cent tolerance; neither side was eliminated."));
+                    }
                     continue;
+                }
 
                 foreach (var matched in new[] { (Account: account, Balance: accountBalance), (Account: reciprocal, Balance: reciprocalBalance) })
                 {
@@ -229,7 +263,8 @@ namespace ApexERP.Application.Services
             var totalGroupEquity = rawEquity + currentPeriodProfit + totalGroupEquityAdj;
 
             return new ConsolidationResult(parentCompanyId, subsidiaries.Select(s => s.Id).ToList(), asOfDate,
-                lines, totalAssets, totalLiabilities, totalGroupEquity, totalNci, totalEliminations);
+                lines, totalAssets, totalLiabilities, totalGroupEquity, totalNci, totalEliminations,
+                intercompanyExceptions.OrderBy(x => x.CompanyAId).ThenBy(x => x.CompanyBId).ThenBy(x => x.AccountCode).ToList());
         }
 
         private sealed record TranslatedTrialBalance(List<TrialBalanceLine> Lines, Dictionary<Guid, decimal> AccountBalances);
