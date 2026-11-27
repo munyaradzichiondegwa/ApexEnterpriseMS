@@ -36,7 +36,7 @@ public static class TenantMembershipValidator
         if (user is null || (user.LockedUntil.HasValue && user.LockedUntil.Value > now)) return false;
 
         var homeTenantId = await db.Companies.IgnoreQueryFilters()
-            .Where(x => x.Id == user.CompanyId)
+            .Where(x => x.Id == user.CompanyId && x.IsActive)
             .Select(x => x.TenantId)
             .SingleOrDefaultAsync(cancellationToken);
         if (homeTenantId != tenantId) return false;
