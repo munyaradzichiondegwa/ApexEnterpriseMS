@@ -182,6 +182,27 @@ export default function GroupPage() {
                 </table>
               )}
             </div>
+            <div className="card mt-4 overflow-x-auto">
+              <h3 className="font-semibold mb-1">Reporting-period alignment</h3>
+              <p className="text-xs text-slate-500 mb-3">Shows whether each group company has one accounting period covering the consolidation date and whether that period ends on the reporting date.</p>
+              {(!consolidated.periodEvidence || consolidated.periodEvidence.length === 0) ? (
+                <p className="text-sm text-slate-500">No accounting-period evidence is available.</p>
+              ) : (
+                <table className="table-base">
+                  <thead><tr><th>Company</th><th>Financial year</th><th>Period</th><th>Period start</th><th>Period end</th><th>Alignment status</th></tr></thead>
+                  <tbody>{consolidated.periodEvidence.map((p: any) => (
+                    <tr key={p.companyId}>
+                      <td>{p.companyName}</td>
+                      <td>{p.year ?? "—"}</td>
+                      <td>{p.periodNo ?? "—"}</td>
+                      <td>{p.periodStart ? new Date(p.periodStart).toLocaleDateString() : "—"}</td>
+                      <td>{p.periodEnd ? new Date(p.periodEnd).toLocaleDateString() : "—"}</td>
+                      <td className={p.isPeriodEndAligned ? "text-emerald-700 font-medium" : "text-amber-700 font-medium"}>{p.status}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              )}
+            </div>
             </div>
           )}
         </div>
