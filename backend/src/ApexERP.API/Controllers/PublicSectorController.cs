@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ApexERP.API.Controllers
 {
     public record CreateFundCentreRequest(string Code, string Name, FundCentreLevel Level, Guid? ParentId, int FinancialYear, decimal AppropriationAmount, decimal CarriedForward);
-    public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride);
+    public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record CreateTenderRequest(string Title, string? Specifications, DateTime SubmissionDeadline);
     public record SubmitBidRequest(Guid VendorId, decimal PriceAmount);
     public record ScoreBidRequest(decimal PriceScore, decimal TechnicalScore, decimal LocalContentScore, decimal PriceWeight, decimal TechnicalWeight, decimal LocalContentWeight);
@@ -69,7 +69,13 @@ namespace ApexERP.API.Controllers
         {
             try
             {
-                var commitment = await _publicSector.CommitAsync(CompanyId, req.FundCentreId, req.PurchaseOrderId, req.Amount, req.AllowOverride);
+                if (req.AllowOverride && !HasPermission(Permissions.PublicSectorBudgetOverride))
+                    return Forbid();
+                if (req.AllowOverride && string.IsNullOrWhiteSpace(req.OverrideReason))
+                    return BadRequest(new { error = "An override justification is required." });
+                var commitment = await _publicSector.CommitAsync(CompanyId, req.FundCentreId, req.PurchaseOrderId,
+                    req.Amount, req.AllowOverride, req.OverrideReason, UserId,
+                    HttpContext.Connection.RemoteIpAddress?.ToString());
                 return Ok(commitment);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }

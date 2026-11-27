@@ -20,10 +20,12 @@ namespace ApexERP.Application.Services
     public class PublicSectorService
     {
         private readonly ApexErpDbContext _db;
+        private readonly AuditService _audit;
 
-        public PublicSectorService(ApexErpDbContext db)
+        public PublicSectorService(ApexErpDbContext db, AuditService audit)
         {
             _db = db;
+            _audit = audit;
         }
 
         public async Task<FundCentre> CreateFundCentreAsync(Guid companyId, string code, string name, FundCentreLevel level,
@@ -33,8 +35,14 @@ namespace ApexERP.Application.Services
             {
                 var parent = await _db.FundCentres.FirstOrDefaultAsync(f => f.Id == parentId && f.CompanyId == companyId, ct)
                     ?? throw new InvalidOperationException("Parent fund centre not found.");
-                if (level <= parent.Level) throw new InvalidOperationException("A child fund centre must be one level below its parent (Vote > Program > Sub-Program).");
+                if (level != parent.Level + 1) throw new InvalidOperationException("A child fund centre must be exactly one level below its parent (Vote > Program > Sub-Program).");
+                if (parent.FinancialYear != financialYear) throw new InvalidOperationException("A child fund centre must belong to the same financial year as its parent.");
             }
+
+            else if (level != FundCentreLevel.Vote)
+                throw new InvalidOperationException("A root fund centre must be a Vote.");
+            if (financialYear < 2000 || financialYear > 2200 || appropriationAmount < 0 || carriedForward < 0)
+                throw new InvalidOperationException("Financial year and appropriation amounts are invalid.");
 
             var fc = new FundCentre
             {
@@ -55,25 +63,51 @@ namespace ApexERP.Application.Services
         /// <summary>Creates an encumbrance against a fund centre when a PO is approved. Blocks the
         /// commitment (unless overridden) if it would exceed available budget.</summary>
         public async Task<Commitment> CommitAsync(Guid companyId, Guid fundCentreId, Guid purchaseOrderId, decimal amount,
-            bool allowOverride, CancellationToken ct = default)
+            bool allowOverride, string? overrideReason, Guid actorId, string? ipAddress = null, CancellationToken ct = default)
         {
-            var utilisation = await GetBudgetUtilizationAsync(companyId, fundCentreId, ct);
-            if (utilisation.Available < amount && !allowOverride)
-                throw new InvalidOperationException(
-                    $"Committing {amount:N2} would exceed available budget for {utilisation.Code} (available: {utilisation.Available:N2}). Requires an approved override.");
+            if (amount <= 0) throw new InvalidOperationException("A commitment amount must be greater than zero.");
+            if (allowOverride && string.IsNullOrWhiteSpace(overrideReason))
+                throw new InvalidOperationException("A budget override requires a recorded justification.");
 
-            var commitment = new Commitment
+            return await _db.InTransactionAsync(async token =>
             {
-                CompanyId = companyId,
-                FundCentreId = fundCentreId,
-                PurchaseOrderId = purchaseOrderId,
-                Amount = amount,
-                Status = CommitmentStatus.Active,
-                CommittedDate = DateTime.UtcNow
-            };
-            _db.Commitments.Add(commitment);
-            await _db.SaveChangesAsync(ct);
-            return commitment;
+                await _db.AcquireTransactionLockAsync($"public-sector-budget:{companyId:N}:{fundCentreId:N}", token);
+                var fundCentre = await _db.FundCentres.FirstOrDefaultAsync(f => f.Id == fundCentreId && f.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Fund centre not found.");
+                if (fundCentre.IsClosed) throw new InvalidOperationException("A closed fund centre cannot accept new commitments.");
+
+                var purchaseOrder = await _db.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == purchaseOrderId && p.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Purchase order not found in this company.");
+                if (purchaseOrder.Status != PurchaseOrderStatus.Approved || purchaseOrder.FundCentreId != fundCentreId)
+                    throw new InvalidOperationException("A commitment requires an approved purchase order assigned to the same fund centre.");
+                if (amount != purchaseOrder.Total)
+                    throw new InvalidOperationException("The commitment amount must equal the approved purchase order total.");
+                if (await _db.Commitments.AnyAsync(c => c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId, token))
+                    throw new InvalidOperationException("This purchase order already has a budget commitment.");
+
+                var utilisation = await GetBudgetUtilizationAsync(companyId, fundCentreId, token);
+                var exceedsBudget = utilisation.Available < amount;
+                if (exceedsBudget && !allowOverride)
+                    throw new InvalidOperationException(
+                        $"Committing {amount:N2} would exceed available budget for {utilisation.Code} (available: {utilisation.Available:N2}). An authorised budget override is required.");
+
+                var commitment = new Commitment
+                {
+                    CompanyId = companyId,
+                    FundCentreId = fundCentreId,
+                    PurchaseOrderId = purchaseOrderId,
+                    Amount = amount,
+                    Status = CommitmentStatus.Active,
+                    CommittedDate = DateTime.UtcNow
+                };
+                _db.Commitments.Add(commitment);
+                _audit.Record(companyId, actorId, allowOverride ? "BudgetCommitment.Override" : "BudgetCommitment.Created",
+                    "PublicSector", nameof(Commitment), commitment.Id,
+                    new { utilisation.Available, utilisation.Commitments, utilisation.Actuals },
+                    new { amount, purchaseOrderId, fundCentreId, exceedsBudget, overrideReason }, ipAddress);
+                await _db.SaveChangesAsync(token);
+                return commitment;
+            }, ct);
         }
 
         /// <summary>Releases a commitment when the GRN/invoice posts (the actual expenditure replaces
@@ -107,14 +141,13 @@ namespace ApexERP.Application.Services
                 .Where(c => c.CompanyId == companyId && c.FundCentreId == fundCentreId && c.Status == CommitmentStatus.Active)
                 .SumAsync(c => c.Amount, ct);
 
-            // Actuals: posted AP invoices and payroll (via JournalLine.FundCentreId) tagged against this fund centre.
-            var actualsFromInvoices = await _db.ApInvoices
-                .Where(i => i.CompanyId == companyId && i.FundCentreId == fundCentreId && i.Status != InvoiceStatus.Draft && i.Status != InvoiceStatus.Cancelled)
-                .SumAsync(i => i.Total, ct);
-            var actualsFromJournals = await _db.JournalLines
-                .Where(l => l.FundCentreId == fundCentreId && l.JournalEntry!.CompanyId == companyId && (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
+            // The posted GL is the authoritative actuals ledger. AP invoice expense lines and payroll
+            // postings are tagged with FundCentreId and stored in base currency; counting AP headers as
+            // well would double-count the same expenditure and mix foreign currency with base currency.
+            var actuals = await _db.JournalLines
+                .Where(l => l.FundCentreId == fundCentreId && l.JournalEntry!.CompanyId == companyId &&
+                    (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
                 .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
-            var actuals = Math.Max(actualsFromInvoices, actualsFromJournals); // avoid double-counting if AP invoices already flow through JournalLine tagging
 
             var available = totalAppropriation - commitments - actuals;
             var pctUtilised = totalAppropriation == 0 ? 0 : Math.Round((commitments + actuals) / totalAppropriation * 100, 2);

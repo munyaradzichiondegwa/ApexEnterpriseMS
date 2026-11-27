@@ -41,6 +41,7 @@ namespace ApexERP.Application.Security
         public const string PayrollRunsPost = "payroll.runs.post";
         public const string PayrollConfigManage = "payroll.config.manage";     // PAYE bands
         public const string EquityDividendsManage = "equity.dividends.manage"; // declare / pay dividends
+        public const string PublicSectorBudgetOverride = "public-sector.budget.override";
         public const string PublicSectorYearEndClose = "public-sector.yearend.close";
         public const string PublicSectorTendersAward = "public-sector.tenders.award";
         public const string FixedAssetsDepreciate = "fixed-assets.depreciate";
@@ -82,7 +83,7 @@ namespace ApexERP.Application.Security
             GlAccountsRead, GlAccountsManage, GlStructureManage, GlJournalsRead, GlJournalsCreate,
             GlJournalsApprove, GlJournalsPost, GlJournalsReverse, AccountingPeriodClose, AccountingPeriodReopen,
             ReportsFinancialRead, ArInvoicesPost, ApInvoicesPost, ApPaymentsCreate, PayrollRunsPost, PayrollConfigManage,
-            EquityDividendsManage, PublicSectorYearEndClose, PublicSectorTendersAward,
+            EquityDividendsManage, PublicSectorBudgetOverride, PublicSectorYearEndClose, PublicSectorTendersAward,
             FixedAssetsDepreciate, FixedAssetsDispose, FixedAssetsRevalue,
             GroupStructureManage, GroupConsolidationRead, GroupNettingExecute,
             ExceptionsRead, ExceptionsManage, WorkflowDecide,
