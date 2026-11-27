@@ -30,11 +30,6 @@ public sealed class AddWorkflowApprovalAmountAndFundCentre : Migration
             table: "WorkflowRequests",
             column: "FundCentreId");
 
-        migrationBuilder.CreateIndex(
-            name: "IX_WorkflowRequests_FundCentreId",
-            table: "WorkflowRequests",
-            column: "FundCentreId");
-
         migrationBuilder.AddForeignKey(
             name: "FK_WorkflowRequests_FundCentres_FundCentreId",
             table: "WorkflowRequests",
