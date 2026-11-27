@@ -141,8 +141,6 @@ namespace ApexERP.Tests
             var companyB1 = Guid.NewGuid();
             var memberUserId = Guid.NewGuid();
             var unrelatedUserId = Guid.NewGuid();
-            var memberUserId = Guid.NewGuid();
-            var unrelatedUserId = Guid.NewGuid();
 
             await using (var seed = db.NewContext(null))
             {
@@ -257,6 +255,8 @@ namespace ApexERP.Tests
             var companyA1 = Guid.NewGuid();
             var companyA2 = Guid.NewGuid();
             var companyB1 = Guid.NewGuid();
+            var memberUserId = Guid.NewGuid();
+            var unrelatedUserId = Guid.NewGuid();
 
             await using (var seed = db.NewContext(null))
             {
