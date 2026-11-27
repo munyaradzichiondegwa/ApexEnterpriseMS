@@ -4,6 +4,7 @@ using System.Text;
 using ApexERP.Application.Security;
 using ApexERP.Application.Services;
 using ApexERP.Domain.Common;
+using ApexERP.Domain.Controls;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -437,6 +438,29 @@ namespace ApexERP.Tests
             Assert.Equal(1, message.Attempts);
             Assert.Equal("Failed", message.Status);
             Assert.NotNull(message.NextAttemptAt);
+        }
+
+        [Fact]
+        public void Webhook_signature_rejects_out_of_range_and_non_numeric_timestamps_without_throwing()
+        {
+            var now = new DateTime(2026, 11, 27, 12, 0, 0, DateTimeKind.Utc);
+            Assert.False(WebhookSignature.Verify(Secret, "999999999999999999999999999999",
+                "{}", "00", now));
+            Assert.False(WebhookSignature.Verify(Secret, "not-a-timestamp", "{}", "00", now));
+        }
+
+        [Fact]
+        public void Webhook_signature_accepts_a_valid_signature_case_insensitively_within_the_replay_window()
+        {
+            var now = new DateTime(2026, 11, 27, 12, 0, 0, DateTimeKind.Utc);
+            var timestamp = new DateTimeOffset(now).ToUnixTimeSeconds().ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+            var signature = WebhookSignature.Sign(Secret, timestamp, "{\"event\":\"paid\"}");
+
+            Assert.True(WebhookSignature.Verify(Secret, timestamp, "{\"event\":\"paid\"}",
+                signature.ToUpperInvariant(), now));
+            Assert.False(WebhookSignature.Verify(Secret, timestamp, "{\"event\":\"paid\"}",
+                signature, now.AddMinutes(6)));
         }
 
     }
