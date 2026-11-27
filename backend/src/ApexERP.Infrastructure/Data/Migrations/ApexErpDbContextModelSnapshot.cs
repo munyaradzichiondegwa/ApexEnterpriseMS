@@ -6690,15 +6690,6 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<string>("BlacklistedReason")
                         .HasColumnType("text");
 
-                    b.Property<string>("Category")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("TaxClearanceValidTo")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("RegistrationValidTo")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
