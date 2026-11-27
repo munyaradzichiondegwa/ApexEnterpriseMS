@@ -19,7 +19,7 @@ namespace ApexERP.Infrastructure.Data
         internal static (string CompanyId, string TenantId, string Bypass) ValuesFor(ApexErpDbContext db) =>
             (db.CurrentCompanyId?.ToString() ?? string.Empty,
              db.CurrentTenantId?.ToString() ?? string.Empty,
-             db.CurrentCompanyId == null || db.AllowCrossTenant ? "on" : "off");
+             db.AllowSystemAccess || db.AllowCrossTenant ? "on" : "off");
 
         public const string Sql = "SELECT set_config('app.company_id', @c, false), set_config('app.tenant_id', @t, false), set_config('app.rls_bypass', @b, false)";
 
@@ -96,8 +96,40 @@ namespace ApexERP.Infrastructure.Data
         }
     }
 
+    /// <summary>
+    /// Grants a narrowly scoped, explicitly named platform operation access to rows across tenant boundaries.
+    /// This replaces the unsafe assumption that a missing company identity automatically means system access.
+    /// </summary>
+    public sealed class SystemAccessScope : IDisposable
+    {
+        private readonly ApexErpDbContext _db;
+        private readonly bool _previous;
+        private readonly string? _previousReason;
+
+        public SystemAccessScope(ApexErpDbContext db, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("A system-access reason is required.", nameof(reason));
+
+            _db = db;
+            _previous = db.AllowSystemAccess;
+            _previousReason = db.SystemAccessReason;
+            db.AllowSystemAccess = true;
+            db.SystemAccessReason = reason;
+            TenantSession.RefreshSync(db);
+        }
+
+        public void Dispose()
+        {
+            _db.AllowSystemAccess = _previous;
+            _db.SystemAccessReason = _previousReason;
+            TenantSession.RefreshSync(_db);
+        }
+    }
+
     public static class CrossTenantExtensions
     {
         public static CrossTenantScope CrossTenantScope(this ApexErpDbContext db) => new(db);
+        public static SystemAccessScope SystemAccessScope(this ApexErpDbContext db, string reason) => new(db, reason);
     }
 }
