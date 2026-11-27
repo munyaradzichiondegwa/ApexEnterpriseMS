@@ -69,6 +69,7 @@ builder.Services.AddSingleton(new JournalControlOptions
 
 // ---- Application services (all scoped: one DbContext per request) ----
 builder.Services.AddScoped<GlPostingService>();
+builder.Services.AddScoped<FxRevaluationService>();
 builder.Services.AddScoped<ArService>();
 builder.Services.AddScoped<ApService>();
 builder.Services.AddScoped<InventoryService>();
