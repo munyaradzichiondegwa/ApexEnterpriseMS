@@ -108,15 +108,61 @@ namespace ApexERP.Application.Services
             var intercoAccounts = accountsById.Values.Where(a => a.IsIntercompanyAccount && groupIds.Contains(a.CompanyId)
                                                                    && a.IntercompanyCounterpartyCompanyId.HasValue
                                                                    && groupIds.Contains(a.IntercompanyCounterpartyCompanyId.Value)).ToList();
+            var companiesById = group.ToDictionary(c => c.Id);
+            var eliminatedAccountIds = new HashSet<Guid>();
+            var accountBalances = new Dictionary<Guid, decimal>();
             decimal totalEliminations = 0;
-            foreach (var acc in intercoAccounts)
+
+            // Never eliminate a one-sided or unmatched intercompany balance. A valid elimination
+            // requires a reciprocal account, the same functional currency, and equal/opposite
+            // posted balances as at the reporting date. This prevents an unmatched receivable or
+            // payable from disappearing from the consolidated statements.
+            foreach (var account in intercoAccounts.OrderBy(a => a.CompanyId).ThenBy(a => a.Code))
             {
-                if (!aggregated.TryGetValue(acc.Code, out var line)) continue;
-                var accTb = (await GetTrialBalanceIgnoringFiltersAsync(acc.CompanyId, asOfDate, ct)).FirstOrDefault(l => l.Code == acc.Code);
-                if (accTb == null) continue;
-                var eliminationAmount = accTb.Debit - accTb.Credit;
-                aggregated[acc.Code] = line with { EliminatedAmount = line.EliminatedAmount - eliminationAmount, ConsolidatedAmount = line.ConsolidatedAmount - eliminationAmount };
-                totalEliminations += Math.Abs(eliminationAmount);
+                if (eliminatedAccountIds.Contains(account.Id) ||
+                    !companiesById.TryGetValue(account.CompanyId, out var owner) ||
+                    !companiesById.TryGetValue(account.IntercompanyCounterpartyCompanyId!.Value, out var counterparty) ||
+                    !string.Equals(owner.FunctionalCurrency, counterparty.FunctionalCurrency, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var reciprocal = intercoAccounts.FirstOrDefault(candidate =>
+                    candidate.Id != account.Id &&
+                    candidate.CompanyId == account.IntercompanyCounterpartyCompanyId.Value &&
+                    candidate.IntercompanyCounterpartyCompanyId == account.CompanyId &&
+                    string.Equals(candidate.Code, account.Code, StringComparison.OrdinalIgnoreCase));
+                if (reciprocal == null || eliminatedAccountIds.Contains(reciprocal.Id))
+                    continue;
+
+                if (!accountBalances.TryGetValue(account.Id, out var accountBalance))
+                {
+                    accountBalance = await GetAccountBalanceAsync(account.Id, account.CompanyId, asOfDate, ct);
+                    accountBalances[account.Id] = accountBalance;
+                }
+                if (!accountBalances.TryGetValue(reciprocal.Id, out var reciprocalBalance))
+                {
+                    reciprocalBalance = await GetAccountBalanceAsync(reciprocal.Id, reciprocal.CompanyId, asOfDate, ct);
+                    accountBalances[reciprocal.Id] = reciprocalBalance;
+                }
+
+                if (!AreReciprocalBalancesMatched(accountBalance, reciprocalBalance))
+                    continue;
+
+                foreach (var matched in new[] { (Account: account, Balance: accountBalance), (Account: reciprocal, Balance: reciprocalBalance) })
+                {
+                    if (aggregated.TryGetValue(matched.Account.Code, out var line))
+                    {
+                        var elimination = -matched.Balance;
+                        aggregated[matched.Account.Code] = line with
+                        {
+                            EliminatedAmount = line.EliminatedAmount + elimination,
+                            ConsolidatedAmount = line.ConsolidatedAmount + elimination
+                        };
+                    }
+                }
+
+                eliminatedAccountIds.Add(account.Id);
+                eliminatedAccountIds.Add(reciprocal.Id);
+                totalEliminations += Math.Abs(accountBalance);
             }
 
             var lines = aggregated.Values.OrderBy(l => l.Code).ToList();
@@ -140,6 +186,22 @@ namespace ApexERP.Application.Services
             return new ConsolidationResult(parentCompanyId, subsidiaries.Select(s => s.Id).ToList(), asOfDate,
                 lines, totalAssets, totalLiabilities, totalGroupEquity, totalNci, totalEliminations);
         }
+
+        /// <summary>Returns the signed functional-currency balance for one GL account, including
+        /// both sides of a reversed journal so the original and reversal net to zero.</summary>
+        private async Task<decimal> GetAccountBalanceAsync(Guid accountId, Guid companyId, DateTime asOfDate, CancellationToken ct)
+        {
+            var asOfExclusive = ReportingDates.EndExclusive(asOfDate);
+            return await _db.JournalLines.IgnoreQueryFilters()
+                .Where(l => l.GlAccountId == accountId && l.JournalEntry!.CompanyId == companyId &&
+                    (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed) &&
+                    l.JournalEntry.EntryDate < asOfExclusive)
+                .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
+        }
+
+        /// <summary>Only exact reciprocal balances (within one cent) are eligible for elimination.</summary>
+        public static bool AreReciprocalBalancesMatched(decimal left, decimal right, decimal tolerance = 0.01m) =>
+            tolerance >= 0m && Math.Abs(left + right) <= tolerance;
 
         private async Task<decimal> GetNetEquityAsync(Guid companyId, DateTime asOfDate, CancellationToken ct)
         {
