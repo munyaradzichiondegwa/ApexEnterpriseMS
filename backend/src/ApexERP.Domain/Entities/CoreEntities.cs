@@ -123,7 +123,7 @@ namespace ApexERP.Domain.Entities
 
     /// <summary>One tier's decision within a multi-tier WorkflowRequest -- preserves full approval
     /// history in the audit trail as required by PRD 16 ("Full approval history in audit log").</summary>
-    public class WorkflowApproval : BaseEntity
+    public class WorkflowApproval : TenantEntity
     {
         public Guid WorkflowRequestId { get; set; }
         public int Tier { get; set; }
