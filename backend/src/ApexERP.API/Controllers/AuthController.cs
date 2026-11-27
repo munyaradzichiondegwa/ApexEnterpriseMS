@@ -111,6 +111,7 @@ namespace ApexERP.API.Controllers
             var passwordProblem = PasswordPolicy.Validate(request.Password, request.Email);
             if (passwordProblem != null) return BadRequest(new { error = passwordProblem });
             using var scope = _db.SystemAccessScope("onboarding: accept company user invitation");
+            await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)));
             var invitation = await _db.CompanyUserInvitations.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
             if (invitation is null || invitation.AcceptedAt.HasValue || invitation.ExpiresAt <= DateTime.UtcNow ||
@@ -139,7 +140,8 @@ namespace ApexERP.API.Controllers
                     m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
                 .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
             var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == tenant.Id && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
-            if (activeSeats + pendingSeats > seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been exceeded by current reservations.", seatLimit });
+            var pendingAdminSeats = await _db.TenantAdministratorInvitations.CountAsync(x => x.TenantId == tenant.Id && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+            if (activeSeats + pendingSeats + pendingAdminSeats > seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been exceeded by current reservations.", seatLimit });
 
             var claimedAt = DateTime.UtcNow;
             var claimed = await _db.CompanyUserInvitations
@@ -151,9 +153,6 @@ namespace ApexERP.API.Controllers
             var user = new User { CompanyId = company.Id, Email = invitation.Email,
                 PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
                 LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true };
-            var transaction = _db.Database.CurrentTransaction;
-            var ownsTransaction = transaction is null;
-            if (ownsTransaction) transaction = await _db.Database.BeginTransactionAsync(ct);
             try
             {
                 _db.Users.Add(user);
@@ -163,16 +162,12 @@ namespace ApexERP.API.Controllers
                     IsActive = true, ValidFrom = DateTime.UtcNow });
                 invitation.AcceptedUserId = user.Id;
                 await _db.SaveChangesAsync(ct);
-                if (ownsTransaction) await transaction!.CommitAsync(ct);
+                if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
             }
             catch
             {
-                if (ownsTransaction && transaction is not null) await transaction.RollbackAsync(ct);
+                if (capacityTransaction is not null) await capacityTransaction.RollbackAsync(ct);
                 throw;
-            }
-            finally
-            {
-                if (ownsTransaction && transaction is not null) await transaction.DisposeAsync();
             }
             var login = await _auth.IssueTokensAsync(user, Ip, null, ct);
             return Ok(Deliver(login));

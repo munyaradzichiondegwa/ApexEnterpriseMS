@@ -197,6 +197,7 @@ public sealed class PlatformAdministrationController : ControllerBase
         if (passwordProblem != null) return BadRequest(new { error = passwordProblem });
 
         using var scope = _db.SystemAccessScope("onboarding: accept initial administrator invitation");
+        await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)));
         var invitation = await _db.TenantAdministratorInvitations.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
         if (invitation is null || invitation.AcceptedAt != null || invitation.ExpiresAt <= DateTime.UtcNow ||
@@ -237,9 +238,6 @@ public sealed class PlatformAdministrationController : ControllerBase
             PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true
         };
-        var transaction = _db.Database.CurrentTransaction;
-        var ownsTransaction = transaction is null;
-        if (ownsTransaction) transaction = await _db.Database.BeginTransactionAsync(ct);
         try
         {
             var claimedAt = DateTime.UtcNow;
@@ -260,16 +258,12 @@ public sealed class PlatformAdministrationController : ControllerBase
             onboarding.Status = "AdministratorCreated";
             onboarding.CompletedStepsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "tenant-provisioned", "initial-company-created", "initial-administrator-created" });
             await _db.SaveChangesAsync(ct);
-            if (ownsTransaction) await transaction!.CommitAsync(ct);
+            if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
         }
         catch
         {
-            if (ownsTransaction && transaction is not null) await transaction.RollbackAsync(ct);
+            if (capacityTransaction is not null) await capacityTransaction.RollbackAsync(ct);
             throw;
-        }
-        finally
-        {
-            if (ownsTransaction && transaction is not null) await transaction.DisposeAsync();
         }
         var login = await _auth.IssueTokensAsync(user, HttpContext.Connection.RemoteIpAddress?.ToString(), null, ct);
         var sameSite = Enum.TryParse<SameSiteMode>(_configuration["Auth:CookieSameSite"], true, out var mode) ? mode : SameSiteMode.Strict;

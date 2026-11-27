@@ -103,6 +103,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             return BadRequest(new { error = "A company name and valid fiscal year start month (1-12) are required." });
 
         using var scope = _db.SystemAccessScope("tenant administration: create legal entity");
+        await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         await _db.AcquireTenantCapacityLockAsync(TenantId, "company-limit", ct);
         var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId)
             .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
@@ -153,6 +154,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             RoleId = targetRole, IsDefault = false, IsActive = true, ValidFrom = DateTime.UtcNow
         });
         await _db.SaveChangesAsync(ct);
+        if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
         return CreatedAtAction(nameof(Companies), new { id = company.Id }, new { company.Id, company.Name });
     }
 
@@ -245,6 +247,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
     {
         if (DenyManagement() is { } denied) return denied;
         using var scope = _db.SystemAccessScope("tenant administration: add company membership");
+        await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         await _db.AcquireTenantCapacityLockAsync(TenantId, "seat-limit", ct);
         if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
         var user = await _db.Users.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.UserId && x.IsActive, ct);
@@ -267,10 +270,11 @@ public sealed class OrganisationManagementController : ApiControllerBase
             .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, c => c.Id, (m,c) => m.UserId)
             .Distinct().CountAsync(ct);
         var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        var pendingAdminSeats = await _db.TenantAdministratorInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
         var alreadyHasTenantSeat = await _db.CompanyMemberships.IgnoreQueryFilters().Where(x => x.UserId == user.Id && x.IsActive)
             .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, c => c.Id, (m,c) => m.Id)
             .AnyAsync(ct);
-        if (seats + pendingSeats >= seatLimit && !alreadyHasTenantSeat)
+        if (seats + pendingSeats + pendingAdminSeats >= seatLimit && !alreadyHasTenantSeat)
             return Conflict(new { error = "The subscription seat limit has been reached.", seatLimit });
 
         if (existingMembership is null)
@@ -279,6 +283,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         else { existingMembership.MembershipRole = role.Name; existingMembership.RoleId = role.Id;
             existingMembership.IsActive = true; existingMembership.ValidTo = null; existingMembership.ValidFrom = DateTime.UtcNow; }
         await _db.SaveChangesAsync(ct);
+        if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
         return Ok(new { added = true, userId = user.Id, companyId, role = role.Name });
     }
 
@@ -289,6 +294,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         if (DenyManagement() is { } denied) return denied;
         if (string.IsNullOrWhiteSpace(request.Email)) return BadRequest(new { error = "Email is required." });
         using var scope = _db.SystemAccessScope("tenant administration: invite company user");
+        await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         await _db.AcquireTenantCapacityLockAsync(TenantId, "seat-limit", ct);
         var company = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct);
         if (company is null) return NotFound();
@@ -311,7 +317,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
             .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
             .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
         var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
-        if (activeSeats + pendingSeats >= seatLimit) return Conflict(new { error = "The subscription seat limit has been reached.", seatLimit });
+        var pendingAdminSeats = await _db.TenantAdministratorInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        if (activeSeats + pendingSeats + pendingAdminSeats >= seatLimit) return Conflict(new { error = "The subscription seat limit has been reached.", seatLimit });
 
         var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken)));
@@ -319,6 +326,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             Email = email, TokenHash = tokenHash, ExpiresAt = DateTime.UtcNow.AddHours(48), InvitedBy = UserId };
         _db.CompanyUserInvitations.Add(invitation);
         await _db.SaveChangesAsync(ct);
+        if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
         var emailSent = false;
         try
         {
