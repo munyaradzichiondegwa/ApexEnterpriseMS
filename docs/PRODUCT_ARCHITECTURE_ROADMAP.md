@@ -66,6 +66,7 @@ Definitions and invariants:
 - Keep platform control-plane data and tenant business data logically and authoritatively separated.
 - Use PostgreSQL RLS as defence in depth. Runtime roles must not own tables or possess a bypass capability.
 - Test missing tenant context, forged tenant/company claims, cross-tenant IDs, membership revocation, inactive tenants, RLS WITH CHECK, rollback and pooled-connection context reset.
+- When a user accesses a second company, the Users RLS policy may expose only that authenticated user's own identity row after validating their active membership; it must not expose other users who happen to have memberships in that company. System-access bypass must remain explicit and work for tenant-and-company-scoped tables.
 - Ensure privileged cross-tenant/system scopes are narrow, reason-coded, audited, disposed reliably and unavailable to ordinary tenant request paths.
 
 ### Milestone 2 — Organisation registration and onboarding
