@@ -12,7 +12,8 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         Guid TenantId, Guid ParentId, Guid CompanyAId, Guid CompanyBId,
         Guid IntercompanyAccountId);
 
-    private static async Task<SeededGroup> SeedGroupAsync(TestDb db, decimal payableAmount)
+    private static async Task<SeededGroup> SeedGroupAsync(TestDb db, decimal payableAmount,
+        string buyerCurrency = "USD", decimal? buyerToGroupRate = null)
     {
         var tenantId = Guid.NewGuid();
         var parentId = Guid.NewGuid();
@@ -46,7 +47,7 @@ public sealed class ConsolidationIntercompanyIntegrationTests
             new Company
             {
                 Id = companyBId, TenantId = tenantId, Name = "Intercompany Buyer",
-                BaseCurrency = "USD", FunctionalCurrency = "USD",
+                BaseCurrency = buyerCurrency, FunctionalCurrency = buyerCurrency,
                 ParentCompanyId = parentId, OwnershipPercentage = 100m, IsActive = true
             });
         seed.GlAccounts.AddRange(
@@ -121,15 +122,24 @@ public sealed class ConsolidationIntercompanyIntegrationTests
             new JournalLine
             {
                 JournalEntryId = buyerJournal.Id, GlAccountId = expenseAccountId,
-                Debit = payableAmount, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                Debit = payableAmount, Credit = 0m, Currency = buyerCurrency, ExchangeRate = 1m,
                 BaseDebit = payableAmount, BaseCredit = 0m
             },
             new JournalLine
             {
                 JournalEntryId = buyerJournal.Id, GlAccountId = payableAccountId,
-                Debit = 0m, Credit = payableAmount, Currency = "USD", ExchangeRate = 1m,
+                Debit = 0m, Credit = payableAmount, Currency = buyerCurrency, ExchangeRate = 1m,
                 BaseDebit = 0m, BaseCredit = payableAmount
             });
+        if (buyerToGroupRate.HasValue)
+        {
+            seed.ExchangeRates.Add(new ExchangeRate
+            {
+                CompanyId = companyBId, FromCurrency = buyerCurrency, ToCurrency = "USD",
+                RateDate = new DateTime(2026, 1, 1), Rate = buyerToGroupRate.Value,
+                RateSource = "Test treasury rate", SourceReference = "TEST/IC/2026-01-01"
+            });
+        }
         await seed.SaveChangesAsync();
         return new SeededGroup(tenantId, parentId, companyAId, companyBId, intercompanyAccountId);
     }
@@ -149,6 +159,30 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         var intercompanyLine = Assert.Single(result.Lines, x => x.Code == "IC-100");
         Assert.Equal(0m, intercompanyLine.ConsolidatedAmount);
         Assert.All(result.PeriodEvidence, x => Assert.True(x.IsGroupPeriodAligned));
+    }
+
+    [PostgresFact]
+    public async Task Reciprocal_intercompany_balances_are_eliminated_after_functional_currency_translation()
+    {
+        await using var db = await TestDb.CreateAsync();
+        // Seller records USD 100; buyer records EUR 50. At USD 2 per EUR,
+        // the reciprocal balances are equal in the group's reporting currency.
+        var group = await SeedGroupAsync(db, 50m, buyerCurrency: "EUR", buyerToGroupRate: 2m);
+
+        await using var ctx = db.NewContext(group.ParentId, tenantId: group.TenantId);
+        var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
+        var result = await service.ConsolidateAsync(group.ParentId, new DateTime(2026, 1, 31));
+
+        Assert.Empty(result.IntercompanyExceptions);
+        Assert.Equal(100m, result.TotalEliminations);
+        var intercompanyLine = Assert.Single(result.Lines, x => x.Code == "IC-100");
+        Assert.Equal(0m, intercompanyLine.ConsolidatedAmount);
+        var buyerRateEvidence = Assert.Single(result.RateEvidence, x =>
+            x.CompanyId == group.CompanyBId && x.EffectiveDate == new DateTime(2026, 1, 31));
+        Assert.Equal("EUR", buyerRateEvidence.FromCurrency);
+        Assert.Equal("USD", buyerRateEvidence.ToCurrency);
+        Assert.Equal(2m, buyerRateEvidence.AppliedRate);
+        Assert.Equal("TEST/IC/2026-01-01", buyerRateEvidence.SourceReference);
     }
 
     [PostgresFact]
