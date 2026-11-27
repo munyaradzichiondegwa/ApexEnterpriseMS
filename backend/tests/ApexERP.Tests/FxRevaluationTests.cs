@@ -8,6 +8,9 @@ public sealed class FxRevaluationTests
 {
     [Theory]
     [InlineData("100", "100", "1.1", "10")]
+    [InlineData("1000", "1200", "1.1", "-100")]
+    [InlineData("-1000", "-1000", "1.1", "-100")]
+    [InlineData("-1000", "-1200", "1.1", "100")]
     [InlineData("-100", "-100", "1.1", "-10")]
     [InlineData("100", "110", "1.1", "0")]
     [InlineData("0", "0", "1.1", "0")]
