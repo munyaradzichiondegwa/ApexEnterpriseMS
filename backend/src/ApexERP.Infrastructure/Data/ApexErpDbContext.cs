@@ -346,6 +346,8 @@ namespace ApexERP.Infrastructure.Data
                 .OnDelete(DeleteBehavior.Cascade);
 
             // ---- Global tenant-isolation query filters (mirrors PostgreSQL RLS) ----
+            ApplyTenantFilter<OrganisationalBranch>(modelBuilder);
+            ApplyTenantFilter<CompanyMembership>(modelBuilder);
             ApplyTenantFilter<Role>(modelBuilder);
             ApplyTenantFilter<User>(modelBuilder);
             ApplyTenantFilter<AuditLogEntry>(modelBuilder);
