@@ -5,6 +5,7 @@ using ApexERP.Application.Security;
 using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using ApexERP.API.Authorization;
 using ApexERP.API.Services;
@@ -186,6 +187,7 @@ public sealed class PlatformAdministrationController : ControllerBase
 
     [HttpPost("invitations/accept")]
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> AcceptAdministratorInvitation([FromBody] AcceptInvitationRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.Email) ||
@@ -200,6 +202,11 @@ public sealed class PlatformAdministrationController : ControllerBase
         if (invitation is null || invitation.AcceptedAt != null || invitation.ExpiresAt <= DateTime.UtcNow ||
             !string.Equals(invitation.Email, request.Email.Trim(), StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+
+        var tenantIsActive = await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == invitation.TenantId && x.IsActive, ct);
+        var companyIsActive = await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == invitation.CompanyId && x.TenantId == invitation.TenantId && x.IsActive, ct);
+        if (!tenantIsActive || !companyIsActive)
+            return Conflict(new { error = "The tenant or initial company is no longer active. Contact the platform administrator." });
 
         var subscription = await _db.TenantSubscriptions.Where(x => x.TenantId == invitation.TenantId).OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
         if (subscription is null || subscription.Status is not ("Active" or "Trial") ||
@@ -227,6 +234,12 @@ public sealed class PlatformAdministrationController : ControllerBase
         if (ownsTransaction) transaction = await _db.Database.BeginTransactionAsync(ct);
         try
         {
+            var claimedAt = DateTime.UtcNow;
+            var claimed = await _db.TenantAdministratorInvitations
+                .Where(x => x.Id == invitation.Id && x.AcceptedAt == null && x.ExpiresAt > claimedAt)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.AcceptedAt, claimedAt), ct);
+            if (claimed != 1) return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+            invitation.AcceptedAt = claimedAt;
             _db.Users.Add(user);
             await _db.SaveChangesAsync(ct);
             _db.CompanyMemberships.Add(new CompanyMembership
@@ -234,7 +247,6 @@ public sealed class PlatformAdministrationController : ControllerBase
                 CompanyId = invitation.CompanyId, UserId = user.Id, MembershipRole = "Administrator",
                 IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow, RoleId = role.Id
             });
-            invitation.AcceptedAt = DateTime.UtcNow;
             invitation.AcceptedUserId = user.Id;
             var onboarding = await _db.TenantOnboardings.SingleAsync(x => x.TenantId == invitation.TenantId, ct);
             onboarding.Status = "AdministratorCreated";
