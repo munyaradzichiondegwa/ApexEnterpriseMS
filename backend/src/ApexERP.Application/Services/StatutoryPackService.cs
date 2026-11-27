@@ -372,7 +372,7 @@ public sealed class StatutoryPackService
             var previousBands = await _db.PayeTaxBands.Where(b => b.CompanyId == companyId && b.Currency == currency &&
                 b.EffectiveFrom < document.EffectiveFrom && (!b.EffectiveTo.HasValue || b.EffectiveTo >= document.EffectiveFrom)).ToListAsync(ct);
             foreach (var previous in previousBands)
-                previous.EffectiveTo = nssaEffectiveFrom.AddDays(-1);
+                previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
 
             foreach (var band in bands)
             {
@@ -421,7 +421,7 @@ public sealed class StatutoryPackService
                     r.Code == code && r.Currency == currency && r.EffectiveFrom < nssaEffectiveFrom &&
                     (!r.EffectiveTo.HasValue || r.EffectiveTo >= nssaEffectiveFrom)).ToListAsync(ct);
                 foreach (var previous in previousRates)
-                    previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
+                    previous.EffectiveTo = nssaEffectiveFrom.AddDays(-1);
 
                 _db.StatutoryRates.Add(new StatutoryRate
                 {
