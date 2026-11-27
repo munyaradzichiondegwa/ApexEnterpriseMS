@@ -51,9 +51,24 @@ public sealed class SubscriptionEntitlementMiddleware
                 return;
             }
 
+            var companyLimit = subscription.CompanyOverride > 0 ? subscription.CompanyOverride : plan.MaxCompanies;
+            var seatLimit = subscription.SeatOverride > 0 ? subscription.SeatOverride : plan.MaxSeats;
+            var activeCompanies = await db.Companies.IgnoreQueryFilters().CountAsync(x => x.TenantId == tenantId && x.IsActive, context.RequestAborted);
+            var activeSeats = await db.CompanyMemberships.IgnoreQueryFilters()
+                .Join(db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == tenantId && x.IsActive),
+                    membership => membership.CompanyId, company => company.Id, (membership, company) => new { membership.UserId, membership.IsActive })
+                .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(context.RequestAborted);
+
             var segments = context.Request.Path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
             var version = Array.FindIndex(segments, x => x.Length > 1 && x[0] == 'v' && x.Skip(1).All(char.IsDigit));
             var module = version >= 0 && version + 1 < segments.Length ? segments[version + 1].ToLowerInvariant() : null;
+            if (module != "organisation" && (activeCompanies > companyLimit || activeSeats > seatLimit))
+            {
+                context.Response.StatusCode = StatusCodes.Status402PaymentRequired;
+                await context.Response.WriteAsJsonAsync(new { error = "Tenant usage exceeds the licensed company or seat limit. Manage memberships or upgrade the plan.", code = "license_limit_exceeded", activeCompanies, companyLimit, activeSeats, seatLimit }, context.RequestAborted);
+                return;
+            }
+
             if (module is not null && module is not ("organisation" or "platform"))
             {
                 string[] modules;
