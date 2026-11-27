@@ -145,7 +145,7 @@ function ExecutiveDashboard({ exec, error }: { exec: any; error: string | null }
           {close ? <p className="text-sm">Period {close.period} ends {fmtDate(close.endDate)}: {close.done} of {close.tasks} checklist steps done{close.blocked ? `, ${close.blocked} blocked` : ""}. <Link className="text-brand-700 underline" href="/period-close">Open checklist</Link></p> : <p className="text-sm text-slate-500">No open period.</p>}
         </Section>
         <Section title="Integrations and jobs">
-          <p className="text-sm">{o.integrationPending} message(s) pending, <span className={o.integrationDeadLetter ? "text-red-700 font-medium" : ""}>{o.integrationDeadLetter} dead-lettered</span>, {o.backgroundJobFailures7d} job failure(s) in 7 days. <Link className="text-brand-700 underline" href="/integrations">Open</Link></p>
+          <p className="text-sm">{o.integrationPending} message(s) pending, {o.integrationProcessing ?? 0} processing, <span className={o.integrationDeadLetter ? "text-red-700 font-medium" : ""}>{o.integrationDeadLetter} dead-lettered</span>, {o.backgroundJobFailures7d} job failure(s) in 7 days. <Link className="text-brand-700 underline" href="/integrations">Open</Link></p>
         </Section>
       </div>
     </div>
