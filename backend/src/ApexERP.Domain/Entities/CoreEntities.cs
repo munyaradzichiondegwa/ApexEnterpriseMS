@@ -110,6 +110,9 @@ namespace ApexERP.Domain.Entities
         public Guid ReferenceId { get; set; }
         public string ReferenceTable { get; set; } = string.Empty;
         public Guid SubmittedBy { get; set; }
+        /// <summary>Amount used to select and later validate the approval threshold.</summary>
+        public decimal Amount { get; set; }
+        public Guid? FundCentreId { get; set; }
         public WorkflowStatus Status { get; set; } = WorkflowStatus.Pending;
         public Guid? CurrentApproverId { get; set; }
         public string? Notes { get; set; }
