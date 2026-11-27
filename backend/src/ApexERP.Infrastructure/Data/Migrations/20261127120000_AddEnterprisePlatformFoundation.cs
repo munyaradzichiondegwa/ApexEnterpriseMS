@@ -93,6 +93,21 @@ ALTER TABLE "Departments" ADD COLUMN "BranchId" uuid NULL;
 CREATE INDEX "IX_Departments_CompanyId_BranchId" ON "Departments" ("CompanyId","BranchId");
 ALTER TABLE "CostCentres" ADD COLUMN "BranchId" uuid NULL;
 CREATE INDEX "IX_CostCentres_CompanyId_BranchId" ON "CostCentres" ("CompanyId","BranchId");
+CREATE TABLE "TenantSlaPolicies" (
+ "Id" uuid PRIMARY KEY, "TenantId" uuid NOT NULL, "SupportTier" text NOT NULL,
+ "AvailabilityTargetPercent" numeric(20,6) NOT NULL, "ResponseTargetMinutes" integer NOT NULL,
+ "ResolutionTargetMinutes" integer NOT NULL, "MonitoringWindowDays" integer NOT NULL,
+ "BusinessTimeZone" text NOT NULL, "BusinessHoursJson" jsonb NOT NULL, "IsActive" boolean NOT NULL,
+ "CreatedAt" timestamptz NOT NULL, "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
+CREATE UNIQUE INDEX "IX_TenantSlaPolicies_TenantId" ON "TenantSlaPolicies" ("TenantId");
+CREATE TABLE "TenantSlaIncidents" (
+ "Id" uuid PRIMARY KEY, "TenantId" uuid NOT NULL, "IncidentNumber" text NOT NULL, "Severity" text NOT NULL,
+ "Status" text NOT NULL, "Summary" text NOT NULL, "OpenedAt" timestamptz NOT NULL, "FirstResponseAt" timestamptz NULL,
+ "ResolvedAt" timestamptz NULL, "ResponseTargetMinutes" integer NOT NULL, "ResolutionTargetMinutes" integer NOT NULL,
+ "AssignedTo" uuid NULL, "ResolutionNotes" text NULL,
+ "CreatedAt" timestamptz NOT NULL, "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
+CREATE UNIQUE INDEX "IX_TenantSlaIncidents_TenantId_IncidentNumber" ON "TenantSlaIncidents" ("TenantId","IncidentNumber");
+CREATE INDEX "IX_TenantSlaIncidents_TenantId_Status_OpenedAt" ON "TenantSlaIncidents" ("TenantId","Status","OpenedAt");
 -- Existing users already have an unambiguous primary company and role. Preserve that
 -- established access as their default membership; this does not infer tenant ownership.
 INSERT INTO "CompanyMemberships"
@@ -153,6 +168,8 @@ ON CONFLICT ("Code") DO NOTHING;
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("""
+DROP TABLE IF EXISTS "TenantSlaIncidents";
+DROP TABLE IF EXISTS "TenantSlaPolicies";
 DROP INDEX IF EXISTS "IX_Departments_CompanyId_BranchId";
 DROP INDEX IF EXISTS "IX_CostCentres_CompanyId_BranchId";
 ALTER TABLE IF EXISTS "Departments" DROP COLUMN IF EXISTS "BranchId";
