@@ -10,7 +10,6 @@ import ConfigError from "@/components/ConfigError";
 import LoadingState from "@/components/LoadingState";
 import clsx from "clsx";
 import BrandMark from "@/components/BrandMark";
-import { api, extractErrorMessage } from "@/lib/api";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
@@ -72,9 +71,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [companyError, setCompanyError] = useState<string | null>(null);
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [companies, setCompanies] = useState<Array<{ id: string; name: string; isCurrent: boolean }>>([]);
-  const [switching, setSwitching] = useState(false);
-  const [switchError, setSwitchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user && !configError) router.replace("/login");
@@ -118,20 +114,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </div>
   ) : null;
 
-
-  useEffect(() => {
-    if (!user) return;
-    api.get("/auth/companies").then((response) => setCompanies(response.data)).catch(() => setCompanies([]));
-  }, [user?.userId, user?.companyId]);
-
-  async function onCompanyChange(companyId: string) {
-    if (!companyId || companyId === user?.companyId) return;
-    setSwitchError(null);
-    setSwitching(true);
-    try { await switchCompany(companyId); }
-    catch (error) { setSwitchError(extractErrorMessage(error)); }
-    finally { setSwitching(false); }
-  }
 
   // Close the mobile drawer automatically whenever the route changes.
   useEffect(() => {
