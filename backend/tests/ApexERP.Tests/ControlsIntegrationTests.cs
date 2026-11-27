@@ -380,10 +380,9 @@ namespace ApexERP.Tests
 
             // Simulate storage corruption after upload. A fresh company-scoped read must
             // report the hash mismatch rather than silently treating the bytes as verified.
-            await using (var corrupt = db.NewContext(null))
+            await using (var corrupt = db.NewContext(companyA, Approver))
             {
-                var stored = await corrupt.AuditEvidenceReferences.IgnoreQueryFilters()
-                    .SingleAsync(x => x.CompanyId == companyA && x.FileName == "own.pdf");
+                var stored = await corrupt.AuditEvidenceReferences.SingleAsync(x => x.FileName == "own.pdf");
                 stored.Content = Encoding.UTF8.GetBytes("tampered evidence");
                 await corrupt.SaveChangesAsync();
             }
