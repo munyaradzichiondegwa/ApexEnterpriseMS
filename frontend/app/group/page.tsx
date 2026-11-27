@@ -145,6 +145,7 @@ export default function GroupPage() {
         <div>
           <button className="btn-primary mb-4" onClick={() => loadConsolidated("")}>Run Consolidation (this company as parent)</button>
           {consolidated && (
+            <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="card">
                 <div className="flex justify-between text-sm py-1"><span className="text-slate-500">Total Assets</span><span className="font-medium">{fmt(consolidated.totalAssets)}</span></div>
@@ -180,6 +181,7 @@ export default function GroupPage() {
                   ))}</tbody>
                 </table>
               )}
+            </div>
             </div>
           )}
         </div>
