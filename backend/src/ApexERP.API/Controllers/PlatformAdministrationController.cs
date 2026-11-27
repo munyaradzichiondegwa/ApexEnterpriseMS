@@ -356,6 +356,91 @@ public sealed class PlatformAdministrationController : ControllerBase
         return Accepted(new { job.Id, job.Status, job.JobType });
     }
 
+
+    [HttpGet("overview")]
+    public async Task<IActionResult> PlatformOverview(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("platform admin: platform operations overview");
+        var tenants = await _db.CustomerOrganisations.IgnoreQueryFilters().CountAsync(ct);
+        var activeTenants = await _db.CustomerOrganisations.IgnoreQueryFilters().CountAsync(x => x.IsActive, ct);
+        var subscriptions = await _db.TenantSubscriptions.AsNoTracking().GroupBy(x => x.Status)
+            .Select(g => new { status = g.Key, count = g.Count() }).ToListAsync(ct);
+        var failedJobs = await _db.TenantLifecycleJobs.AsNoTracking().CountAsync(x => x.Status == "Failed", ct);
+        var pendingSupport = await _db.TenantSupportGrants.AsNoTracking().CountAsync(x => x.Status == "PendingApproval", ct);
+        return Ok(new { tenants, activeTenants, subscriptions, failedLifecycleJobs = failedJobs, pendingSupportApprovals = pendingSupport });
+    }
+
+    [HttpPut("plans/{planId:guid}")]
+    public async Task<IActionResult> UpdatePlan(Guid planId, [FromBody] CreatePlanRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name) || request.MaxSeats < 1 || request.MaxCompanies < 1)
+            return BadRequest(new { error = "Plan name and positive seat/company limits are required." });
+        using var scope = _db.SystemAccessScope("platform admin: update subscription plan");
+        var plan = await _db.SubscriptionPlans.SingleOrDefaultAsync(x => x.Id == planId, ct);
+        if (plan is null) return NotFound();
+        plan.Name = request.Name.Trim(); plan.Description = request.Description ?? "";
+        plan.MaxSeats = request.MaxSeats; plan.MaxCompanies = request.MaxCompanies;
+        plan.ModuleCodesJson = System.Text.Json.JsonSerializer.Serialize(request.ModuleCodes ?? Array.Empty<string>());
+        plan.MonthlyPrice = request.MonthlyPrice; plan.Currency = (request.Currency ?? "USD").ToUpperInvariant();
+        plan.IsPubliclyAvailable = request.IsPubliclyAvailable;
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("subscription-plan.updated", "SubscriptionPlan", plan.Id.ToString(), null, ct);
+        return Ok(new { plan.Id, plan.Code, plan.MaxSeats, plan.MaxCompanies });
+    }
+
+    [HttpGet("tenants/{tenantId:guid}/operational-checks")]
+    public async Task<IActionResult> OperationalChecks(Guid tenantId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("platform admin: inspect tenant operational checks");
+        if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
+        var rows = await _db.TenantOperationalChecks.AsNoTracking().Where(x => x.TenantId == tenantId)
+            .OrderByDescending(x => x.CheckedAt).Take(200).ToListAsync(ct);
+        return Ok(rows);
+    }
+
+    [HttpGet("tenants/{tenantId:guid}/lifecycle-jobs")]
+    public async Task<IActionResult> LifecycleJobs(Guid tenantId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("platform admin: inspect tenant lifecycle jobs");
+        if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
+        return Ok(await _db.TenantLifecycleJobs.AsNoTracking().Where(x => x.TenantId == tenantId)
+            .OrderByDescending(x => x.CreatedAt).Take(100).ToListAsync(ct));
+    }
+
+    [HttpPut("lifecycle-jobs/{jobId:guid}")]
+    public async Task<IActionResult> UpdateLifecycleJob(Guid jobId, [FromBody] LifecycleJobStatusRequest request, CancellationToken ct)
+    {
+        var transitions = new[] { "Running", "Succeeded", "Failed", "Cancelled" };
+        if (!transitions.Contains(request.Status)) return BadRequest(new { error = "Unsupported lifecycle job status." });
+        using var scope = _db.SystemAccessScope("platform admin: update tenant lifecycle job");
+        var job = await _db.TenantLifecycleJobs.SingleOrDefaultAsync(x => x.Id == jobId, ct);
+        if (job is null) return NotFound();
+        if (job.Status is "Succeeded" or "Failed" or "Cancelled") return Conflict(new { error = "Terminal lifecycle jobs cannot be changed." });
+        if (request.Status == "Running") { job.StartedAt ??= DateTime.UtcNow; }
+        if (request.Status is "Succeeded" or "Failed" or "Cancelled") job.CompletedAt = DateTime.UtcNow;
+        job.Status = request.Status; job.ExternalJobReference = request.ExternalJobReference ?? job.ExternalJobReference;
+        job.ResultSummary = request.ResultSummary;
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("tenant.lifecycle-job.status-changed", "TenantLifecycleJob", job.Id.ToString(), new { request.Status }, ct);
+        return Ok(new { job.Id, job.Status, job.StartedAt, job.CompletedAt });
+    }
+
+    [HttpGet("support-grants/{grantId:guid}/diagnostics")]
+    public async Task<IActionResult> SupportDiagnostics(Guid grantId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("platform admin: access approved time-limited support diagnostics");
+        var grant = await _db.TenantSupportGrants.SingleOrDefaultAsync(x => x.Id == grantId, ct);
+        if (grant is null) return NotFound();
+        if (grant.Status != "Approved" || grant.RevokedAt.HasValue || grant.ExpiresAt <= DateTime.UtcNow)
+            return Forbid();
+        var checks = await _db.TenantOperationalChecks.AsNoTracking().Where(x => x.TenantId == grant.TenantId)
+            .OrderByDescending(x => x.CheckedAt).Take(100).ToListAsync(ct);
+        var jobs = await _db.TenantLifecycleJobs.AsNoTracking().Where(x => x.TenantId == grant.TenantId)
+            .OrderByDescending(x => x.CreatedAt).Take(50).ToListAsync(ct);
+        await AuditAsync("support-grant.diagnostics-accessed", "TenantSupportGrant", grant.Id.ToString(), null, ct);
+        return Ok(new { grant.TenantId, grant.ExpiresAt, checks, jobs });
+    }
+
     private Guid CurrentActorId() => Guid.TryParse(User.FindFirst("sub")?.Value, out var id)
         ? id : throw new UnauthorizedAccessException("Platform actor identity is missing.");
 
@@ -383,4 +468,5 @@ public sealed record JurisdictionProfileRequest(string CountryCode, string Count
 public sealed record SupportGrantRequest(string Reason, int DurationMinutes = 60);
 public sealed record OperationalCheckRequest(string CheckCode, string Status, long? DurationMilliseconds = null, string? DetailsJson = null);
 public sealed record LifecycleJobRequest(string JobType, string RequestedBy);
+public sealed record LifecycleJobStatusRequest(string Status, string? ExternalJobReference = null, string? ResultSummary = null);
 public sealed record AcceptInvitationRequest(string Token, string Email, string Password, string FirstName, string LastName);
