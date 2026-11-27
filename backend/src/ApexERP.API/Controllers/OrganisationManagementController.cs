@@ -14,7 +14,7 @@ namespace ApexERP.API.Controllers;
 
 [Route("api/v1/organisation")]
 [Authorize]
-[AuthenticatedOnly]
+[ModulePermissionExempt]
 public sealed class OrganisationManagementController : ApiControllerBase
 {
     private readonly ApexErpDbContext _db;
