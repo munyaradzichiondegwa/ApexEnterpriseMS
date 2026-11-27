@@ -229,6 +229,67 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
+        public async Task Public_sector_budget_override_requires_an_independent_approval_chain()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var vendorId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var purchaseOrderId = Guid.NewGuid();
+            var approverRoleId = Guid.NewGuid();
+            var submitterId = Guid.NewGuid();
+            var approverId = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Budget Override MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD", IsPublicSectorEntity = true
+                });
+                seed.Vendors.Add(new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-OVR", Name = "Override Vendor", IsApproved = true });
+                seed.Roles.Add(new Role { Id = approverRoleId, CompanyId = companyId, Name = "Budget Approver", PermissionsJson = "[]" });
+                seed.Users.AddRange(
+                    new User { Id = submitterId, CompanyId = companyId, Email = "budget.submitter@test.local", PasswordHash = "test-hash", RoleId = approverRoleId, IsActive = true },
+                    new User { Id = approverId, CompanyId = companyId, Email = "budget.approver@test.local", PasswordHash = "test-hash", RoleId = approverRoleId, IsActive = true });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-OVR", Name = "Operating Vote",
+                    Level = FundCentreLevel.Vote, FinancialYear = 2026, AppropriationAmount = 100m
+                });
+                seed.PurchaseOrders.Add(new PurchaseOrder
+                {
+                    Id = purchaseOrderId, CompanyId = companyId, VendorId = vendorId, PoNo = "PO-OVERRIDE",
+                    IssueDate = new DateTime(2026, 1, 1), Status = PurchaseOrderStatus.Approved,
+                    Total = 125m, FundCentreId = fundCentreId
+                });
+                seed.ApprovalChains.Add(new ApprovalChain
+                {
+                    CompanyId = companyId, Name = "Budget override approval",
+                    EntityType = "PublicSectorBudgetOverride", AmountThreshold = 0m, FundCentreId = fundCentreId,
+                    Tiers = new List<ApprovalChainTier> { new() { TierOrder = 1, ApproverRoleId = approverRoleId, SlaHours = 24 } }
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CommitAsync(companyId, fundCentreId, purchaseOrderId, 125m, true,
+                    "Emergency appropriation", submitterId));
+
+            var workflows = new ApprovalChainService(ctx);
+            var request = await workflows.SubmitForApprovalAsync(companyId, "PublicSectorBudgetOverride",
+                purchaseOrderId, "PurchaseOrder", submitterId, 125m, fundCentreId, "Emergency appropriation");
+            await workflows.DecideAsync(companyId, request.Id, approverId, true, "Reviewed and approved.");
+
+            var commitment = await service.CommitAsync(companyId, fundCentreId, purchaseOrderId, 125m,
+                true, "Emergency appropriation", submitterId);
+            Assert.Equal(125m, commitment.Amount);
+            Assert.Equal(CommitmentStatus.Active, commitment.Status);
+        }
+
+        [PostgresFact]
         public async Task Tender_evaluation_requires_approved_vendor_valid_scoring_and_eligible_award()
         {
             await using var db = await TestDb.CreateAsync();
