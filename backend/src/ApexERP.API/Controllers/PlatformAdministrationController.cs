@@ -282,16 +282,9 @@ public sealed class PlatformAdministrationController : ControllerBase
         var total = await _db.CustomerOrganisations.IgnoreQueryFilters().CountAsync(ct);
         var rows = await _db.CustomerOrganisations.IgnoreQueryFilters().AsNoTracking().OrderBy(x => x.Name)
             .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(x => new { x.Id, x.Name, x.LegalName, x.IsActive })
+            .Select(x => new { x.Id, x.Name, x.LegalName, x.IsActive, CompanyCount = x.Companies.Count })
             .ToListAsync(ct);
-        var tenantIds = rows.Select(x => x.Id).ToArray();
-        var counts = await _db.Companies.IgnoreQueryFilters().AsNoTracking()
-            .Where(x => x.TenantId.HasValue && tenantIds.Contains(x.TenantId.Value))
-            .GroupBy(x => x.TenantId!.Value).Select(g => new { TenantId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.TenantId, x => x.Count, ct);
-        var items = rows.Select(x => new { x.Id, x.Name, x.LegalName, x.IsActive,
-            CompanyCount = counts.TryGetValue(x.Id, out var count) ? count : 0 });
-        return Ok(new { page, pageSize, total, items });
+        return Ok(new { page, pageSize, total, items = rows });
     }
 
     [HttpGet("deployment-profiles")]

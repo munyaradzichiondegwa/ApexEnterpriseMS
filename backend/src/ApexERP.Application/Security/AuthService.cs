@@ -217,12 +217,13 @@ namespace ApexERP.Application.Security
             var hash = Sha256(refreshToken);
             var stored = await _db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
             if (stored == null) throw new UnauthorizedAccessException("Session expired.");
+            var tenantId = await TenantIdForCompanyAsync(stored.CompanyId, ct);
             var now = DateTime.UtcNow;
 
             if (stored.RevokedAt != null)
             {
                 // A token that was already used is being presented again: assume theft and end every session in the family.
-                await RevokeFamilyAsync(stored.FamilyId, "refresh token reuse detected", ct);
+                await RevokeFamilyAsync(stored.FamilyId, tenantId, "refresh token reuse detected", ct);
                 var u = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == stored.UserId, ct);
                 if (u != null) { Log(u, "Auth.RefreshReuseDetected", ip, new { stored.FamilyId }); await _db.SaveChangesAsync(ct); }
                 throw new UnauthorizedAccessException("Session expired.");
@@ -231,9 +232,9 @@ namespace ApexERP.Application.Security
 
             var user = await _db.Users.IgnoreQueryFilters().Include(x => x.Role).FirstOrDefaultAsync(x => x.Id == stored.UserId, ct);
             if (user == null || !user.IsActive || AccountLockout.IsLocked(user.LockedUntil, now))
-            { await RevokeFamilyAsync(stored.FamilyId, "user inactive or locked", ct); throw new UnauthorizedAccessException("Session expired."); }
+            { await RevokeFamilyAsync(stored.FamilyId, tenantId, "user inactive or locked", ct); throw new UnauthorizedAccessException("Session expired."); }
             if (user.PasswordChangedAt != null && user.PasswordChangedAt > stored.CreatedAt)
-            { await RevokeFamilyAsync(stored.FamilyId, "password changed", ct); throw new UnauthorizedAccessException("Session expired."); }
+            { await RevokeFamilyAsync(stored.FamilyId, tenantId, "password changed", ct); throw new UnauthorizedAccessException("Session expired."); }
 
             var result = await IssueTokensForCompanyAsync(user.Id, stored.CompanyId, ip, stored.FamilyId, ct);
             stored.RevokedAt = now; stored.RevokedReason = "rotated"; stored.ReplacedByTokenHash = Sha256(result.RefreshToken);
@@ -247,20 +248,39 @@ namespace ApexERP.Application.Security
             if (string.IsNullOrWhiteSpace(refreshToken)) return;
             var hash = Sha256(refreshToken);
             var stored = await _db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
-            if (stored != null) await RevokeFamilyAsync(stored.FamilyId, "logout", ct);
+            if (stored != null)
+            {
+                var tenantId = await TenantIdForCompanyAsync(stored.CompanyId, ct);
+                await RevokeFamilyAsync(stored.FamilyId, tenantId, "logout", ct);
+            }
         }
 
         public async Task RevokeAllForUserAsync(Guid userId, string reason, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: revoke every company session for user");
-            var live = await _db.RefreshTokens.IgnoreQueryFilters().Where(t => t.UserId == userId && t.RevokedAt == null).ToListAsync(ct);
+            var tenantId = _db.CurrentTenantId ?? throw new InvalidOperationException("A tenant context is required to revoke a user's sessions.");
+            using var crossTenant = _db.CrossTenantScope();
+            var live = await _db.RefreshTokens.IgnoreQueryFilters()
+                .Where(t => t.UserId == userId && t.RevokedAt == null &&
+                    _db.Companies.IgnoreQueryFilters().Any(c => c.Id == t.CompanyId && c.TenantId == tenantId))
+                .ToListAsync(ct);
             foreach (var t in live) { t.RevokedAt = DateTime.UtcNow; t.RevokedReason = reason; }
             await _db.SaveChangesAsync(ct);
         }
 
-        private async Task RevokeFamilyAsync(Guid familyId, string reason, CancellationToken ct)
+        private async Task<Guid> TenantIdForCompanyAsync(Guid companyId, CancellationToken ct)
         {
-            var live = await _db.RefreshTokens.IgnoreQueryFilters().Where(t => t.FamilyId == familyId && t.RevokedAt == null).ToListAsync(ct);
+            var tenantId = await _db.Companies.IgnoreQueryFilters()
+                .Where(c => c.Id == companyId).Select(c => c.TenantId).SingleOrDefaultAsync(ct);
+            return tenantId ?? throw new UnauthorizedAccessException("Session expired.");
+        }
+
+        private async Task RevokeFamilyAsync(Guid familyId, Guid tenantId, string reason, CancellationToken ct)
+        {
+            using var crossTenant = _db.CrossTenantScope();
+            var live = await _db.RefreshTokens.IgnoreQueryFilters()
+                .Where(t => t.FamilyId == familyId && t.RevokedAt == null &&
+                    _db.Companies.IgnoreQueryFilters().Any(c => c.Id == t.CompanyId && c.TenantId == tenantId))
+                .ToListAsync(ct);
             foreach (var t in live) { t.RevokedAt = DateTime.UtcNow; t.RevokedReason = reason; }
             await _db.SaveChangesAsync(ct);
         }
@@ -270,7 +290,6 @@ namespace ApexERP.Application.Security
         // ---------------------------------------------------------------------------------------------
         public async Task ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: change authenticated user's password");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (!VerifyPassword(currentPassword ?? "", user.PasswordHash)) throw new UnauthorizedAccessException("The current password is not correct.");
             var problem = PasswordPolicy.Validate(newPassword, user.Email);
@@ -283,7 +302,6 @@ namespace ApexERP.Application.Security
 
         public async Task<MfaSetup> BeginMfaSetupAsync(Guid userId, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: begin authenticated user's MFA setup");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (user.TotpEnabled) throw new InvalidOperationException("Two-step verification is already on. Turn it off first to enrol a new device.");
             var secret = Totp.GenerateSecret();
@@ -295,7 +313,6 @@ namespace ApexERP.Application.Security
         /// <summary>Confirms the first code from the authenticator app, turns MFA on and returns one-time recovery codes (shown once).</summary>
         public async Task<IReadOnlyList<string>> ConfirmMfaAsync(Guid userId, string code, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: confirm authenticated user's MFA setup");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (user.TotpSecret == null) throw new InvalidOperationException("Start MFA setup first.");
             if (!Totp.Verify(_protector.Unprotect(user.TotpSecret), code, DateTime.UtcNow)) throw new InvalidOperationException("That code is not valid. Check the time on your phone and try again.");
@@ -310,7 +327,6 @@ namespace ApexERP.Application.Security
 
         public async Task DisableMfaAsync(Guid userId, string password, string code, CancellationToken ct = default)
         {
-            using var systemAccess = _db.SystemAccessScope("authentication: disable authenticated user's MFA");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (!VerifyPassword(password ?? "", user.PasswordHash)) throw new UnauthorizedAccessException("The password is not correct.");
             if (user.TotpEnabled && !await VerifySecondFactorAsync(user, code ?? "", DateTime.UtcNow, ct)) throw new UnauthorizedAccessException("The verification code is not valid.");

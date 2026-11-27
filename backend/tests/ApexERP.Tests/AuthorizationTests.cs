@@ -242,7 +242,7 @@ namespace ApexERP.Tests
              d.ActionName == nameof(PlatformAdministrationController.LifecycleJobCallback));
 
         private static bool IsModulePermissionExempt(ControllerActionDescriptor d) =>
-            d.ControllerTypeInfo.GetCustomAttributes<ModulePermissionExemptAttribute>(true).Any();
+            d.ControllerTypeInfo.AsType().IsDefined(typeof(ModulePermissionExemptAttribute), inherit: true);
 
         [Fact]
         public void The_guard_actually_sees_the_controllers()
@@ -334,6 +334,25 @@ namespace ApexERP.Tests
                 n.StartsWith("OrganisationManagement.", StringComparison.Ordinal) ||
                 n.StartsWith("PlatformAdministration.", StringComparison.Ordinal),
                 "Unexpected authenticated-only action: " + n));
+        }
+
+        [Fact]
+        public void Module_permission_exemption_is_limited_to_the_platform_control_plane()
+        {
+            var exempt = Descriptors().Where(IsModulePermissionExempt)
+                .Select(d => d.ControllerTypeInfo.AsType()).Distinct().ToArray();
+            Assert.Equal(new[] { typeof(PlatformAdministrationController) }, exempt);
+        }
+
+        [Fact]
+        public void Organisation_management_requires_tenant_module_permissions()
+        {
+            var actions = Descriptors().Where(d => d.ControllerTypeInfo.AsType() == typeof(OrganisationManagementController)).ToList();
+            Assert.NotEmpty(actions);
+            Assert.All(actions, d => Assert.False(IsModulePermissionExempt(d)));
+            Assert.Contains("perm:organisation.read", Policies(Find(typeof(OrganisationManagementController), nameof(OrganisationManagementController.Companies))));
+            Assert.Contains("perm:organisation.write", Policies(Find(typeof(OrganisationManagementController), nameof(OrganisationManagementController.CreateCompany))));
+            Assert.Contains("perm:organisation.write", Policies(Find(typeof(OrganisationManagementController), nameof(OrganisationManagementController.RequestSubscriptionRenewal))));
         }
 
         private static string Permission(ControllerActionDescriptor d) =>

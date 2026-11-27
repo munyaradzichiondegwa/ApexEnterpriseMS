@@ -14,7 +14,6 @@ namespace ApexERP.API.Controllers;
 
 [Route("api/v1/organisation")]
 [Authorize]
-[ModulePermissionExempt]
 public sealed class OrganisationManagementController : ApiControllerBase
 {
     private readonly ApexErpDbContext _db;
@@ -25,6 +24,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         ? id : throw new UnauthorizedAccessException("Missing tenant context.");
 
     private bool CanManage => GrantedPermissions.Contains("*") ||
+        GrantedPermissions.Contains("organisation.write") ||
         GrantedPermissions.Contains("settings.write") ||
         string.Equals(User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value, "Administrator", StringComparison.OrdinalIgnoreCase);
 

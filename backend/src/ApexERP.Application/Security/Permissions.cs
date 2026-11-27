@@ -118,7 +118,7 @@ namespace ApexERP.Application.Security
         {
             "gl", "ar", "ap", "cashbank", "inventory", "fixed-assets", "payroll", "tax", "reports", "crm",
             "projects", "supply-chain", "manufacturing", "fdms", "equity", "grants", "public-sector",
-            "group", "workflow", "admin", "exceptions", "automation", "controls", "integrations"
+            "group", "workflow", "organisation", "admin", "exceptions", "automation", "controls", "integrations"
         };
     }
 
