@@ -428,6 +428,8 @@ namespace ApexERP.Tests
             var voteId = Guid.NewGuid();
             var programId = Guid.NewGuid();
             var purchaseOrderId = Guid.NewGuid();
+            var expenseAccountId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
 
             await using (var seed = db.NewContext(companyId))
             {
@@ -458,6 +460,30 @@ namespace ApexERP.Tests
                     PoNo = "PO-REPORT", IssueDate = new DateTime(2026, 2, 1),
                     Status = PurchaseOrderStatus.Approved, Total = 60m, FundCentreId = programId
                 });
+                seed.GlAccounts.Add(new GlAccount
+                {
+                    Id = expenseAccountId, CompanyId = companyId, Code = "5000",
+                    Name = "School Supplies", Type = GlAccountType.Expense, Currency = "USD"
+                });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 3,
+                    StartDate = new DateTime(2026, 3, 1), EndDate = new DateTime(2026, 4, 1),
+                    Status = PeriodStatus.Open
+                });
+                var actualJournal = new JournalEntry
+                {
+                    CompanyId = companyId, EntryNo = "JE-REPORT-ACTUAL",
+                    Description = "Posted school supplies expense", EntryDate = new DateTime(2026, 3, 15),
+                    PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                };
+                seed.JournalEntries.Add(actualJournal);
+                seed.JournalLines.Add(new JournalLine
+                {
+                    JournalEntryId = actualJournal.Id, GlAccountId = expenseAccountId,
+                    Debit = 15m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                    BaseDebit = 15m, BaseCredit = 0m, FundCentreId = programId
+                });
                 await seed.SaveChangesAsync();
             }
 
@@ -479,8 +505,8 @@ namespace ApexERP.Tests
             Assert.Equal(60m, program.CommittedToDate);
             Assert.Equal(20m, program.RealisedAgainstCommitments);
             Assert.Equal(40m, program.OutstandingCommitments);
-            Assert.Equal(0m, program.PostedActuals);
-            Assert.Equal(60m, program.AvailableBudget);
+            Assert.Equal(15m, program.PostedActuals);
+            Assert.Equal(45m, program.AvailableBudget);
         }
 
     }
