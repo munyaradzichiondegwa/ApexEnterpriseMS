@@ -34,6 +34,8 @@ namespace ApexERP.Application.Services
         /// (cumulative "deduct" tax-table technique: tax = gross * marginalRate - deduct).</summary>
         public async Task<decimal> CalculatePayeAsync(Guid companyId, decimal monthlyGross, DateTime asOf, string currency = "USD", CancellationToken ct = default)
         {
+            currency = (currency ?? string.Empty).Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(currency)) throw new InvalidOperationException("A PAYE currency is required.");
             var bands = await _db.PayeTaxBands
                 .Where(b => b.CompanyId == companyId && b.Currency == currency && b.EffectiveFrom <= asOf && (b.EffectiveTo == null || b.EffectiveTo >= asOf))
                 .OrderBy(b => b.LowerBound)
@@ -86,7 +88,7 @@ namespace ApexERP.Application.Services
             var already = await _db.PayrollRuns.AnyAsync(
                 p => p.CompanyId == companyId && p.PeriodMonth == month && p.PeriodYear == year && p.Currency == currency, ct);
             if (already)
-                throw new InvalidOperationException($"A payroll run for {month}/{year} already exists.");
+                throw new InvalidOperationException($"A {currency} payroll run for {month}/{year} already exists.");
 
             var employees = await _db.Employees.Where(e => e.CompanyId == companyId && e.IsActive && e.Currency.ToUpper() == currency).ToListAsync(ct);
             if (employees.Count == 0)
