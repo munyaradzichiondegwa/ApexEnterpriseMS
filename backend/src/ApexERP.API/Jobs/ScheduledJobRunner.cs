@@ -28,10 +28,16 @@ namespace ApexERP.API.Jobs
                 {
                     List<Guid> companies;
                     using (var scope = _services.CreateScope())
-                        companies = await scope.ServiceProvider.GetRequiredService<ApexErpDbContext>().Companies.IgnoreQueryFilters()
-                            .Where(c => c.IsActive && c.TenantId.HasValue && c.Tenant != null && c.Tenant.IsActive)
-                            .Select(c => c.Id)
-                            .ToListAsync(stoppingToken);
+                    {
+                        var db = scope.ServiceProvider.GetRequiredService<ApexErpDbContext>();
+                        using (db.SystemAccessScope("scheduler: discover active customer companies"))
+                        {
+                            companies = await db.Companies.IgnoreQueryFilters()
+                                .Where(c => c.IsActive && c.TenantId.HasValue && c.Tenant != null && c.Tenant.IsActive)
+                                .Select(c => c.Id)
+                                .ToListAsync(stoppingToken);
+                        }
+                    }
                     foreach (var id in companies)
                     {
                         try { await ScheduledJobs.RunDueForCompanyAsync(_services, id, DateTime.UtcNow, null, stoppingToken); }
