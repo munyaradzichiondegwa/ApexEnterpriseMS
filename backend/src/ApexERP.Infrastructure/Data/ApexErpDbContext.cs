@@ -275,7 +275,9 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<TenantOperationalCheck>().Property(x => x.DetailsJson).HasColumnType("jsonb");
 
             // Explicitly model every FK created by the enterprise platform migration.
-            modelBuilder.Entity<WorkflowApproval>().HasOne<Company>().WithMany()
+            modelBuilder.Entity<WorkflowRequest>().HasOne<FundCentre>().WithMany()
+                .HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict);
+                        modelBuilder.Entity<WorkflowApproval>().HasOne<Company>().WithMany()
                 .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<OrganisationalBranch>().HasOne<Company>().WithMany()
                 .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
