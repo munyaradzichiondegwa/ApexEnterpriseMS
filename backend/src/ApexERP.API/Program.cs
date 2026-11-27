@@ -397,7 +397,6 @@ app.Use(async (context, next) =>
         dbContext.CurrentTenantId = tenantId;
         dbContext.CurrentCompanyId = companyId;
         dbContext.CurrentIpAddress = context.Connection.RemoteIpAddress?.ToString();
-        await TenantSession.RefreshAsync(dbContext, context.RequestAborted);
 
         if (Guid.TryParse(
                 (context.User.FindFirst("sub") ??
@@ -406,6 +405,7 @@ app.Use(async (context, next) =>
         {
             dbContext.CurrentUserId = userId;
         }
+        await TenantSession.RefreshAsync(dbContext, context.RequestAborted);
     }
 
     await next();
