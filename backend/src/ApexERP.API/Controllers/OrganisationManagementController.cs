@@ -66,6 +66,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
     [HttpPost("subscription/renewal-request")]
     public async Task<IActionResult> RequestSubscriptionRenewal(CancellationToken ct)
     {
+        if (DenyManagement() is { } denied) return denied;
         using var scope = _db.SystemAccessScope("tenant self-service: request subscription renewal");
         var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId)
             .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
