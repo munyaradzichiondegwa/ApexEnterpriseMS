@@ -183,6 +183,8 @@ namespace ApexERP.Application.Services
                 var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
                     c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId, token);
                 if (commitment == null) return false;
+                await _db.AcquireTransactionLockAsync($"public-sector-commitment:{companyId:N}:{commitment.Id:N}", token);
+                commitment = await _db.Commitments.FirstAsync(c => c.CompanyId == companyId && c.Id == commitment.Id, token);
                 return await ReleaseCommitmentLockedAsync(commitment, "Purchase order release request", token);
             }, ct);
 
@@ -229,6 +231,8 @@ namespace ApexERP.Application.Services
                 var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
                     c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId, token);
                 if (commitment == null) return false;
+                await _db.AcquireTransactionLockAsync($"public-sector-commitment:{companyId:N}:{commitment.Id:N}", token);
+                commitment = await _db.Commitments.FirstAsync(c => c.CompanyId == companyId && c.Id == commitment.Id, token);
                 if (commitment.Status != CommitmentStatus.Active)
                 {
                     _audit.Record(companyId, _db.CurrentUserId, "BudgetCommitment.CancelNoOp", "PublicSector",
