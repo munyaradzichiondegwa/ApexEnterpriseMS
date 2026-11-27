@@ -103,6 +103,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             return BadRequest(new { error = "A company name and valid fiscal year start month (1-12) are required." });
 
         using var scope = _db.SystemAccessScope("tenant administration: create legal entity");
+        await _db.AcquireTenantCapacityLockAsync(TenantId, "company-limit", ct);
         var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId)
             .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
         if (sub is null || sub.Status is not ("Active" or "Trial") ||
@@ -244,6 +245,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
     {
         if (DenyManagement() is { } denied) return denied;
         using var scope = _db.SystemAccessScope("tenant administration: add company membership");
+        await _db.AcquireTenantCapacityLockAsync(TenantId, "seat-limit", ct);
         if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
         var user = await _db.Users.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.UserId && x.IsActive, ct);
         if (user is null) return NotFound(new { error = "User not found." });
@@ -264,7 +266,11 @@ public sealed class OrganisationManagementController : ApiControllerBase
         var seats = await _db.CompanyMemberships.IgnoreQueryFilters().Where(x => x.IsActive)
             .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, c => c.Id, (m,c) => m.UserId)
             .Distinct().CountAsync(ct);
-        if (seats >= seatLimit && !await _db.CompanyMemberships.IgnoreQueryFilters().AnyAsync(x => x.UserId == user.Id && x.IsActive, ct))
+        var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        var alreadyHasTenantSeat = await _db.CompanyMemberships.IgnoreQueryFilters().Where(x => x.UserId == user.Id && x.IsActive)
+            .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, c => c.Id, (m,c) => m.Id)
+            .AnyAsync(ct);
+        if (seats + pendingSeats >= seatLimit && !alreadyHasTenantSeat)
             return Conflict(new { error = "The subscription seat limit has been reached.", seatLimit });
 
         if (existingMembership is null)
@@ -283,6 +289,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         if (DenyManagement() is { } denied) return denied;
         if (string.IsNullOrWhiteSpace(request.Email)) return BadRequest(new { error = "Email is required." });
         using var scope = _db.SystemAccessScope("tenant administration: invite company user");
+        await _db.AcquireTenantCapacityLockAsync(TenantId, "seat-limit", ct);
         var company = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct);
         if (company is null) return NotFound();
         var email = request.Email.Trim().ToLowerInvariant();

@@ -202,6 +202,7 @@ public sealed class PlatformAdministrationController : ControllerBase
         if (invitation is null || invitation.AcceptedAt != null || invitation.ExpiresAt <= DateTime.UtcNow ||
             !string.Equals(invitation.Email, request.Email.Trim(), StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+        await _db.AcquireTenantCapacityLockAsync(invitation.TenantId, "seat-limit", ct);
 
         var tenantIsActive = await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == invitation.TenantId && x.IsActive, ct);
         var companyIsActive = await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == invitation.CompanyId && x.TenantId == invitation.TenantId && x.IsActive, ct);
@@ -216,6 +217,13 @@ public sealed class PlatformAdministrationController : ControllerBase
         var plan = await _db.SubscriptionPlans.SingleAsync(x => x.Id == subscription.PlanId, ct);
         var seatLimit = subscription.SeatOverride > 0 ? subscription.SeatOverride : plan.MaxSeats;
         if (seatLimit < 1) return StatusCode(402, new { error = "The subscription has no administrator seat available." });
+        var activeSeats = await _db.CompanyMemberships.IgnoreQueryFilters().Where(x => x.IsActive)
+            .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == invitation.TenantId && x.IsActive),
+                m => m.CompanyId, c => c.Id, (m,c) => m.UserId).Distinct().CountAsync(ct);
+        var pendingCompanySeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == invitation.TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        var pendingAdminSeats = await _db.TenantAdministratorInvitations.CountAsync(x => x.TenantId == invitation.TenantId && x.Id != invitation.Id && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        if (activeSeats + pendingCompanySeats + pendingAdminSeats >= seatLimit)
+            return StatusCode(402, new { error = "The subscription seat limit has been reached.", seatLimit });
         if (await _db.Users.IgnoreQueryFilters().AnyAsync(x => x.Email == invitation.Email, ct))
             return Conflict(new { error = "An account with this email already exists. Ask the platform administrator to issue a user invitation." });
 

@@ -116,6 +116,7 @@ namespace ApexERP.API.Controllers
             if (invitation is null || invitation.AcceptedAt.HasValue || invitation.ExpiresAt <= DateTime.UtcNow ||
                 !string.Equals(invitation.Email, request.Email.Trim(), StringComparison.OrdinalIgnoreCase))
                 return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+            await _db.AcquireTenantCapacityLockAsync(invitation.TenantId, "seat-limit", ct);
             if (await _db.Users.IgnoreQueryFilters().AnyAsync(x => x.Email == invitation.Email, ct))
                 return Conflict(new { error = "An account with this email already exists." });
             var company = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(
@@ -137,7 +138,15 @@ namespace ApexERP.API.Controllers
                 .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == tenant.Id && x.IsActive),
                     m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
                 .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
-            if (activeSeats >= seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been reached.", seatLimit });
+            var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == tenant.Id && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+            if (activeSeats + pendingSeats >= seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been reached.", seatLimit });
+
+            var claimedAt = DateTime.UtcNow;
+            var claimed = await _db.CompanyUserInvitations
+                .Where(x => x.Id == invitation.Id && x.AcceptedAt == null && x.ExpiresAt > claimedAt)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.AcceptedAt, claimedAt), ct);
+            if (claimed != 1) return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+            invitation.AcceptedAt = claimedAt;
 
             var user = new User { CompanyId = company.Id, Email = invitation.Email,
                 PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
@@ -152,7 +161,6 @@ namespace ApexERP.API.Controllers
                 _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
                     MembershipRole = role.Name, RoleId = role.Id, IsDefault = true,
                     IsActive = true, ValidFrom = DateTime.UtcNow });
-                invitation.AcceptedAt = DateTime.UtcNow;
                 invitation.AcceptedUserId = user.Id;
                 await _db.SaveChangesAsync(ct);
                 if (ownsTransaction) await transaction!.CommitAsync(ct);
