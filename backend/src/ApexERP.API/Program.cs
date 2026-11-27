@@ -82,6 +82,8 @@ builder.Services.AddScoped<CrmService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<IEmailDeliveryService, SmtpEmailDeliveryService>();
+builder.Services.AddHttpClient(nameof(TenantLifecycleDispatcher));
+builder.Services.AddHostedService<TenantLifecycleDispatcher>();
 
 // Full IFRS statement suite (Necessary Financial Reports 3, 4, 5)
 builder.Services.AddScoped<StatementOfChangesInEquityService>();
