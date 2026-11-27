@@ -75,6 +75,8 @@ public sealed class FxRevaluationService
                 r.FromCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive &&
                 r.RateDate >= asOfDate.Date.AddDays(-7) && r.Rate > 0)
             .OrderByDescending(r => r.RateDate)
+            .ThenByDescending(r => r.IsManualOverride)
+            .ThenBy(r => r.Id)
             .ToListAsync(ct);
 
         var lines = new List<FxRevaluationLine>();
