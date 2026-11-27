@@ -176,6 +176,55 @@ namespace ApexERP.Tests
             }
         }
 
+        [PostgresFact]
+        public async Task External_group_parent_requires_recorded_consent_without_expanding_visible_company_graph()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var tenantA = Guid.NewGuid();
+            var tenantB = Guid.NewGuid();
+            var caller = Guid.NewGuid();
+            var consentingParent = Guid.NewGuid();
+            var unlinkedParent = Guid.NewGuid();
+            var cyclicParent = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(null))
+            {
+                seed.CustomerOrganisations.AddRange(
+                    new CustomerOrganisation { Id = tenantA, Name = "Group tenant A" },
+                    new CustomerOrganisation { Id = tenantB, Name = "Group tenant B" });
+                seed.Companies.AddRange(
+                    new Company { Id = caller, TenantId = tenantA, Name = "Independent customer" },
+                    new Company { Id = consentingParent, TenantId = tenantB, Name = "Consenting parent" },
+                    new Company { Id = unlinkedParent, TenantId = tenantB, Name = "Unlinked parent" },
+                    new Company { Id = cyclicParent, TenantId = tenantB, Name = "Cyclic parent", ParentCompanyId = caller });
+                seed.Customers.Add(new Customer
+                {
+                    CompanyId = consentingParent,
+                    Code = "LINK-CALLER",
+                    Name = "Caller company",
+                    LinkedCompanyId = caller
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var context = db.NewContext(caller, tenantId: tenantA);
+            var scope = new GroupScopeService(context);
+
+            var visible = await scope.GetVisibleCompanyIdsAsync(caller);
+            Assert.Equal(new[] { caller }, visible.OrderBy(x => x).ToArray());
+            Assert.DoesNotContain(consentingParent, visible);
+
+            Assert.Null(await scope.ValidateStructureChangeAsync(caller, caller, consentingParent));
+
+            var consentError = await scope.ValidateStructureChangeAsync(caller, caller, unlinkedParent);
+            Assert.NotNull(consentError);
+            Assert.Contains("has not registered", consentError);
+
+            var cycleError = await scope.ValidateStructureChangeAsync(caller, caller, cyclicParent);
+            Assert.NotNull(cycleError);
+            Assert.Contains("circular", cycleError);
+        }
+
         // ---- PostgreSQL RLS: exercise policies as a non-owner, non-BYPASSRLS role -------------------------------
 
         [PostgresFact]
