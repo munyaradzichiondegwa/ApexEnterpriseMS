@@ -272,6 +272,84 @@ namespace ApexERP.Application.Services
                 totalEliminations += Math.Abs(accountBalance);
             }
 
+            // Eliminate the income/expense sides of matched mirror postings by their linked
+            // source and mirror journals. These accounts are not necessarily the same GL code
+            // (revenue versus expense), so balance-sheet reciprocal-account matching above cannot
+            // safely identify them. Translate each P&L line at its own posting-date rate first.
+            var matchedIntercompanyTransactions = await _db.IntercompanyTransactions.IgnoreQueryFilters()
+                .Where(t => groupIds.Contains(t.FromCompanyId) && groupIds.Contains(t.ToCompanyId) &&
+                    t.Status != IntercompanyStatus.Unmatched &&
+                    t.SourceJournalEntryId.HasValue && t.MirrorJournalEntryId.HasValue)
+                .OrderBy(t => t.TransactionDate).ThenBy(t => t.Id)
+                .ToListAsync(ct);
+
+            foreach (var transaction in matchedIntercompanyTransactions)
+            {
+                var sourceJournalId = transaction.SourceJournalEntryId!.Value;
+                var mirrorJournalId = transaction.MirrorJournalEntryId!.Value;
+                var pnlLines = await (
+                    from journalLine in _db.JournalLines.IgnoreQueryFilters()
+                    join journal in _db.JournalEntries.IgnoreQueryFilters()
+                        on journalLine.JournalEntryId equals journal.Id
+                    join account in _db.GlAccounts.IgnoreQueryFilters()
+                        on journalLine.GlAccountId equals account.Id
+                    where ((journal.Id == sourceJournalId && journal.CompanyId == transaction.FromCompanyId) ||
+                           (journal.Id == mirrorJournalId && journal.CompanyId == transaction.ToCompanyId)) &&
+                          (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed) &&
+                          (account.Type == GlAccountType.Income || account.Type == GlAccountType.Expense)
+                    select new
+                    {
+                        journal.CompanyId,
+                        journal.EntryDate,
+                        AccountCode = account.Code,
+                        SignedAmount = journalLine.BaseDebit - journalLine.BaseCredit
+                    }).ToListAsync(ct);
+
+                if (pnlLines.Count == 0) continue;
+
+                decimal TranslatePnlLine(Guid companyId, DateTime entryDate, decimal signedAmount)
+                {
+                    var companyCurrency = companiesById[companyId].FunctionalCurrency.Trim();
+                    if (string.Equals(companyCurrency, parentCurrency, StringComparison.OrdinalIgnoreCase))
+                        return signedAmount;
+
+                    var selectedRate = rateEvidence.FirstOrDefault(r =>
+                        r.CompanyId == companyId && r.EffectiveDate == entryDate.Date);
+                    if (selectedRate == null)
+                        throw new InvalidOperationException(
+                            $"Missing posting-date translation evidence for intercompany journal {companyId:N} on {entryDate:yyyy-MM-dd}.");
+                    return signedAmount * selectedRate.AppliedRate;
+                }
+
+                var sourceTotal = pnlLines.Where(l => l.CompanyId == transaction.FromCompanyId)
+                    .Sum(l => TranslatePnlLine(l.CompanyId, l.EntryDate, l.SignedAmount));
+                var mirrorTotal = pnlLines.Where(l => l.CompanyId == transaction.ToCompanyId)
+                    .Sum(l => TranslatePnlLine(l.CompanyId, l.EntryDate, l.SignedAmount));
+
+                if (!AreReciprocalBalancesMatched(sourceTotal, mirrorTotal))
+                {
+                    intercompanyExceptions.Add(new IntercompanyEliminationException(
+                        transaction.FromCompanyId, transaction.ToCompanyId,
+                        $"IC-TXN-{transaction.Id:N}", sourceTotal, mirrorTotal, sourceTotal + mirrorTotal,
+                        "Linked intercompany income/expense journal amounts do not agree in group currency; neither side was eliminated."));
+                    continue;
+                }
+
+                foreach (var line in pnlLines)
+                {
+                    if (!aggregated.TryGetValue(line.AccountCode, out var consolidatedLine)) continue;
+                    var translatedAmount = TranslatePnlLine(line.CompanyId, line.EntryDate, line.SignedAmount);
+                    var elimination = -translatedAmount;
+                    aggregated[line.AccountCode] = consolidatedLine with
+                    {
+                        EliminatedAmount = consolidatedLine.EliminatedAmount + elimination,
+                        ConsolidatedAmount = consolidatedLine.ConsolidatedAmount + elimination
+                    };
+                }
+
+                totalEliminations += Math.Abs(sourceTotal);
+            }
+
             // The difference caused by translating foreign operations at closing and historical
             // rates is presented in equity as the foreign-currency translation reserve (CTA).
             var translationReserve = -aggregated.Values.Sum(l => l.ConsolidatedAmount);
