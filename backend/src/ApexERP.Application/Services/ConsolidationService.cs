@@ -13,12 +13,18 @@ namespace ApexERP.Application.Services
         DateTime EffectiveDate, DateTime RateDate, decimal QuotedRate, decimal AppliedRate,
         bool IsInverse, bool IsManualOverride, string RateSource, string? SourceReference);
 
+    public record ConsolidationPeriodEvidence(
+        Guid CompanyId, string CompanyName, int? Year, int? PeriodNo,
+        DateTime? PeriodStart, DateTime? PeriodEnd, string Status,
+        bool IsPeriodEndAligned, bool HasOverlappingPeriods);
+
     public record ConsolidationResult(
         Guid ParentCompanyId, List<Guid> SubsidiaryCompanyIds, DateTime AsOfDate,
         List<ConsolidatedAccountLine> Lines,
         decimal TotalAssets, decimal TotalLiabilities, decimal TotalGroupEquity, decimal TotalNonControllingInterest,
         decimal TotalEliminations, IReadOnlyList<IntercompanyEliminationException> IntercompanyExceptions,
-        IReadOnlyList<ConsolidationRateEvidence> RateEvidence);
+        IReadOnlyList<ConsolidationRateEvidence> RateEvidence,
+        IReadOnlyList<ConsolidationPeriodEvidence> PeriodEvidence);
 
     /// <summary>
     /// PRD Module 2 ("As a Group Accountant, I want to consolidate the GL of multiple companies
@@ -78,6 +84,29 @@ namespace ApexERP.Application.Services
             if (group.Count == 0)
                 throw new InvalidOperationException("The requested group is empty.");
             var subsidiaries = group.Where(c => c.Id != parentCompanyId).ToList();
+            var groupCompanyIds = group.Select(c => c.Id).ToList();
+            var periodsCoveringReportDate = await _db.AccountingPeriods.IgnoreQueryFilters()
+                .Where(p => groupCompanyIds.Contains(p.CompanyId) &&
+                    p.StartDate <= asOfDate.Date && p.EndDate >= asOfDate.Date)
+                .ToListAsync(ct);
+            var periodEvidence = group.Select(company =>
+            {
+                var matches = periodsCoveringReportDate.Where(p => p.CompanyId == company.Id)
+                    .OrderBy(p => p.Year).ThenBy(p => p.PeriodNo).ToList();
+                if (matches.Count == 0)
+                    return new ConsolidationPeriodEvidence(company.Id, company.Name, null, null,
+                        null, null, "No accounting period covers the reporting date", false, false);
+                if (matches.Count > 1)
+                    return new ConsolidationPeriodEvidence(company.Id, company.Name, null, null,
+                        null, null, "Multiple accounting periods overlap the reporting date", false, true);
+
+                var period = matches[0];
+                var aligned = period.EndDate.Date == asOfDate.Date;
+                return new ConsolidationPeriodEvidence(company.Id, company.Name, period.Year, period.PeriodNo,
+                    period.StartDate.Date, period.EndDate.Date,
+                    aligned ? "Period end aligned" : "Reporting date falls before the period end",
+                    aligned, false);
+            }).OrderBy(x => x.CompanyName).ToList();
 
             // Financial rows are read across legal companies only after the tenant-scoped group
             // allow-list has been established. Every query below retains an explicit CompanyId predicate.
@@ -283,7 +312,8 @@ namespace ApexERP.Application.Services
             return new ConsolidationResult(parentCompanyId, subsidiaries.Select(s => s.Id).ToList(), asOfDate,
                 lines, totalAssets, totalLiabilities, totalGroupEquity, totalNci, totalEliminations,
                 intercompanyExceptions.OrderBy(x => x.CompanyAId).ThenBy(x => x.CompanyBId).ThenBy(x => x.AccountCode).ToList(),
-                rateEvidence.OrderBy(x => x.CompanyName).ThenBy(x => x.EffectiveDate).ToList());
+                rateEvidence.OrderBy(x => x.CompanyName).ThenBy(x => x.EffectiveDate).ToList(),
+                periodEvidence);
         }
 
         private sealed record TranslatedTrialBalance(List<TrialBalanceLine> Lines,
