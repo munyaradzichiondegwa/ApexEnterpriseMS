@@ -187,6 +187,21 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<Distribution> Distributions => Set<Distribution>();
         public DbSet<GrantCloseoutChecklist> GrantCloseoutChecklists => Set<GrantCloseoutChecklist>();
 
+        // Enterprise platform: tenant operations and platform control-plane records.
+        public DbSet<OrganisationalBranch> OrganisationalBranches => Set<OrganisationalBranch>();
+        public DbSet<CompanyMembership> CompanyMemberships => Set<CompanyMembership>();
+        public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+        public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
+        public DbSet<JurisdictionProfile> JurisdictionProfiles => Set<JurisdictionProfile>();
+        public DbSet<TenantJurisdiction> TenantJurisdictions => Set<TenantJurisdiction>();
+        public DbSet<DeploymentProfile> DeploymentProfiles => Set<DeploymentProfile>();
+        public DbSet<TenantOnboarding> TenantOnboardings => Set<TenantOnboarding>();
+        public DbSet<TenantAdministratorInvitation> TenantAdministratorInvitations => Set<TenantAdministratorInvitation>();
+        public DbSet<PlatformAuditEvent> PlatformAuditEvents => Set<PlatformAuditEvent>();
+        public DbSet<TenantSupportGrant> TenantSupportGrants => Set<TenantSupportGrant>();
+        public DbSet<TenantOperationalCheck> TenantOperationalChecks => Set<TenantOperationalCheck>();
+        public DbSet<TenantLifecycleJob> TenantLifecycleJobs => Set<TenantLifecycleJob>();
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -206,6 +221,30 @@ namespace ApexERP.Infrastructure.Data
                 .HasQueryFilter(t => CurrentTenantId != null && t.Id == CurrentTenantId);
             modelBuilder.Entity<Company>()
                 .HasQueryFilter(c => CurrentTenantId != null && c.TenantId == CurrentTenantId);
+
+            // Enterprise platform constraints. Platform catalogue/audit rows are deliberately
+            // outside tenant query filters and must only be exposed through platform-admin policies.
+            modelBuilder.Entity<OrganisationalBranch>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique();
+            modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.CompanyId, x.UserId }).IsUnique();
+            modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.UserId, x.IsActive });
+            modelBuilder.Entity<SubscriptionPlan>().HasIndex(x => x.Code).IsUnique();
+            modelBuilder.Entity<TenantSubscription>().HasIndex(x => new { x.TenantId, x.Status });
+            modelBuilder.Entity<DeploymentProfile>().HasIndex(x => x.Code).IsUnique();
+            modelBuilder.Entity<JurisdictionProfile>().HasIndex(x => x.CountryCode).IsUnique();
+            modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => new { x.TenantId, x.CountryCode }).IsUnique();
+            modelBuilder.Entity<TenantOnboarding>().HasIndex(x => x.TenantId).IsUnique();
+            modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.TokenHash).IsUnique();
+            modelBuilder.Entity<TenantSupportGrant>().HasIndex(x => new { x.TenantId, x.Status, x.ExpiresAt });
+            modelBuilder.Entity<TenantOperationalCheck>().HasIndex(x => new { x.TenantId, x.CheckCode, x.CheckedAt });
+            modelBuilder.Entity<TenantLifecycleJob>().HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
+            modelBuilder.Entity<PlatformAuditEvent>().HasIndex(x => new { x.TenantId, x.CreatedAt });
+            modelBuilder.Entity<OrganisationalBranch>().Property(x => x.Code).HasMaxLength(40);
+            modelBuilder.Entity<SubscriptionPlan>().Property(x => x.ModuleCodesJson).HasColumnType("jsonb");
+            modelBuilder.Entity<DeploymentProfile>().Property(x => x.ConfigurationJson).HasColumnType("jsonb");
+            modelBuilder.Entity<TenantJurisdiction>().Property(x => x.TaxConfigurationJson).HasColumnType("jsonb");
+            modelBuilder.Entity<TenantOnboarding>().Property(x => x.CompletedStepsJson).HasColumnType("jsonb");
+            modelBuilder.Entity<PlatformAuditEvent>().Property(x => x.DetailsJson).HasColumnType("jsonb");
+            modelBuilder.Entity<TenantOperationalCheck>().Property(x => x.DetailsJson).HasColumnType("jsonb");
 
             // ---- Decimal precision: NUMERIC(20,6) everywhere per PRD Section 5 ----
             // ---- Dates: every DateTime is stored/read as UTC. Npgsql refuses to write a DateTime whose
@@ -308,6 +347,8 @@ namespace ApexERP.Infrastructure.Data
                 .OnDelete(DeleteBehavior.Cascade);
 
             // ---- Global tenant-isolation query filters (mirrors PostgreSQL RLS) ----
+            ApplyTenantFilter<OrganisationalBranch>(modelBuilder);
+            ApplyTenantFilter<CompanyMembership>(modelBuilder);
             ApplyTenantFilter<Role>(modelBuilder);
             ApplyTenantFilter<User>(modelBuilder);
             ApplyTenantFilter<AuditLogEntry>(modelBuilder);
