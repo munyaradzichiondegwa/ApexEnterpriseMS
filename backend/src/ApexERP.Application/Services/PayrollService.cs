@@ -32,10 +32,10 @@ namespace ApexERP.Application.Services
 
         /// <summary>Calculates PAYE for a given monthly gross using the effective ZIMRA tax bands
         /// (cumulative "deduct" tax-table technique: tax = gross * marginalRate - deduct).</summary>
-        public async Task<decimal> CalculatePayeAsync(Guid companyId, decimal monthlyGross, DateTime asOf, CancellationToken ct = default)
+        public async Task<decimal> CalculatePayeAsync(Guid companyId, decimal monthlyGross, DateTime asOf, string currency = "USD", CancellationToken ct = default)
         {
             var bands = await _db.PayeTaxBands
-                .Where(b => b.CompanyId == companyId && b.EffectiveFrom <= asOf && (b.EffectiveTo == null || b.EffectiveTo >= asOf))
+                .Where(b => b.CompanyId == companyId && b.Currency == currency && b.EffectiveFrom <= asOf && (b.EffectiveTo == null || b.EffectiveTo >= asOf))
                 .OrderBy(b => b.LowerBound)
                 .ToListAsync(ct);
 
@@ -49,26 +49,27 @@ namespace ApexERP.Application.Services
 
         // Statutory rates are effective-dated configuration (StatutoryRate rows). The constants above are only the
         // fallback when a company has not configured a code yet, so existing tenants keep working (spec 25.2).
-        private static StatutoryRate? Pick(IReadOnlyList<StatutoryRate>? rates, string code) =>
-            rates?.Where(r => r.Code == code).OrderByDescending(r => r.EffectiveFrom).FirstOrDefault();
+        private static StatutoryRate? Pick(IReadOnlyList<StatutoryRate>? rates, string code, string currency) =>
+            rates?.Where(r => r.Code == code && string.Equals(r.Currency, currency, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(r => r.EffectiveFrom).FirstOrDefault();
 
-        public decimal CalculateNssaEmployee(decimal monthlyGross, IReadOnlyList<StatutoryRate>? rates = null)
+        public decimal CalculateNssaEmployee(decimal monthlyGross, IReadOnlyList<StatutoryRate>? rates = null, string currency = "USD")
         {
-            var r = Pick(rates, "NSSA_EMPLOYEE");
+            var r = Pick(rates, "NSSA_EMPLOYEE", currency);
             var insurable = Math.Min(monthlyGross, r?.Ceiling ?? NssaInsurableCeiling);
             return Math.Round(insurable * (r != null ? r.RatePct / 100m : NssaRate), 6);
         }
 
-        public decimal CalculateNssaEmployer(decimal monthlyGross, IReadOnlyList<StatutoryRate>? rates = null)
+        public decimal CalculateNssaEmployer(decimal monthlyGross, IReadOnlyList<StatutoryRate>? rates = null, string currency = "USD")
         {
-            var r = Pick(rates, "NSSA_EMPLOYER");
+            var r = Pick(rates, "NSSA_EMPLOYER", currency);
             var insurable = Math.Min(monthlyGross, r?.Ceiling ?? NssaInsurableCeiling);
             return Math.Round(insurable * (r != null ? r.RatePct / 100m : NssaRate), 6);
         }
 
-        public decimal CalculateAidsLevy(decimal paye, IReadOnlyList<StatutoryRate>? rates = null)
+        public decimal CalculateAidsLevy(decimal paye, IReadOnlyList<StatutoryRate>? rates = null, string currency = "USD")
         {
-            var r = Pick(rates, "AIDS_LEVY");
+            var r = Pick(rates, "AIDS_LEVY", currency);
             return Math.Round(paye * (r != null ? r.RatePct / 100m : AidsLevyRate), 6);
         }
 
@@ -78,31 +79,36 @@ namespace ApexERP.Application.Services
         /// matching the PRD's draft -> approved -> posted workflow.
         /// </summary>
         public async Task<RunPayrollResult> RunAsync(Guid companyId, int month, int year,
-            Dictionary<Guid, decimal>? allowancesByEmployee = null, CancellationToken ct = default)
+            Dictionary<Guid, decimal>? allowancesByEmployee = null, string currency = "USD", CancellationToken ct = default)
         {
             var already = await _db.PayrollRuns.AnyAsync(
-                p => p.CompanyId == companyId && p.PeriodMonth == month && p.PeriodYear == year, ct);
+                p => p.CompanyId == companyId && p.PeriodMonth == month && p.PeriodYear == year && p.Currency == currency, ct);
             if (already)
                 throw new InvalidOperationException($"A payroll run for {month}/{year} already exists.");
 
-            var employees = await _db.Employees.Where(e => e.CompanyId == companyId && e.IsActive).ToListAsync(ct);
+            currency = currency.Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(currency)) throw new InvalidOperationException("A payroll currency is required.");
+            var employees = await _db.Employees.Where(e => e.CompanyId == companyId && e.IsActive && e.Currency == currency).ToListAsync(ct);
+            if (employees.Count == 0)
+                throw new InvalidOperationException($"No active employees are configured for payroll currency {currency}.");
             var asOf = new DateTime(year, month, DateTime.DaysInMonth(year, month));
 
             var rates = await _db.StatutoryRates
-                .Where(r => r.CompanyId == companyId && r.ApprovedBy != null && r.EffectiveFrom <= asOf && (r.EffectiveTo == null || r.EffectiveTo >= asOf))
+                .Where(r => r.CompanyId == companyId && r.Currency == currency && r.ApprovedBy != null &&
+                    r.EffectiveFrom <= asOf && (r.EffectiveTo == null || r.EffectiveTo >= asOf))
                 .ToListAsync(ct);
 
-            var run = new PayrollRun { CompanyId = companyId, PeriodMonth = month, PeriodYear = year, Status = PayrollRunStatus.Draft };
+            var run = new PayrollRun { CompanyId = companyId, PeriodMonth = month, PeriodYear = year, Currency = currency, Status = PayrollRunStatus.Draft };
             var lines = new List<PayrollLine>();
 
             foreach (var emp in employees)
             {
                 var allowances = allowancesByEmployee != null && allowancesByEmployee.TryGetValue(emp.Id, out var a) ? a : 0m;
                 var gross = emp.BasicSalary + allowances;
-                var paye = await CalculatePayeAsync(companyId, gross, asOf, ct);
-                var nssaEmp = CalculateNssaEmployee(gross, rates);
-                var nssaEmployer = CalculateNssaEmployer(gross, rates);
-                var aidsLevy = CalculateAidsLevy(paye, rates);
+                var paye = await CalculatePayeAsync(companyId, gross, asOf, currency, ct);
+                var nssaEmp = CalculateNssaEmployee(gross, rates, currency);
+                var nssaEmployer = CalculateNssaEmployer(gross, rates, currency);
+                var aidsLevy = CalculateAidsLevy(paye, rates, currency);
                 var net = gross - paye - nssaEmp - aidsLevy;
 
                 lines.Add(new PayrollLine
@@ -150,14 +156,34 @@ namespace ApexERP.Application.Services
 
             var entryDate = new DateTime(run.PeriodYear, run.PeriodMonth, DateTime.DaysInMonth(run.PeriodYear, run.PeriodMonth));
 
+            var company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == companyId, ct)
+                ?? throw new InvalidOperationException("Company not found.");
+            var functionalCurrency = company.FunctionalCurrency.Trim().ToUpperInvariant();
+            var fxRate = 1m;
+            if (!string.Equals(run.Currency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                var direct = await _db.ExchangeRates.Where(r => r.CompanyId == companyId &&
+                    r.FromCurrency == run.Currency && r.ToCurrency == functionalCurrency &&
+                    r.RateDate <= entryDate && r.Rate > 0).OrderByDescending(r => r.RateDate).FirstOrDefaultAsync(ct);
+                if (direct != null) fxRate = direct.Rate;
+                else
+                {
+                    var inverse = await _db.ExchangeRates.Where(r => r.CompanyId == companyId &&
+                        r.FromCurrency == functionalCurrency && r.ToCurrency == run.Currency &&
+                        r.RateDate <= entryDate && r.Rate > 0).OrderByDescending(r => r.RateDate).FirstOrDefaultAsync(ct);
+                    if (inverse == null) throw new InvalidOperationException($"No payroll exchange rate is configured from {run.Currency} to {functionalCurrency} for {entryDate:yyyy-MM-dd}.");
+                    fxRate = 1m / inverse.Rate;
+                }
+            }
+
             var glLines = new List<GlLineRequest>
             {
-                new(salariesExpenseAccountId, totalGross, 0, "USD", 1m, null, "Gross salaries expense"),
-                new(nssaEmployerExpenseAccountId, totalNssaEmployer, 0, "USD", 1m, null, "NSSA employer contribution expense"),
-                new(payeControlAccountId, 0, totalPaye, "USD", 1m, null, "PAYE payable to ZIMRA"),
-                new(nssaControlAccountId, 0, totalNssaEmp + totalNssaEmployer, "USD", 1m, null, "NSSA payable (employee + employer)"),
-                new(aidsLevyControlAccountId, 0, totalAidsLevy, "USD", 1m, null, "AIDS Levy payable"),
-                new(netPayControlAccountId, 0, totalNet, "USD", 1m, null, "Net salaries payable to employees")
+                new(salariesExpenseAccountId, totalGross, 0, run.Currency, fxRate, null, "Gross salaries expense"),
+                new(nssaEmployerExpenseAccountId, totalNssaEmployer, 0, run.Currency, fxRate, null, "NSSA employer contribution expense"),
+                new(payeControlAccountId, 0, totalPaye, run.Currency, fxRate, null, "PAYE payable to ZIMRA"),
+                new(nssaControlAccountId, 0, totalNssaEmp + totalNssaEmployer, run.Currency, fxRate, null, "NSSA payable (employee + employer)"),
+                new(aidsLevyControlAccountId, 0, totalAidsLevy, run.Currency, fxRate, null, "AIDS Levy payable"),
+                new(netPayControlAccountId, 0, totalNet, run.Currency, fxRate, null, "Net salaries payable to employees")
             };
 
             var je = await _gl.PostAsync(companyId, entryDate, JournalSource.Payroll,
