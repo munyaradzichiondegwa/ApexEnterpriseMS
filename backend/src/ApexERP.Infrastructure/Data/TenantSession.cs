@@ -1,3 +1,4 @@
+using System.Data;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -22,6 +23,27 @@ namespace ApexERP.Infrastructure.Data
              db.AllowSystemAccess || db.AllowCrossTenant ? "on" : "off");
 
         public const string Sql = "SELECT set_config('app.company_id', @c, false), set_config('app.tenant_id', @t, false), set_config('app.rls_bypass', @b, false)";
+
+        // Settings are session-scoped because ordinary read requests are not wrapped in transactions.
+        // The interceptor re-stamps every pooled connection checkout and clears the session before it
+        // is returned to Npgsql's pool, so a previous request's identity or bypass cannot survive reuse.
+        public const string ResetSql = "SELECT set_config('app.company_id', '', false), set_config('app.tenant_id', '', false), set_config('app.rls_bypass', 'off', false)";
+
+        internal static void Clear(DbConnection connection)
+        {
+            if (connection.State != ConnectionState.Open) return;
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = ResetSql;
+            cmd.ExecuteNonQuery();
+        }
+
+        internal static async Task ClearAsync(DbConnection connection)
+        {
+            if (connection.State != ConnectionState.Open) return;
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = ResetSql;
+            await cmd.ExecuteNonQueryAsync();
+        }
 
         internal static void Apply(DbConnection connection, ApexErpDbContext db)
         {
@@ -73,6 +95,18 @@ namespace ApexERP.Infrastructure.Data
         public override async Task ConnectionOpenedAsync(DbConnection connection, ConnectionEndEventData eventData, CancellationToken cancellationToken = default)
         {
             if (TenantSession.Enabled && eventData.Context is ApexErpDbContext db) await TenantSession.ApplyAsync(connection, db, cancellationToken);
+        }
+
+        public override InterceptionResult ConnectionClosing(DbConnection connection, ConnectionEventData eventData, InterceptionResult result)
+        {
+            if (TenantSession.Enabled && eventData.Context is ApexErpDbContext) TenantSession.Clear(connection);
+            return result;
+        }
+
+        public override async ValueTask<InterceptionResult> ConnectionClosingAsync(DbConnection connection, ConnectionEventData eventData, InterceptionResult result)
+        {
+            if (TenantSession.Enabled && eventData.Context is ApexErpDbContext) await TenantSession.ClearAsync(connection);
+            return result;
         }
     }
 
