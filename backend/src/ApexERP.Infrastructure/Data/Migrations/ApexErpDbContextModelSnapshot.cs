@@ -6368,6 +6368,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("EffectiveFrom")
                         .HasColumnType("timestamp with time zone");
 
