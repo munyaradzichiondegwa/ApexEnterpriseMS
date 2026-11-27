@@ -89,6 +89,15 @@ CREATE TABLE "CompanyUserInvitations" (
  "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
 CREATE UNIQUE INDEX "IX_CompanyUserInvitations_TokenHash" ON "CompanyUserInvitations" ("TokenHash");
 CREATE INDEX "IX_CompanyUserInvitations_TenantId_Email_AcceptedAt" ON "CompanyUserInvitations" ("TenantId","Email","AcceptedAt");
+-- Existing users already have an unambiguous primary company and role. Preserve that
+-- established access as their default membership; this does not infer tenant ownership.
+INSERT INTO "CompanyMemberships"
+ ("Id","CompanyId","UserId","MembershipRole","RoleId","IsDefault","IsActive","ValidFrom","ValidTo","CreatedAt","UpdatedAt","CreatedBy","UpdatedBy")
+SELECT gen_random_uuid(), u."CompanyId", u."Id", COALESCE(r."Name",'Member'), u."RoleId",
+       true, u."IsActive", now(), NULL, now(), NULL, NULL, NULL
+FROM "Users" u
+LEFT JOIN "Roles" r ON r."Id" = u."RoleId"
+ON CONFLICT ("CompanyId","UserId") DO NOTHING;
 """);
     }
 
