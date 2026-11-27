@@ -8,11 +8,17 @@ namespace ApexERP.Application.Services
     public record ConsolidatedAccountLine(string Code, string Name, GlAccountType Type, decimal GroupAmount, decimal EliminatedAmount, decimal ConsolidatedAmount);
     public record IntercompanyEliminationException(Guid CompanyAId, Guid CompanyBId, string AccountCode,
         decimal CompanyABalance, decimal CompanyBBalance, decimal Difference, string Reason);
+    public record ConsolidationRateEvidence(
+        Guid CompanyId, string CompanyName, string FromCurrency, string ToCurrency,
+        DateTime EffectiveDate, DateTime RateDate, decimal QuotedRate, decimal AppliedRate,
+        bool IsInverse, bool IsManualOverride, string RateSource, string? SourceReference);
+
     public record ConsolidationResult(
         Guid ParentCompanyId, List<Guid> SubsidiaryCompanyIds, DateTime AsOfDate,
         List<ConsolidatedAccountLine> Lines,
         decimal TotalAssets, decimal TotalLiabilities, decimal TotalGroupEquity, decimal TotalNonControllingInterest,
-        decimal TotalEliminations, IReadOnlyList<IntercompanyEliminationException> IntercompanyExceptions);
+        decimal TotalEliminations, IReadOnlyList<IntercompanyEliminationException> IntercompanyExceptions,
+        IReadOnlyList<ConsolidationRateEvidence> RateEvidence);
 
     /// <summary>
     /// PRD Module 2 ("As a Group Accountant, I want to consolidate the GL of multiple companies
@@ -84,6 +90,7 @@ namespace ApexERP.Application.Services
             var accountsById = new Dictionary<Guid, GlAccount>();
             var translatedBalancesByAccount = new Dictionary<Guid, decimal>();
             var translatedTrialBalancesByCompany = new Dictionary<Guid, List<TrialBalanceLine>>();
+            var rateEvidence = new List<ConsolidationRateEvidence>();
             var parentCurrency = group.First(c => c.Id == parentCompanyId).FunctionalCurrency;
 
             foreach (var company in group)
@@ -97,6 +104,7 @@ namespace ApexERP.Application.Services
                 // The latter is more precise than an average-rate approximation when daily rates exist.
                 var translated = await TranslateTrialBalanceAsync(company, parentCurrency, asOfDate, companyAccounts, ct);
                 translatedTrialBalancesByCompany[company.Id] = translated.Lines;
+                rateEvidence.AddRange(translated.RateEvidence);
                 foreach (var balance in translated.AccountBalances)
                     translatedBalancesByAccount[balance.Key] = balance.Value;
 
@@ -274,10 +282,12 @@ namespace ApexERP.Application.Services
 
             return new ConsolidationResult(parentCompanyId, subsidiaries.Select(s => s.Id).ToList(), asOfDate,
                 lines, totalAssets, totalLiabilities, totalGroupEquity, totalNci, totalEliminations,
-                intercompanyExceptions.OrderBy(x => x.CompanyAId).ThenBy(x => x.CompanyBId).ThenBy(x => x.AccountCode).ToList());
+                intercompanyExceptions.OrderBy(x => x.CompanyAId).ThenBy(x => x.CompanyBId).ThenBy(x => x.AccountCode).ToList(),
+                rateEvidence.OrderBy(x => x.CompanyName).ThenBy(x => x.EffectiveDate).ToList());
         }
 
-        private sealed record TranslatedTrialBalance(List<TrialBalanceLine> Lines, Dictionary<Guid, decimal> AccountBalances);
+        private sealed record TranslatedTrialBalance(List<TrialBalanceLine> Lines,
+            Dictionary<Guid, decimal> AccountBalances, List<ConsolidationRateEvidence> RateEvidence);
 
         private async Task<TranslatedTrialBalance> TranslateTrialBalanceAsync(Company company, string groupCurrency,
             DateTime asOfDate, List<GlAccount> accounts, CancellationToken ct)
@@ -297,6 +307,7 @@ namespace ApexERP.Application.Services
             var directRates = new List<ExchangeRate>();
             var inverseRateRecords = new List<ExchangeRate>();
             Func<DateTime, decimal> rateAt = _ => 1m;
+            var selectedRatesByDate = new Dictionary<DateTime, SelectedExchangeRate>();
             if (!sameCurrency)
             {
                 directRates = await _db.ExchangeRates.IgnoreQueryFilters()
@@ -312,9 +323,13 @@ namespace ApexERP.Application.Services
 
                 rateAt = date =>
                 {
-                    var selected = ExchangeRateResolver.SelectEffectiveRate(directRates, inverseRateRecords, date);
-                    if (selected == null)
-                        throw new InvalidOperationException($"No {functionalCurrency}/{targetCurrency} exchange rate is available on or before {date:yyyy-MM-dd} for subsidiary {company.Name}.");
+                    var effectiveDate = date.Date;
+                    if (!selectedRatesByDate.TryGetValue(effectiveDate, out var selected))
+                    {
+                        selected = ExchangeRateResolver.SelectEffectiveRate(directRates, inverseRateRecords, effectiveDate)
+                            ?? throw new InvalidOperationException($"No {functionalCurrency}/{targetCurrency} exchange rate is available on or before {effectiveDate:yyyy-MM-dd} for subsidiary {company.Name}.");
+                        selectedRatesByDate[effectiveDate] = selected;
+                    }
                     return selected.IsInverse ? 1m / selected.Rate.Rate : selected.Rate.Rate;
                 };
             }
@@ -360,7 +375,17 @@ namespace ApexERP.Application.Services
                         Math.Max(-signed, 0m), Math.Max(signed, 0m)));
             }
 
-            return new TranslatedTrialBalance(lines, accountBalances);
+            var evidence = selectedRatesByDate.Select(selection =>
+            {
+                var selected = selection.Value;
+                var appliedRate = selected.IsInverse ? 1m / selected.Rate.Rate : selected.Rate.Rate;
+                return new ConsolidationRateEvidence(company.Id, company.Name, functionalCurrency, targetCurrency,
+                    selection.Key, selected.Rate.RateDate.Date, selected.Rate.Rate, appliedRate,
+                    selected.IsInverse, selected.Rate.IsManualOverride, selected.Rate.RateSource,
+                    selected.Rate.SourceReference);
+            }).OrderBy(x => x.EffectiveDate).ToList();
+
+            return new TranslatedTrialBalance(lines, accountBalances, evidence);
         }
 
         /// <summary>Returns the signed functional-currency balance for one GL account, including
