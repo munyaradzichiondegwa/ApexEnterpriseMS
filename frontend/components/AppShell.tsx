@@ -132,7 +132,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Persistent desktop sidebar -- hidden below the md breakpoint */}
       <aside className="hidden md:flex w-64 bg-brand-900 text-brand-50 flex-col shrink-0">
         <div className="px-5 py-5 border-b border-brand-800">
-          <div className="text-lg font-bold tracking-tight">ApexERP</div>
+          <BrandMark />
           <div className="text-xs text-brand-300 truncate">{user.email}</div>
         </div>
         <nav className="flex-1 overflow-y-auto py-3">
