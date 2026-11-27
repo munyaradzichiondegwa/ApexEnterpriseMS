@@ -87,10 +87,13 @@ public sealed class StatutoryPackService
                 throw new InvalidOperationException("The statutory pack effective date range is invalid.");
 
             var existing = await ListCoreAsync(companyId, token);
-            var overlaps = existing.Where(x => x.JurisdictionCode == code && x.Status == "Published" && x.Version != version)
-                .Any(x => RangesOverlap(document.EffectiveFrom, document.EffectiveTo, x.EffectiveFrom, x.EffectiveTo));
-            if (overlaps)
-                throw new InvalidOperationException("The effective period overlaps another published pack for this jurisdiction. Close the previous period before publishing.");
+            // A later effective-dated version supersedes an earlier open-ended version without
+            // rewriting the already-published legal record. A new pack cannot be backdated over a
+            // later publication or share its effective-from date.
+            var conflicts = existing.Where(x => x.JurisdictionCode == code && x.Status == "Published" &&
+                x.Version != version && RangesOverlap(document.EffectiveFrom, document.EffectiveTo, x.EffectiveFrom, x.EffectiveTo));
+            if (conflicts.Any(x => x.EffectiveFrom.Date >= document.EffectiveFrom.Date))
+                throw new InvalidOperationException("A published pack already takes effect on or after this date. New versions must advance the jurisdiction's effective timeline.");
 
             var published = document with { Status = "Published", PublishedAt = DateTime.UtcNow };
             setting.Value = JsonSerializer.Serialize(published);
@@ -116,11 +119,12 @@ public sealed class StatutoryPackService
         var code = NormalizeCode(jurisdictionCode);
         var matches = (await ListCoreAsync(companyId, ct)).Where(x => x.JurisdictionCode == code &&
             x.Status == "Published" && x.EffectiveFrom.Date <= onDate.Date &&
-            (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= onDate.Date)).ToList();
-        if (matches.Count != 1)
-            throw new InvalidOperationException(matches.Count == 0
-                ? $"No approved and published statutory pack applies to {code} on {onDate:yyyy-MM-dd}."
-                : $"More than one published statutory pack applies to {code} on {onDate:yyyy-MM-dd}; publication integrity requires administrator review.");
+            (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= onDate.Date))
+            .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.Version).ToList();
+        if (matches.Count == 0)
+            throw new InvalidOperationException($"No approved and published statutory pack applies to {code} on {onDate:yyyy-MM-dd}.");
+        if (matches.Count > 1 && matches[0].EffectiveFrom.Date == matches[1].EffectiveFrom.Date)
+            throw new InvalidOperationException($"Conflicting statutory packs share the same effective date for {code}; administrator review is required.");
         return matches[0];
     }
 
