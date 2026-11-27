@@ -360,11 +360,15 @@ app.Use(async (context, next) =>
         }
 
         var dbContext = context.RequestServices.GetRequiredService<ApexErpDbContext>();
-        var companyBelongsToTenant = await dbContext.Companies.IgnoreQueryFilters()
-            .AnyAsync(c => c.Id == companyId && c.TenantId == tenantId && c.IsActive, context.RequestAborted);
-        var tenantIsActive = companyBelongsToTenant &&
-            await dbContext.CustomerOrganisations.IgnoreQueryFilters()
-                .AnyAsync(t => t.Id == tenantId && t.IsActive, context.RequestAborted);
+        bool tenantIsActive;
+        using (dbContext.SystemAccessScope("tenant resolution: validate signed token identities"))
+        {
+            var companyBelongsToTenant = await dbContext.Companies.IgnoreQueryFilters()
+                .AnyAsync(c => c.Id == companyId && c.TenantId == tenantId && c.IsActive, context.RequestAborted);
+            tenantIsActive = companyBelongsToTenant &&
+                await dbContext.CustomerOrganisations.IgnoreQueryFilters()
+                    .AnyAsync(t => t.Id == tenantId && t.IsActive, context.RequestAborted);
+        }
 
         if (!tenantIsActive)
         {
@@ -375,6 +379,7 @@ app.Use(async (context, next) =>
         dbContext.CurrentTenantId = tenantId;
         dbContext.CurrentCompanyId = companyId;
         dbContext.CurrentIpAddress = context.Connection.RemoteIpAddress?.ToString();
+        await TenantSession.RefreshAsync(dbContext, context.RequestAborted);
 
         if (Guid.TryParse(
                 (context.User.FindFirst("sub") ??
