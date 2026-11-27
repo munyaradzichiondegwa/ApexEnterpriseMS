@@ -271,8 +271,13 @@ namespace ApexERP.Application.Services
 
             // The posted GL is the authoritative actuals ledger. Restrict it to this fund centre's
             // financial year; AP headers are not counted because their expense journals already are.
+            var expenseAccountIds = await _db.GlAccounts
+                .Where(a => a.CompanyId == companyId && a.Type == GlAccountType.Expense)
+                .Select(a => a.Id)
+                .ToListAsync(ct);
             var actuals = await _db.JournalLines
-                .Where(l => l.FundCentreId == fundCentreId && l.JournalEntry!.CompanyId == companyId &&
+                .Where(l => expenseAccountIds.Contains(l.GlAccountId) &&
+                    l.FundCentreId == fundCentreId && l.JournalEntry!.CompanyId == companyId &&
                     l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate < periodEnd &&
                     (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
                 .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
@@ -321,9 +326,13 @@ namespace ApexERP.Application.Services
                 .Select(c => c.FiscalYearStartMonth).FirstOrDefaultAsync(ct);
             var periodStart = FiscalCalendar.FiscalYearStart(new DateTime(financialYear, 12, 31), fiscalStartMonth);
             var periodEnd = periodStart.AddYears(1);
+            var expenseAccountIds = await _db.GlAccounts
+                .Where(a => a.CompanyId == companyId && a.Type == GlAccountType.Expense)
+                .Select(a => a.Id)
+                .ToListAsync(ct);
             var actualTotals = await _db.JournalLines
                 .Where(l => l.FundCentreId.HasValue && fundCentreIds.Contains(l.FundCentreId.Value) &&
-                    l.JournalEntry!.CompanyId == companyId &&
+                    expenseAccountIds.Contains(l.GlAccountId) && l.JournalEntry!.CompanyId == companyId &&
                     l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate < periodEnd &&
                     (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
                 .GroupBy(l => l.FundCentreId!.Value)
