@@ -390,6 +390,9 @@ namespace ApexERP.Tests
                 Assert.Equal(0L, await CountAsync("GlAccounts"));
                 Assert.Equal(0L, await CountAsync("TenantSubscriptions"));
                 Assert.Equal(0L, await CountAsync("TenantJurisdictions"));
+                Assert.Equal(0L, await CountAsync("AuditEvidenceReferences"));
+                Assert.Equal(0L, await CountAsync("JobExecutions"));
+                Assert.Equal(0L, await CountAsync("TenantLifecycleJobs"));
 
                 await SetContextAsync(tenantA, companyA1);
                 Assert.Equal(2L, await CountAsync("Companies"));                 // all legal entities in this tenant
@@ -435,7 +438,7 @@ namespace ApexERP.Tests
                 Assert.Equal(0L, await CountAsync("TenantJurisdictions"));
                 Assert.Equal(0L, await CountAsync("AuditEvidenceReferences"));
                 Assert.Equal(0L, await CountAsync("JobExecutions"));
-                Assert.Equal(0L, await CountAsync("TenantLifecycleJobs"));
+                Assert.Equal(1L, await CountAsync("TenantLifecycleJobs")); // tenant B's own platform job remains visible even though selected company is not in tenant B
 
                 await SetContextAsync(null, null, bypass: true);
                 Assert.Equal(3L, await CountAsync("Companies"));
@@ -450,10 +453,10 @@ namespace ApexERP.Tests
                 await using var flags = connection.CreateCommand();
                 flags.CommandText = @"SELECT COUNT(*), bool_and(relrowsecurity), bool_and(relforcerowsecurity)
                     FROM pg_class
-                    WHERE relname IN ('Companies', 'CustomerOrganisations', 'GlAccounts')";
+                    WHERE relname IN ('Companies', 'CustomerOrganisations', 'GlAccounts', 'AuditEvidenceReferences', 'JobExecutions', 'TenantLifecycleJobs')";
                 await using var flagReader = await flags.ExecuteReaderAsync();
                 Assert.True(await flagReader.ReadAsync());
-                Assert.Equal(3L, flagReader.GetInt64(0));
+                Assert.Equal(6L, flagReader.GetInt64(0));
                 Assert.True(flagReader.GetBoolean(1));
                 Assert.True(flagReader.GetBoolean(2));
             }
