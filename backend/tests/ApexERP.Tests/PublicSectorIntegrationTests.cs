@@ -238,6 +238,9 @@ namespace ApexERP.Tests
             var tenderId = Guid.NewGuid();
             var bidId = Guid.NewGuid();
             var secondBidId = Guid.NewGuid();
+            var approverRoleId = Guid.NewGuid();
+            var submitterId = Guid.NewGuid();
+            var approverId = Guid.NewGuid();
             await using (var seed = db.NewContext(companyId))
             {
                 seed.Companies.Add(new Company
@@ -250,6 +253,15 @@ namespace ApexERP.Tests
                 seed.Vendors.AddRange(
                     new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-003", Name = "Approved Supplier", IsApproved = true },
                     new Vendor { Id = secondVendorId, CompanyId = companyId, Code = "V-004", Name = "Second Approved Supplier", IsApproved = true });
+                seed.Roles.Add(new Role { Id = approverRoleId, CompanyId = companyId, Name = "Tender Approver", PermissionsJson = "[]" });
+                seed.Users.AddRange(
+                    new User { Id = submitterId, CompanyId = companyId, Email = "submitter@test.local", PasswordHash = "test-hash", RoleId = approverRoleId, IsActive = true },
+                    new User { Id = approverId, CompanyId = companyId, Email = "approver@test.local", PasswordHash = "test-hash", RoleId = approverRoleId, IsActive = true });
+                seed.ApprovalChains.Add(new ApprovalChain
+                {
+                    CompanyId = companyId, Name = "Tender award approval", EntityType = "TenderAward", AmountThreshold = 0m,
+                    Tiers = new List<ApprovalChainTier> { new() { TierOrder = 1, ApproverRoleId = approverRoleId, SlaHours = 24 } }
+                });
                 seed.TenderNotices.Add(new TenderNotice
                 {
                     Id = tenderId, CompanyId = companyId, TenderNo = "TND-2026-TEST",
@@ -271,7 +283,7 @@ namespace ApexERP.Tests
             }
 
             await using var ctx = db.NewContext(companyId);
-            var service = new TenderService(ctx);
+            var service = new TenderService(ctx, new ApprovalChainService(ctx));
             var evaluation = await service.BeginEvaluationAsync(companyId, tenderId);
             Assert.Equal(TenderStatus.Evaluation, evaluation.Status);
 
@@ -297,6 +309,11 @@ namespace ApexERP.Tests
 
             winningVendor.IsApproved = true;
             await ctx.SaveChangesAsync();
+            var approvalService = new ApprovalChainService(ctx);
+            var approvalRequest = await service.SubmitAwardForApprovalAsync(companyId, tenderId, vendorId, submitterId);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.AwardAsync(companyId, tenderId, vendorId, "Award must not bypass approval."));
+            await approvalService.DecideAsync(companyId, approvalRequest.Id, approverId, true, "Reviewed evaluation matrix and eligibility.");
             var awarded = await service.AwardAsync(companyId, tenderId, vendorId, "Highest evaluated compliant bid.");
             Assert.Equal(TenderStatus.Awarded, awarded.Status);
             Assert.Equal(vendorId, awarded.AwardedVendorId);
