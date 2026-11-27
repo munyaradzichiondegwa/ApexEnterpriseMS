@@ -75,9 +75,10 @@ export default function PlatformAdminPage() {
         trialDays: Number(tenantForm.trialDays),
       });
       const tokenText = response.data.invitationToken ? " Initial administrator token (one-time): " + response.data.invitationToken : "";
-      setNotice("Tenant " + response.data.tenantId + " provisioned. Email sent: " + response.data.invitationEmailSent + "." + tokenText);
+      const successMessage = "Tenant " + response.data.tenantId + " provisioned. Email sent: " + response.data.invitationEmailSent + "." + tokenText;
       setTenantForm({ organisationName: "", initialCompanyName: "", administratorEmail: "", planId: plans[0]?.id || "", currency: "USD", fiscalYearStartMonth: "1", trialDays: "30" });
       await load();
+      setNotice(successMessage);
     } catch (e: any) { setError(e?.response?.data?.error || e.message); } finally { setBusy(false); }
   }
 
