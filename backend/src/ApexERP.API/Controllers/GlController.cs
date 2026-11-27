@@ -284,10 +284,13 @@ namespace ApexERP.API.Controllers
         public Task<IActionResult> SetExchangeRate([FromBody] SetExchangeRateRequest request) =>
             Run(async () =>
             {
+                if (string.IsNullOrWhiteSpace(request.FromCurrency) || string.IsNullOrWhiteSpace(request.ToCurrency) ||
+                    request.RateDate == default || request.Rate <= 0m)
+                    return BadRequest(new { error = "Currency codes, a rate date and a positive exchange rate are required." });
                 var from = request.FromCurrency.Trim().ToUpperInvariant();
                 var to = request.ToCurrency.Trim().ToUpperInvariant();
-                if (from.Length != 3 || to.Length != 3 || from == to || request.Rate <= 0m)
-                    return BadRequest(new { error = "Provide two different three-letter currency codes and a positive exchange rate." });
+                if (from.Length != 3 || to.Length != 3 || from == to)
+                    return BadRequest(new { error = "Provide two different three-letter currency codes." });
                 var rateDate = DateTime.SpecifyKind(request.RateDate.Date, DateTimeKind.Utc);
                 await _db.InTransactionAsync(async token =>
                 {
