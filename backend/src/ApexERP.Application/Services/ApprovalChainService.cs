@@ -126,6 +126,7 @@ namespace ApexERP.Application.Services
 
                 _db.WorkflowApprovals.Add(new WorkflowApproval
                 {
+                    CompanyId = companyId,
                     WorkflowRequestId = request.Id,
                     Tier = request.CurrentTier,
                     ApproverId = approverId,
