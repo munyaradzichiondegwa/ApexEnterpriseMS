@@ -119,8 +119,8 @@ public sealed class ConsolidationFxIntegrationTests
         Assert.Equal("TREASURY/2026-01-10", closingRate.SourceReference);
 
         var cta = Assert.Single(result.Lines, x => x.Code == "FX-CTA");
-        Assert.Equal(decimal.Round(50m - (100m / 1.80m), 6),
-            decimal.Round(cta.ConsolidatedAmount, 6));
+        Assert.InRange(Math.Abs(cta.ConsolidatedAmount - (50m - (100m / 1.80m))),
+            0m, 0.000001m);
         Assert.Equal(0m, Math.Round(result.TotalAssets - result.TotalLiabilities - result.TotalGroupEquity, 6));
     }
 }
