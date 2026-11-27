@@ -105,7 +105,9 @@ namespace ApexERP.Application.Services
         /// <summary>Id -> parent id for companies inside the caller's customer organisation. The DbContext
         /// tenant filter prevents this group graph from including companies belonging to another customer.</summary>
         public async Task<Dictionary<Guid, Guid?>> LoadParentMapAsync(CancellationToken ct = default) =>
-            await _db.Companies.Select(c => new { c.Id, c.ParentCompanyId })
+            await _db.Companies
+                .Where(c => c.IsActive && c.Tenant != null && c.Tenant.IsActive)
+                .Select(c => new { c.Id, c.ParentCompanyId })
                 .ToDictionaryAsync(c => c.Id, c => c.ParentCompanyId, ct);
 
         public async Task<HashSet<Guid>> GetVisibleCompanyIdsAsync(Guid companyId, CancellationToken ct = default) =>
@@ -125,8 +127,37 @@ namespace ApexERP.Application.Services
         public async Task<string?> ValidateStructureChangeAsync(Guid caller, Guid target, Guid? newParent, CancellationToken ct = default)
         {
             var map = await LoadParentMapAsync(ct);
+
+            // A company may attach itself to an outside parent only with that parent's recorded consent.
+            // The ordinary group map is tenant-filtered, so load only the proposed external parent's
+            // ancestor chain in an explicit system scope for existence and cycle checks. This metadata
+            // lookup does not widen the caller's normal visible-company set.
+            if (newParent.HasValue && target == caller && !map.ContainsKey(newParent.Value))
+            {
+                using var systemAccess = _db.SystemAccessScope("group structure: validate external parent hierarchy");
+                var current = newParent.Value;
+                var seen = new HashSet<Guid>();
+                while (!map.ContainsKey(current))
+                {
+                    if (!seen.Add(current))
+                        return "The parent company hierarchy contains a circular structure.";
+
+                    var parent = await _db.Companies.IgnoreQueryFilters()
+                        .Where(c => c.Id == current && c.IsActive && c.Tenant != null && c.Tenant.IsActive)
+                        .Select(c => c.ParentCompanyId)
+                        .SingleOrDefaultAsync(ct);
+                    if (parent == null && !await _db.Companies.IgnoreQueryFilters()
+                            .AnyAsync(c => c.Id == current && c.IsActive && c.Tenant != null && c.Tenant.IsActive, ct))
+                        return "The parent company was not found.";
+
+                    map[current] = parent;
+                    if (!parent.HasValue) break;
+                    current = parent.Value;
+                }
+            }
+
             // Evaluate the (async) consent lookup up front, only when it can matter.
-            var needsConsentCheck = newParent.HasValue && target == caller && map.TryGetValue(target, out var current) && current != newParent;
+            var needsConsentCheck = newParent.HasValue && target == caller && map.TryGetValue(target, out var currentParent) && currentParent != newParent;
             var hasLink = needsConsentCheck && await ParentHasLinkedRecordAsync(newParent!.Value, caller, ct);
             return GroupGraph.ValidateStructureChange(map, caller, target, newParent, () => hasLink);
         }
