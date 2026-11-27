@@ -160,10 +160,21 @@ namespace ApexERP.Tests
                 Assert.Equal(0m, utilisation.Actuals);
                 Assert.Equal(20m, utilisation.Available);
 
-                // AP invoices carry Commitment.Id; this must not be confused with PurchaseOrderId.
-                await new PublicSectorService(verify, new AuditService(verify))
-                    .ReleaseCommitmentAsync(companyId, commitment.Id);
+                // Partial invoice realisation releases only the fulfilled portion of the encumbrance.
+                var publicSector = new PublicSectorService(verify, new AuditService(verify));
+                await publicSector.RealiseCommitmentAsync(companyId, commitment.Id, 30m);
+                var partiallyRealised = await verify.Commitments.SingleAsync(x => x.Id == commitment.Id);
+                Assert.Equal(30m, partiallyRealised.RealisedAmount);
+                Assert.Equal(CommitmentStatus.Active, partiallyRealised.Status);
+                var afterPartial = await publicSector.GetBudgetUtilizationAsync(companyId, fundCentreId);
+                Assert.Equal(50m, afterPartial.Commitments);
+
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    publicSector.RealiseCommitmentAsync(companyId, commitment.Id, 51m));
+
+                await publicSector.RealiseCommitmentAsync(companyId, commitment.Id, 50m);
                 var released = await verify.Commitments.SingleAsync(x => x.Id == commitment.Id);
+                Assert.Equal(80m, released.RealisedAmount);
                 Assert.Equal(CommitmentStatus.Released, released.Status);
                 Assert.NotNull(released.ReleasedDate);
 
