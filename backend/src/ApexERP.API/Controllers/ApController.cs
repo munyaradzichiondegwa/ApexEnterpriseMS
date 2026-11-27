@@ -103,10 +103,7 @@ namespace ApexERP.API.Controllers
             {
                 var invoice = await _ap.PostInvoiceAsync(CompanyId, id, req.ApControlAccountId, req.VatInputAccountId, req.WhtPayableAccountId);
 
-                // Public Sector: posting the actual invoice replaces the estimate -- release the commitment.
-                if (invoice.CommitmentId.HasValue)
-                    await _publicSector.ReleaseCommitmentAsync(CompanyId, invoice.CommitmentId.Value);
-
+                // Commitment realisation is already performed atomically inside ApService.PostInvoiceAsync.
                 return Ok(invoice);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
