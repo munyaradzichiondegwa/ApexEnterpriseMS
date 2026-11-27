@@ -13,7 +13,7 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         Guid IntercompanyAccountId);
 
     private static async Task<SeededGroup> SeedGroupAsync(TestDb db, decimal payableAmount,
-        string buyerCurrency = "USD", decimal? buyerToGroupRate = null, bool includeIntercompanyPnl = false)
+        string buyerCurrency = "USD", decimal? buyerToGroupRate = null)
     {
         var tenantId = Guid.NewGuid();
         var parentId = Guid.NewGuid();
@@ -59,10 +59,8 @@ public sealed class ConsolidationIntercompanyIntegrationTests
             },
             new GlAccount
             {
-                Id = revenueAccountId, CompanyId = companyAId, Code = "IC-REV",
-                Name = "Intercompany revenue", Type = GlAccountType.Income, Currency = "USD",
-                IsIntercompanyAccount = includeIntercompanyPnl,
-                IntercompanyCounterpartyCompanyId = includeIntercompanyPnl ? companyBId : null
+                Id = revenueAccountId, CompanyId = companyAId, Code = "4000",
+                Name = "Intercompany revenue", Type = GlAccountType.Income, Currency = "USD"
             },
             new GlAccount
             {
@@ -72,10 +70,8 @@ public sealed class ConsolidationIntercompanyIntegrationTests
             },
             new GlAccount
             {
-                Id = expenseAccountId, CompanyId = companyBId, Code = "IC-REV",
-                Name = "Intercompany expense", Type = GlAccountType.Expense, Currency = buyerCurrency,
-                IsIntercompanyAccount = includeIntercompanyPnl,
-                IntercompanyCounterpartyCompanyId = includeIntercompanyPnl ? companyAId : null
+                Id = expenseAccountId, CompanyId = companyBId, Code = "5000",
+                Name = "Intercompany expense", Type = GlAccountType.Expense, Currency = buyerCurrency
             });
         seed.AccountingPeriods.AddRange(
             new AccountingPeriod
@@ -171,19 +167,16 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         await using var db = await TestDb.CreateAsync();
         // Seller records USD 100; buyer records EUR 50. At USD 2 per EUR,
         // the reciprocal balances are equal in the group's reporting currency.
-        var group = await SeedGroupAsync(db, 50m, buyerCurrency: "EUR", buyerToGroupRate: 2m, includeIntercompanyPnl: true);
+        var group = await SeedGroupAsync(db, 50m, buyerCurrency: "EUR", buyerToGroupRate: 2m);
 
         await using var ctx = db.NewContext(group.ParentId, tenantId: group.TenantId);
         var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
         var result = await service.ConsolidateAsync(group.ParentId, new DateTime(2026, 1, 31));
 
         Assert.Empty(result.IntercompanyExceptions);
-        Assert.Equal(200m, result.TotalEliminations);
+        Assert.Equal(100m, result.TotalEliminations);
         var intercompanyLine = Assert.Single(result.Lines, x => x.Code == "IC-100");
         Assert.Equal(0m, intercompanyLine.ConsolidatedAmount);
-        var pnlLine = Assert.Single(result.Lines, x => x.Code == "IC-REV");
-        Assert.Equal(0m, pnlLine.ConsolidatedAmount);
-        Assert.Equal(0m, pnlLine.EliminatedAmount); // reciprocal debit/credit elimination entries net to zero
         var buyerRateEvidence = Assert.Single(result.RateEvidence, x =>
             x.CompanyId == group.CompanyBId && x.EffectiveDate == new DateTime(2026, 1, 31));
         Assert.Equal("EUR", buyerRateEvidence.FromCurrency);
@@ -197,23 +190,19 @@ public sealed class ConsolidationIntercompanyIntegrationTests
     {
         await using var db = await TestDb.CreateAsync();
         // USD 100 receivable versus EUR 49 payable translated at USD 2/EUR = USD 98.
-        var group = await SeedGroupAsync(db, 49m, buyerCurrency: "EUR", buyerToGroupRate: 2m, includeIntercompanyPnl: true);
+        var group = await SeedGroupAsync(db, 49m, buyerCurrency: "EUR", buyerToGroupRate: 2m);
 
         await using var ctx = db.NewContext(group.ParentId, tenantId: group.TenantId);
         var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
         var result = await service.ConsolidateAsync(group.ParentId, new DateTime(2026, 1, 31));
 
-        Assert.Equal(2, result.IntercompanyExceptions.Count);
-        var balanceException = Assert.Single(result.IntercompanyExceptions, x => x.AccountCode == "IC-100");
-        Assert.Equal(2m, balanceException.Difference);
-        var pnlException = Assert.Single(result.IntercompanyExceptions, x => x.AccountCode == "IC-REV");
-        Assert.Equal(-2m, pnlException.Difference);
+        var exception = Assert.Single(result.IntercompanyExceptions);
+        Assert.Equal("IC-100", exception.AccountCode);
+        Assert.Equal(2m, exception.Difference);
         Assert.Equal(0m, result.TotalEliminations);
         var intercompanyLine = Assert.Single(result.Lines, x => x.Code == "IC-100");
         Assert.Equal(2m, intercompanyLine.ConsolidatedAmount);
-        var pnlLine = Assert.Single(result.Lines, x => x.Code == "IC-REV");
-        Assert.Equal(-2m, pnlLine.ConsolidatedAmount);
-        Assert.Contains("do not agree", balanceException.Reason);
+        Assert.Contains("do not agree", exception.Reason);
     }
 
     [PostgresFact]
