@@ -95,59 +95,63 @@ public sealed class FxRevaluationService
             lines.Sum(x => x.Adjustment));
     }
 
-    public async Task<JournalEntry> PostAsync(Guid companyId, DateTime asOfDate, Guid fxGainAccountId,
+    public Task<JournalEntry> PostAsync(Guid companyId, DateTime asOfDate, Guid fxGainAccountId,
         Guid fxLossAccountId, Guid postedBy, CancellationToken ct = default)
     {
-        var preview = await PreviewAsync(companyId, asOfDate, ct);
-        if (preview.MissingRates.Count > 0)
-            throw new InvalidOperationException($"Missing closing exchange rates for: {string.Join(", ", preview.MissingRates)}.");
-        if (preview.Lines.Count == 0)
-            throw new InvalidOperationException("There are no foreign-currency monetary balances requiring revaluation.");
-
-        var gainAccount = await _db.GlAccounts.FirstOrDefaultAsync(a => a.Id == fxGainAccountId &&
-            a.CompanyId == companyId && a.IsActive && a.IsPostable, ct)
-            ?? throw new InvalidOperationException("The foreign-exchange gain account is not an active postable account in this company.");
-        var lossAccount = await _db.GlAccounts.FirstOrDefaultAsync(a => a.Id == fxLossAccountId &&
-            a.CompanyId == companyId && a.IsActive && a.IsPostable, ct)
-            ?? throw new InvalidOperationException("The foreign-exchange loss account is not an active postable account in this company.");
-        if (gainAccount.Type != GlAccountType.Income || lossAccount.Type != GlAccountType.Expense)
-            throw new InvalidOperationException("Configure an Income account for FX gains and an Expense account for FX losses.");
-        if (gainAccount.Id == lossAccount.Id)
-            throw new InvalidOperationException("FX gain and loss accounts must be different.");
-
-        var reference = $"FX-REVAL-{asOfDate:yyyyMMdd}";
-        if (await _db.JournalEntries.AnyAsync(j => j.CompanyId == companyId && j.Reference == reference &&
-            (j.Status == JournalStatus.Posted || j.Status == JournalStatus.Reversed), ct))
-            throw new InvalidOperationException($"An FX revaluation journal already exists for {asOfDate:yyyy-MM-dd}.");
-
-        var journalLines = new List<GlLineRequest>();
-        decimal totalGains = 0m, totalLosses = 0m;
-        foreach (var line in preview.Lines)
+        return _db.InTransactionAsync(async token =>
         {
-            var amount = Math.Abs(line.Adjustment);
-            if (line.Adjustment > 0)
-            {
-                journalLines.Add(new GlLineRequest(line.GlAccountId, amount, 0m, preview.FunctionalCurrency, 1m,
-                    Narrative: $"IAS 21 closing-rate revaluation {line.Currency}"));
-                totalGains += amount;
-            }
-            else
-            {
-                journalLines.Add(new GlLineRequest(line.GlAccountId, 0m, amount, preview.FunctionalCurrency, 1m,
-                    Narrative: $"IAS 21 closing-rate revaluation {line.Currency}"));
-                totalLosses += amount;
-            }
-        }
+            await _db.AcquireTransactionLockAsync($"fx-revaluation:{companyId:N}:{asOfDate:yyyyMMdd}", token);
+            var preview = await PreviewAsync(companyId, asOfDate, token);
+            if (preview.MissingRates.Count > 0)
+                throw new InvalidOperationException($"Missing closing exchange rates for: {string.Join(", ", preview.MissingRates)}.");
+            if (preview.Lines.Count == 0)
+                throw new InvalidOperationException("There are no foreign-currency monetary balances requiring revaluation.");
 
-        if (totalGains > 0)
-            journalLines.Add(new GlLineRequest(gainAccount.Id, 0m, totalGains, preview.FunctionalCurrency, 1m,
-                Narrative: "Unrealised foreign-exchange gain"));
-        if (totalLosses > 0)
-            journalLines.Add(new GlLineRequest(lossAccount.Id, totalLosses, 0m, preview.FunctionalCurrency, 1m,
-                Narrative: "Unrealised foreign-exchange loss"));
+            var gainAccount = await _db.GlAccounts.FirstOrDefaultAsync(a => a.Id == fxGainAccountId &&
+                a.CompanyId == companyId && a.IsActive && a.IsPostable, token)
+                ?? throw new InvalidOperationException("The foreign-exchange gain account is not an active postable account in this company.");
+            var lossAccount = await _db.GlAccounts.FirstOrDefaultAsync(a => a.Id == fxLossAccountId &&
+                a.CompanyId == companyId && a.IsActive && a.IsPostable, token)
+                ?? throw new InvalidOperationException("The foreign-exchange loss account is not an active postable account in this company.");
+            if (gainAccount.Type != GlAccountType.Income || lossAccount.Type != GlAccountType.Expense)
+                throw new InvalidOperationException("Configure an Income account for FX gains and an Expense account for FX losses.");
+            if (gainAccount.Id == lossAccount.Id)
+                throw new InvalidOperationException("FX gain and loss accounts must be different.");
 
-        return await _gl.PostAsync(companyId, asOfDate.Date, JournalSource.Manual,
-            "IAS 21 foreign-currency monetary-item revaluation", reference, journalLines, ct, postedBy);
+            var reference = $"FX-REVAL-{asOfDate:yyyyMMdd}";
+            if (await _db.JournalEntries.AnyAsync(j => j.CompanyId == companyId && j.Reference == reference &&
+                (j.Status == JournalStatus.Posted || j.Status == JournalStatus.Reversed), token))
+                throw new InvalidOperationException($"An FX revaluation journal already exists for {asOfDate:yyyy-MM-dd}.");
+
+            var journalLines = new List<GlLineRequest>();
+            decimal totalGains = 0m, totalLosses = 0m;
+            foreach (var line in preview.Lines)
+            {
+                var amount = Math.Abs(line.Adjustment);
+                if (line.Adjustment > 0)
+                {
+                    journalLines.Add(new GlLineRequest(line.GlAccountId, amount, 0m, preview.FunctionalCurrency, 1m,
+                        Narrative: $"IAS 21 closing-rate revaluation {line.Currency}"));
+                    totalGains += amount;
+                }
+                else
+                {
+                    journalLines.Add(new GlLineRequest(line.GlAccountId, 0m, amount, preview.FunctionalCurrency, 1m,
+                        Narrative: $"IAS 21 closing-rate revaluation {line.Currency}"));
+                    totalLosses += amount;
+                }
+            }
+
+            if (totalGains > 0)
+                journalLines.Add(new GlLineRequest(gainAccount.Id, 0m, totalGains, preview.FunctionalCurrency, 1m,
+                    Narrative: "Unrealised foreign-exchange gain"));
+            if (totalLosses > 0)
+                journalLines.Add(new GlLineRequest(lossAccount.Id, totalLosses, 0m, preview.FunctionalCurrency, 1m,
+                    Narrative: "Unrealised foreign-exchange loss"));
+
+            return await _gl.PostAsync(companyId, asOfDate.Date, JournalSource.Manual,
+                "IAS 21 foreign-currency monetary-item revaluation", reference, journalLines, token, postedBy);
+        }, ct);
     }
 
     public static decimal CalculateAdjustment(decimal foreignCurrencyBalance, decimal currentFunctionalBalance, decimal closingRate)
