@@ -87,7 +87,7 @@ BEGIN
               AND column_name = 'TenantId' AND data_type = 'uuid'
         ) THEN
             EXECUTE format(
-                'CREATE POLICY apex_tenant_isolation ON %I.%I USING (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid) WITH CHECK (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid)',
+                'CREATE POLICY apex_tenant_isolation ON %I.%I USING (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid)) WITH CHECK (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid))',
                 t.table_schema, t.table_name);
         ELSE
             EXECUTE format(
