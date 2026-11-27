@@ -32,7 +32,7 @@ public sealed class StatutoryPackService
         _audit = audit;
     }
 
-    public async Task<StatutoryPackDocument> CreateDraftAsync(Guid companyId, string jurisdictionCode,
+    public Task<StatutoryPackDocument> CreateDraftAsync(Guid companyId, string jurisdictionCode,
         string jurisdictionName, int version, DateTime effectiveFrom, DateTime? effectiveTo,
         string rulesJson, IReadOnlyList<StatutoryPackSource> sources, Guid actorId, CancellationToken ct = default)
     {
@@ -44,17 +44,21 @@ public sealed class StatutoryPackService
         ValidateRules(rulesJson);
         ValidateSources(sources);
 
-        var key = Key(code, version);
-        if (await _db.CompanySettings.AnyAsync(s => s.CompanyId == companyId && s.Key == key, ct))
-            throw new InvalidOperationException($"Statutory pack {code} version {version} already exists.");
+        return _db.InTransactionAsync(async token =>
+        {
+            await _db.AcquireTransactionLockAsync($"statutory-pack:{companyId:N}:{code}", token);
+            var key = Key(code, version);
+            if (await _db.CompanySettings.AnyAsync(s => s.CompanyId == companyId && s.Key == key, token))
+                throw new InvalidOperationException($"Statutory pack {code} version {version} already exists.");
 
-        var document = new StatutoryPackDocument(code, jurisdictionName.Trim(), version, effectiveFrom.Date,
-            effectiveTo?.Date, rulesJson, sources, "Draft", actorId, DateTime.UtcNow, null, null, null, null, null);
-        _db.CompanySettings.Add(new CompanySetting { CompanyId = companyId, Key = key, Value = JsonSerializer.Serialize(document) });
-        _audit.Record(companyId, actorId, "StatutoryPack.DraftCreated", "Statutory", nameof(StatutoryPackDocument),
-            Guid.Empty, null, new { code, version, effectiveFrom, effectiveTo, sourceCount = sources.Count });
-        await _db.SaveChangesAsync(ct);
-        return document;
+            var document = new StatutoryPackDocument(code, jurisdictionName.Trim(), version, effectiveFrom.Date,
+                effectiveTo?.Date, rulesJson, sources, "Draft", actorId, DateTime.UtcNow, null, null, null, null, null);
+            _db.CompanySettings.Add(new CompanySetting { CompanyId = companyId, Key = key, Value = JsonSerializer.Serialize(document) });
+            _audit.Record(companyId, actorId, "StatutoryPack.DraftCreated", "Statutory", nameof(StatutoryPackDocument),
+                Guid.Empty, null, new { code, version, effectiveFrom, effectiveTo, sourceCount = sources.Count });
+            await _db.SaveChangesAsync(token);
+            return document;
+        }, ct);
     }
 
     public Task<StatutoryPackDocument> ReviewAsync(Guid companyId, string jurisdictionCode, int version,
@@ -128,24 +132,28 @@ public sealed class StatutoryPackService
         return matches[0];
     }
 
-    private async Task<StatutoryPackDocument> ChangeAsync(Guid companyId, string jurisdictionCode, int version,
+    private Task<StatutoryPackDocument> ChangeAsync(Guid companyId, string jurisdictionCode, int version,
         Guid actorId, string expectedStatus, string nextStatus,
         Func<StatutoryPackDocument, Guid, StatutoryPackDocument> update, string auditAction, CancellationToken ct)
     {
         var code = NormalizeCode(jurisdictionCode);
-        var setting = await _db.CompanySettings.FirstOrDefaultAsync(s => s.CompanyId == companyId && s.Key == Key(code, version), ct)
-            ?? throw new InvalidOperationException("Statutory pack not found.");
-        var document = Deserialize(setting.Value);
-        if (document.Status != expectedStatus)
-            throw new InvalidOperationException($"Only a {expectedStatus} statutory pack can be moved to {nextStatus}.");
-        if (document.CreatedBy == actorId || document.ReviewedBy == actorId || document.ApprovedBy == actorId)
-            throw new InvalidOperationException("Preparation, review and approval must be performed by different users.");
-        var changed = update(document, actorId);
-        setting.Value = JsonSerializer.Serialize(changed);
-        _audit.Record(companyId, actorId, auditAction, "Statutory", nameof(StatutoryPackDocument),
-            Guid.Empty, new { document.Status }, new { changed.JurisdictionCode, changed.Version, changed.Status });
-        await _db.SaveChangesAsync(ct);
-        return changed;
+        return _db.InTransactionAsync(async token =>
+        {
+            await _db.AcquireTransactionLockAsync($"statutory-pack:{companyId:N}:{code}", token);
+            var setting = await _db.CompanySettings.FirstOrDefaultAsync(s => s.CompanyId == companyId && s.Key == Key(code, version), token)
+                ?? throw new InvalidOperationException("Statutory pack not found.");
+            var document = Deserialize(setting.Value);
+            if (document.Status != expectedStatus)
+                throw new InvalidOperationException($"Only a {expectedStatus} statutory pack can be moved to {nextStatus}.");
+            if (document.CreatedBy == actorId || document.ReviewedBy == actorId || document.ApprovedBy == actorId)
+                throw new InvalidOperationException("Preparation, review and approval must be performed by different users.");
+            var changed = update(document, actorId);
+            setting.Value = JsonSerializer.Serialize(changed);
+            _audit.Record(companyId, actorId, auditAction, "Statutory", nameof(StatutoryPackDocument),
+                Guid.Empty, new { document.Status }, new { changed.JurisdictionCode, changed.Version, changed.Status });
+            await _db.SaveChangesAsync(token);
+            return changed;
+        }, ct);
     }
 
     private async Task<List<StatutoryPackDocument>> ListCoreAsync(Guid companyId, CancellationToken ct)
