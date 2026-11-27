@@ -57,7 +57,7 @@ public sealed class FxRevaluationService
 
         var accountIds = balances.Select(x => x.GlAccountId).Distinct().ToList();
         var accounts = await _db.GlAccounts.Where(a => a.CompanyId == companyId && accountIds.Contains(a.Id) &&
-            (a.Type == GlAccountType.Asset || a.Type == GlAccountType.Liability)).ToDictionaryAsync(a => a.Id, ct);
+            (a.Type == GlAccountType.Asset || a.Type == GlAccountType.Liability) && a.IsMonetary).ToDictionaryAsync(a => a.Id, ct);
 
         var currencies = balances.Select(x => x.Currency.ToUpper()).Distinct().ToList();
         var rates = await _db.ExchangeRates
