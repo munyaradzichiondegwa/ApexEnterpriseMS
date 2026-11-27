@@ -202,6 +202,8 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<TenantSupportGrant> TenantSupportGrants => Set<TenantSupportGrant>();
         public DbSet<TenantOperationalCheck> TenantOperationalChecks => Set<TenantOperationalCheck>();
         public DbSet<TenantLifecycleJob> TenantLifecycleJobs => Set<TenantLifecycleJob>();
+        public DbSet<TenantSlaPolicy> TenantSlaPolicies => Set<TenantSlaPolicy>();
+        public DbSet<TenantSlaIncident> TenantSlaIncidents => Set<TenantSlaIncident>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -242,6 +244,10 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<TenantSupportGrant>().HasIndex(x => new { x.TenantId, x.Status, x.ExpiresAt });
             modelBuilder.Entity<TenantOperationalCheck>().HasIndex(x => new { x.TenantId, x.CheckCode, x.CheckedAt });
             modelBuilder.Entity<TenantLifecycleJob>().HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
+            modelBuilder.Entity<TenantSlaPolicy>().HasIndex(x => x.TenantId).IsUnique();
+            modelBuilder.Entity<TenantSlaIncident>().HasIndex(x => new { x.TenantId, x.IncidentNumber }).IsUnique();
+            modelBuilder.Entity<TenantSlaIncident>().HasIndex(x => new { x.TenantId, x.Status, x.OpenedAt });
+            modelBuilder.Entity<TenantSlaPolicy>().Property(x => x.BusinessHoursJson).HasColumnType("jsonb");
             modelBuilder.Entity<PlatformAuditEvent>().HasIndex(x => new { x.TenantId, x.CreatedAt });
             modelBuilder.Entity<OrganisationalBranch>().Property(x => x.Code).HasMaxLength(40);
             modelBuilder.Entity<SubscriptionPlan>().Property(x => x.ModuleCodesJson).HasColumnType("jsonb");
