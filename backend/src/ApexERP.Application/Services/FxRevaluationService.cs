@@ -62,12 +62,14 @@ public sealed class FxRevaluationService
         var currencies = balances.Select(x => x.Currency.ToUpper()).Distinct().ToList();
         var directRates = await _db.ExchangeRates
             .Where(r => r.CompanyId == companyId && currencies.Contains(r.FromCurrency.ToUpper()) &&
-                r.ToCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive && r.Rate > 0)
+                r.ToCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive &&
+                r.RateDate >= asOfDate.Date.AddDays(-7) && r.Rate > 0)
             .OrderByDescending(r => r.RateDate)
             .ToListAsync(ct);
         var inverseRates = await _db.ExchangeRates
             .Where(r => r.CompanyId == companyId && currencies.Contains(r.ToCurrency.ToUpper()) &&
-                r.FromCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive && r.Rate > 0)
+                r.FromCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive &&
+                r.RateDate >= asOfDate.Date.AddDays(-7) && r.Rate > 0)
             .OrderByDescending(r => r.RateDate)
             .ToListAsync(ct);
 
