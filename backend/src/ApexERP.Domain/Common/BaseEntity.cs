@@ -61,7 +61,8 @@ namespace ApexERP.Domain.Common
         Prepayment,
         Revenue,
         Impairment,
-        Provision
+        Provision,
+        FxRevaluation
     }
 
     /// <summary>
