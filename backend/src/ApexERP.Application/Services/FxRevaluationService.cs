@@ -88,19 +88,20 @@ public sealed class FxRevaluationService
             if (!string.Equals(account.Currency, balance.Currency, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"Monetary account {account.Code} is configured for {account.Currency}, but its ledger contains {balance.Currency} balances.");
 
-            var rate = directRates.FirstOrDefault(r => string.Equals(r.FromCurrency, balance.Currency, StringComparison.OrdinalIgnoreCase));
-            var inverse = false;
-            if (rate == null)
-            {
-                rate = inverseRates.FirstOrDefault(r => string.Equals(r.ToCurrency, balance.Currency, StringComparison.OrdinalIgnoreCase));
-                inverse = rate != null;
-            }
-            if (rate == null)
+            var directRateCandidates = directRates.Where(r =>
+                string.Equals(r.FromCurrency, balance.Currency, StringComparison.OrdinalIgnoreCase));
+            var inverseRateCandidates = inverseRates.Where(r =>
+                string.Equals(r.ToCurrency, balance.Currency, StringComparison.OrdinalIgnoreCase));
+            var selectedRate = ExchangeRateResolver.SelectEffectiveRate(
+                directRateCandidates, inverseRateCandidates, asOfDate);
+            if (selectedRate == null)
             {
                 missing.Add(balance.Currency.ToUpperInvariant());
                 continue;
             }
 
+            var rate = selectedRate.Rate;
+            var inverse = selectedRate.IsInverse;
             var closingRate = inverse ? 1m / rate.Rate : rate.Rate;
             var revalued = decimal.Round(balance.ForeignBalance * closingRate, 2, MidpointRounding.AwayFromZero);
             var adjustment = decimal.Round(revalued - balance.FunctionalBalance, 2, MidpointRounding.AwayFromZero);
