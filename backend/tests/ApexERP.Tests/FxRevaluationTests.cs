@@ -41,7 +41,8 @@ public sealed class FxRevaluationTests
         var inverse = new ExchangeRate
         {
             Id = Guid.NewGuid(), FromCurrency = "USD", ToCurrency = "EUR",
-            RateDate = new DateTime(2026, 1, 2), Rate = 0.80m
+            RateDate = new DateTime(2026, 1, 2), Rate = 0.80m,
+            RateSource = "Reserve Bank of Zimbabwe", SourceReference = "RBZ daily rate bulletin 2026-01-02"
         };
 
         var selected = ExchangeRateResolver.SelectEffectiveRate(
@@ -50,6 +51,8 @@ public sealed class FxRevaluationTests
         Assert.NotNull(selected);
         Assert.True(selected.IsInverse);
         Assert.Equal(inverse.Id, selected.Rate.Id);
+        Assert.Equal("Reserve Bank of Zimbabwe", selected.Rate.RateSource);
+        Assert.Equal("RBZ daily rate bulletin 2026-01-02", selected.Rate.SourceReference);
     }
 
     [Fact]
