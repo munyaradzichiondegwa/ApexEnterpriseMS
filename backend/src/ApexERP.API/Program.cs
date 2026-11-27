@@ -411,6 +411,8 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.UseMiddleware<ApexERP.API.Middleware.SubscriptionEntitlementMiddleware>();
+
 app.UseRateLimiter();   // after authentication so the global limit can key on the signed-in user
 app.UseAuthorization();
 
