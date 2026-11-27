@@ -96,6 +96,24 @@ namespace ApexERP.API.Controllers
             if (req.ToCompanyId == CompanyId)
                 return BadRequest(new { error = "An inter-company rule must point at a different company." });
 
+            // A rule may only connect companies in the caller's own tenant-scoped group.
+            // This check must happen before opening the cross-company account lookup below.
+            if (!await _scope.IsVisibleAsync(CompanyId, req.ToCompanyId))
+                return NotFound(new { error = "The target company was not found in your group." });
+
+            // Both control accounts must belong to the correct legal entities. The explicit
+            // cross-tenant scope is limited to this lookup; the rule itself remains caller-company scoped.
+            using (var crossTenant = _db.CrossTenantScope())
+            {
+                var senderAccountExists = await _db.GlAccounts.IgnoreQueryFilters()
+                    .AnyAsync(a => a.Id == req.DefaultSenderArAccountId && a.CompanyId == CompanyId);
+                var receiverAccountExists = await _db.GlAccounts.IgnoreQueryFilters()
+                    .AnyAsync(a => a.Id == req.DefaultReceiverApAccountId && a.CompanyId == req.ToCompanyId);
+
+                if (!senderAccountExists || !receiverAccountExists)
+                    return BadRequest(new { error = "The sender and receiver control accounts must belong to their respective companies." });
+            }
+
             var rule = new InterCompanyRule
             {
                 CompanyId = CompanyId,
