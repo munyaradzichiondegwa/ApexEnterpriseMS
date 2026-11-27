@@ -183,6 +183,7 @@ namespace ApexERP.Tests
             var tenantA = Guid.NewGuid();
             var tenantB = Guid.NewGuid();
             var caller = Guid.NewGuid();
+            var childWithExternalParent = Guid.NewGuid();
             var consentingParent = Guid.NewGuid();
             var unlinkedParent = Guid.NewGuid();
             var cyclicParent = Guid.NewGuid();
@@ -194,6 +195,7 @@ namespace ApexERP.Tests
                     new CustomerOrganisation { Id = tenantB, Name = "Group tenant B" });
                 seed.Companies.AddRange(
                     new Company { Id = caller, TenantId = tenantA, Name = "Independent customer" },
+                    new Company { Id = childWithExternalParent, TenantId = tenantA, Name = "Tenant child with external parent", ParentCompanyId = consentingParent },
                     new Company { Id = consentingParent, TenantId = tenantB, Name = "Consenting parent" },
                     new Company { Id = unlinkedParent, TenantId = tenantB, Name = "Unlinked parent" },
                     new Company { Id = cyclicParent, TenantId = tenantB, Name = "Cyclic parent", ParentCompanyId = caller });
@@ -213,6 +215,10 @@ namespace ApexERP.Tests
             var visible = await scope.GetVisibleCompanyIdsAsync(caller);
             Assert.Equal(new[] { caller }, visible.OrderBy(x => x).ToArray());
             Assert.DoesNotContain(consentingParent, visible);
+
+            var childVisible = await scope.GetVisibleCompanyIdsAsync(childWithExternalParent);
+            Assert.Equal(new[] { childWithExternalParent }, childVisible.OrderBy(x => x).ToArray());
+            Assert.DoesNotContain(consentingParent, childVisible);
 
             Assert.Null(await scope.ValidateStructureChangeAsync(caller, caller, consentingParent));
 
