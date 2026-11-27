@@ -89,6 +89,10 @@ CREATE TABLE "CompanyUserInvitations" (
  "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
 CREATE UNIQUE INDEX "IX_CompanyUserInvitations_TokenHash" ON "CompanyUserInvitations" ("TokenHash");
 CREATE INDEX "IX_CompanyUserInvitations_TenantId_Email_AcceptedAt" ON "CompanyUserInvitations" ("TenantId","Email","AcceptedAt");
+ALTER TABLE "Departments" ADD COLUMN "BranchId" uuid NULL;
+CREATE INDEX "IX_Departments_CompanyId_BranchId" ON "Departments" ("CompanyId","BranchId");
+ALTER TABLE "CostCentres" ADD COLUMN "BranchId" uuid NULL;
+CREATE INDEX "IX_CostCentres_CompanyId_BranchId" ON "CostCentres" ("CompanyId","BranchId");
 -- Existing users already have an unambiguous primary company and role. Preserve that
 -- established access as their default membership; this does not infer tenant ownership.
 INSERT INTO "CompanyMemberships"
@@ -142,6 +146,10 @@ ON CONFLICT ("Code") DO NOTHING;
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("""
+DROP INDEX IF EXISTS "IX_Departments_CompanyId_BranchId";
+DROP INDEX IF EXISTS "IX_CostCentres_CompanyId_BranchId";
+ALTER TABLE IF EXISTS "Departments" DROP COLUMN IF EXISTS "BranchId";
+ALTER TABLE IF EXISTS "CostCentres" DROP COLUMN IF EXISTS "BranchId";
 DROP TABLE IF EXISTS "CompanyUserInvitations";
 DROP TABLE IF EXISTS "TenantLifecycleJobs";
 DROP TABLE IF EXISTS "TenantOperationalChecks";
