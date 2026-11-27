@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
 type Ageing = {
@@ -27,6 +27,7 @@ const BUCKETS: { key: keyof Ageing; label: string }[] = [
   { key: "days61to90", label: "61–90 days" },
   { key: "over90", label: "Over 90" },
 ];
+const AGEING_COLOURS = ["#20b6a5", "#1597d4", "#f2bd45", "#f28b28", "#d94b55"];
 
 export default function DashboardCharts({ financial }: { financial: FinancialDashboardData }) {
   const ageing = BUCKETS.map((bucket) => ({
@@ -34,17 +35,40 @@ export default function DashboardCharts({ financial }: { financial: FinancialDas
     receivables: financial.receivablesAgeing?.[bucket.key] ?? 0,
     payables: financial.payablesAgeing?.[bucket.key] ?? 0,
   }));
+  const receivablesMix = ageing.map((row) => ({ name: row.period, value: row.receivables }));
+  const payablesMix = ageing.map((row) => ({ name: row.period, value: row.payables }));
   const workingCapital = [
     { item: "Cash at bank", amount: financial.cash ?? 0 },
     { item: "Receivables", amount: financial.receivables ?? 0 },
     { item: "Payables", amount: financial.payables ?? 0 },
   ];
   const number = (value: number) => new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  const total = (rows: { value: number }[]) => rows.reduce((sum, row) => sum + row.value, 0);
+
+  const AgeingDonut = ({ title, rows }: { title: string; rows: { name: string; value: number }[] }) => (
+    <div className="card">
+      <h4 className="font-semibold">{title}</h4>
+      <p className="text-xs text-slate-500 mb-2">Share of the outstanding balance by ageing bucket.</p>
+      {total(rows) <= 0 ? <p className="text-sm text-slate-500 py-12 text-center">No outstanding balance to display.</p> : (
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={rows} dataKey="value" nameKey="name" innerRadius={58} outerRadius={88} paddingAngle={2}>
+                {rows.map((row, index) => <Cell key={row.name} fill={AGEING_COLOURS[index]} />)}
+              </Pie>
+              <Tooltip formatter={(value: number | string) => number(Number(value))} />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <section className="mb-8" aria-label="Graphical financial analysis">
       <h3 className="font-semibold mb-3">Graphical financial analysis</h3>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
         <div className="card">
           <div className="mb-3">
             <h4 className="font-semibold">Receivables vs payables ageing</h4>
@@ -81,6 +105,10 @@ export default function DashboardCharts({ financial }: { financial: FinancialDas
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <AgeingDonut title="Receivables ageing mix" rows={receivablesMix} />
+        <AgeingDonut title="Payables ageing mix" rows={payablesMix} />
       </div>
     </section>
   );
