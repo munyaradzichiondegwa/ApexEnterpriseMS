@@ -117,5 +117,9 @@ public sealed class ConsolidationFxIntegrationTests
         Assert.True(closingRate.IsManualOverride);
         Assert.Equal("Bank treasury quote", closingRate.RateSource);
         Assert.Equal("TREASURY/2026-01-10", closingRate.SourceReference);
+
+        var cta = Assert.Single(result.Lines.Where(x => x.Code == "FX-CTA"));
+        Assert.Equal(50m - (100m / 1.80m), cta.ConsolidatedAmount);
+        Assert.Equal(0m, Math.Round(result.TotalAssets - result.TotalLiabilities - result.TotalGroupEquity, 6));
     }
 }
