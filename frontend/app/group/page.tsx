@@ -160,6 +160,27 @@ export default function GroupPage() {
                 </table>
               </div>
             </div>
+            <div className="card mt-4 overflow-x-auto">
+              <h3 className="font-semibold mb-1">Foreign-currency translation evidence</h3>
+              <p className="text-xs text-slate-500 mb-3">Effective-date selections used to translate each foreign subsidiary, including quote direction, rate source and reference.</p>
+              {(!consolidated.rateEvidence || consolidated.rateEvidence.length === 0) ? (
+                <p className="text-sm text-slate-500">No foreign-currency translation rates were required for this consolidation.</p>
+              ) : (
+                <table className="table-base">
+                  <thead><tr><th>Company</th><th>Currency pair</th><th>Applied for</th><th>Rate date</th><th className="text-right">Quoted</th><th className="text-right">Applied</th><th>Source</th><th>Reference</th></tr></thead>
+                  <tbody>{consolidated.rateEvidence.map((r: any, i: number) => (
+                    <tr key={r.companyId + "-" + r.effectiveDate + "-" + i}>
+                      <td>{r.companyName}</td><td>{r.fromCurrency}/{r.toCurrency}</td>
+                      <td>{new Date(r.effectiveDate).toLocaleDateString()}</td><td>{new Date(r.rateDate).toLocaleDateString()}</td>
+                      <td className="text-right tabular-nums">{Number(r.quotedRate).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                      <td className="text-right tabular-nums">{Number(r.appliedRate).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                      <td>{r.rateSource}{r.isManualOverride ? " (manual override)" : ""}{r.isInverse ? " (inverse)" : " (direct)"}</td>
+                      <td className="max-w-xs truncate" title={r.sourceReference || ""}>{r.sourceReference || "—"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              )}
+            </div>
           )}
         </div>
       )}
