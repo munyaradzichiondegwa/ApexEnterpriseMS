@@ -154,6 +154,7 @@ public sealed class TenantLifecycleJob : BaseEntity
     public Guid TenantId { get; set; }
     public string JobType { get; set; } = "";
     public string Status { get; set; } = "Queued";
+    public int DispatchAttempts { get; set; }
     public string RequestedBy { get; set; } = "";
     public string? ExternalJobReference { get; set; }
     public DateTime? StartedAt { get; set; }
