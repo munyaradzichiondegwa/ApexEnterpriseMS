@@ -131,6 +131,7 @@ public sealed class StatutoryPackIntegrationTests
         {
           "coverage": "complete",
           "paye": {
+            "aidsLevyRate": 0.03,
             "USD": { "monthly": [ { "from": 0, "to": null, "rate": 0.20, "deduction": 0 } ] },
             "ZWG": { "monthly": [ { "from": 0, "to": null, "rate": 0.10, "deduction": 0 } ] }
           },
