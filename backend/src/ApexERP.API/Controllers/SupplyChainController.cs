@@ -120,12 +120,10 @@ namespace ApexERP.API.Controllers
         {
             try
             {
+                // A GRN confirms receipt, not the supplier's payable amount. Keep the budget
+                // encumbrance active until the linked AP invoice posts and realises it against
+                // the actual base-currency expense. Releasing it here would make AP realisation fail.
                 var grn = await _sc.ReceiveGoodsAsync(CompanyId, id, req.ReceiptDate, req.WarehouseId, req.Lines);
-
-                var po = await _db.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == CompanyId);
-                if (po?.FundCentreId.HasValue == true && po.Status == Domain.Common.PurchaseOrderStatus.Fulfilled)
-                    await _publicSector.ReleaseCommitmentForPoAsync(CompanyId, id);
-
                 return Ok(grn);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
