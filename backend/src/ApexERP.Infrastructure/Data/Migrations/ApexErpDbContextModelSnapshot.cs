@@ -6901,6 +6901,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FundCentreId");
+
                     b.ToTable("WorkflowRequests");
                 });
 
