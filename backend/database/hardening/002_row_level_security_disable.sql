@@ -29,7 +29,10 @@ BEGIN
         EXECUTE format('ALTER TABLE %I.%I NO FORCE ROW LEVEL SECURITY', t.table_schema, t.table_name);
         EXECUTE format('ALTER TABLE %I.%I DISABLE ROW LEVEL SECURITY', t.table_schema, t.table_name);
     END LOOP;
-END $$;
+END $;
+
+-- Remove the additional Users policy before dropping the helper function it calls.
+DROP POLICY IF EXISTS apex_user_membership_access ON "Users";
 
 DROP FUNCTION IF EXISTS apex_rls_allowed(uuid);
 
