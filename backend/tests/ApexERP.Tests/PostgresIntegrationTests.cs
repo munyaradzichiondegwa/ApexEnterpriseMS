@@ -10,7 +10,7 @@ namespace ApexERP.Tests
 {
     /// <summary>
     /// Integration tests against a REAL PostgreSQL database. They run only when APEX_TEST_DB is set to a connection string
-    /// whose user may create databases (for example "Host=localhost;Username=postgres;Password=...;Database=postgres");
+    /// whose user may create databases and roles (CREATEDB and CREATEROLE, or a superuser; for example "Host=localhost;Username=postgres;Password=...;Database=postgres");
     /// otherwise they are skipped. Each test creates a throw-away database, applies the repository's real EF migrations to it
     /// (so these tests also prove the migrations apply), and drops it afterwards.
     /// </summary>
@@ -46,9 +46,17 @@ namespace ApexERP.Tests
             await Execute(server, $"CREATE DATABASE \"{name}\"");
 
             var db = new TestDb(server, name);
-            await using var ctx = db.NewContext(null);
-            await ctx.Database.MigrateAsync();      // the real migrations, exactly as production applies them
-            return db;
+            try
+            {
+                await using var ctx = db.NewContext(null);
+                await ctx.Database.MigrateAsync();  // the real migrations, exactly as production applies them
+                return db;
+            }
+            catch
+            {
+                await db.DisposeAsync();            // do not leave an orphaned database when migration fails
+                throw;
+            }
         }
 
         /// <summary>A context scoped to one company (null = no tenant, which must see nothing).</summary>
