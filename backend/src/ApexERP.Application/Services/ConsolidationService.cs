@@ -143,9 +143,11 @@ namespace ApexERP.Application.Services
 
                 if (!accountBalances.TryGetValue(account.Id, out var accountBalance))
                 {
-                    if (!translatedBalancesByAccount.TryGetValue(account.Id, out accountBalance)) continue;
+                    accountBalance = translatedBalancesByAccount.TryGetValue(account.Id, out var translated)
+                        ? translated : 0m;
                     accountBalances[account.Id] = accountBalance;
                 }
+                if (accountBalance == 0m) continue;
 
                 var reciprocal = intercoAccounts.FirstOrDefault(candidate =>
                     candidate.Id != account.Id &&
@@ -175,7 +177,8 @@ namespace ApexERP.Application.Services
 
                 if (!accountBalances.TryGetValue(reciprocal.Id, out var reciprocalBalance))
                 {
-                    if (!translatedBalancesByAccount.TryGetValue(reciprocal.Id, out reciprocalBalance)) continue;
+                    reciprocalBalance = translatedBalancesByAccount.TryGetValue(reciprocal.Id, out var translated)
+                        ? translated : 0m;
                     accountBalances[reciprocal.Id] = reciprocalBalance;
                 }
 
