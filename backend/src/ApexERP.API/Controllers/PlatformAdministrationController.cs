@@ -163,8 +163,17 @@ public sealed class PlatformAdministrationController : ControllerBase
         sub.Status = request.Status;
         sub.SuspendedAt = request.Status == "Suspended" ? DateTime.UtcNow : null;
         sub.CancelledAt = request.Status == "Cancelled" ? DateTime.UtcNow : null;
+        if (request.Status == "Active") sub.TrialEndsAt = null;
+        if (request.Status == "Trial") sub.TrialEndsAt = request.PeriodEndsAt ?? DateTime.UtcNow.AddDays(30);
         if (request.PeriodEndsAt.HasValue) sub.CurrentPeriodEndsAt = request.PeriodEndsAt.Value;
-        if (request.Status == "Trial" && !sub.TrialEndsAt.HasValue) sub.TrialEndsAt = request.PeriodEndsAt ?? DateTime.UtcNow.AddDays(30);
+        if (request.Status == "Trial" && !request.PeriodEndsAt.HasValue) sub.CurrentPeriodEndsAt = sub.TrialEndsAt;
+        if (request.PlanId.HasValue)
+        {
+            if (!await _db.SubscriptionPlans.AnyAsync(x => x.Id == request.PlanId && x.IsActive, ct)) return BadRequest(new { error = "The selected plan is not active." });
+            sub.PlanId = request.PlanId.Value;
+        }
+        if (request.SeatOverride.HasValue) { if (request.SeatOverride < 1) return BadRequest(new { error = "Seat override must be positive." }); sub.SeatOverride = request.SeatOverride.Value; }
+        if (request.CompanyOverride.HasValue) { if (request.CompanyOverride < 1) return BadRequest(new { error = "Company override must be positive." }); sub.CompanyOverride = request.CompanyOverride.Value; }
         await _db.SaveChangesAsync(ct);
         await AuditAsync("subscription.status-changed", "TenantSubscription", sub.Id.ToString(),
             new { status = sub.Status }, ct);
@@ -508,7 +517,7 @@ public sealed record CreatePlanRequest(string Code, string Name, string? Descrip
 public sealed record ProvisionTenantRequest(string OrganisationName, string? LegalName, string InitialCompanyName,
     string AdministratorEmail, Guid PlanId, int TrialDays = 30, int FiscalYearStartMonth = 1,
     string? Currency = "USD", string? TimeZone = "UTC", string? Sector = null);
-public sealed record SubscriptionLifecycleRequest(string Status, DateTime? PeriodEndsAt = null);
+public sealed record SubscriptionLifecycleRequest(string Status, DateTime? PeriodEndsAt = null, Guid? PlanId = null, int? SeatOverride = null, int? CompanyOverride = null);
 public sealed record DeploymentProfileRequest(string Code, string Name, string Sector, string? ConfigurationJson = "{}");
 public sealed record JurisdictionProfileRequest(string CountryCode, string CountryName, string DefaultCurrency, string? DefaultTimeZone = "UTC", string? DefaultReportingFramework = "IFRS");
 public sealed record SupportGrantRequest(string Reason, int DurationMinutes = 60);
