@@ -33,7 +33,8 @@ namespace ApexERP.Application.Services
             var result = new List<Guid>();
             var seen = new HashSet<Guid> { node };
             var current = node;
-            while (parentOf.TryGetValue(current, out var parent) && parent.HasValue && seen.Add(parent.Value))
+            while (parentOf.TryGetValue(current, out var parent) && parent.HasValue &&
+                   parentOf.ContainsKey(parent.Value) && seen.Add(parent.Value))
             {
                 result.Add(parent.Value);
                 current = parent.Value;
