@@ -201,6 +201,45 @@ namespace ApexERP.Application.Services
                 balanceSheet.Difference, balanceSheet.IsBalanced, unbalanced, pending);
         }
 
+
+        /// <summary>Monthly income and expense trend from posted ledger activity for the selected legal company.</summary>
+        public async Task<List<FinancialTrendPoint>> GetFinancialTrendAsync(Guid companyId, DateTime fromDate, DateTime toDate, CancellationToken ct = default)
+        {
+            var start = ReportingDates.StartInclusive(fromDate);
+            var endExclusive = ReportingDates.EndExclusive(toDate);
+            var grouped = await (
+                from line in _db.JournalLines
+                join account in _db.GlAccounts on line.GlAccountId equals account.Id
+                where line.JournalEntry!.CompanyId == companyId
+                    && (line.JournalEntry.Status == JournalStatus.Posted || line.JournalEntry.Status == JournalStatus.Reversed)
+                    && line.JournalEntry.EntryDate >= start && line.JournalEntry.EntryDate < endExclusive
+                group new { line, account } by new { line.JournalEntry!.EntryDate.Year, line.JournalEntry.EntryDate.Month } into g
+                select new
+                {
+                    g.Key.Year,
+                    g.Key.Month,
+                    Income = g.Sum(x => x.account.Type == GlAccountType.Income ? x.line.BaseCredit - x.line.BaseDebit : 0m),
+                    Expense = g.Sum(x => x.account.Type == GlAccountType.Expense ? x.line.BaseDebit - x.line.BaseCredit : 0m)
+                }).ToListAsync(ct);
+
+            var byMonth = grouped.ToDictionary(x => (x.Year, x.Month));
+            var result = new List<FinancialTrendPoint>();
+            var cursor = new DateTime(fromDate.Year, fromDate.Month, 1);
+            var last = new DateTime(toDate.Year, toDate.Month, 1);
+            while (cursor <= last)
+            {
+                byMonth.TryGetValue((cursor.Year, cursor.Month), out var values);
+                var income = values?.Income ?? 0m;
+                var expense = values?.Expense ?? 0m;
+                result.Add(new FinancialTrendPoint(cursor.Year, cursor.Month, cursor.ToString("yyyy-MM"),
+                    income, expense, income - expense));
+                cursor = cursor.AddMonths(1);
+            }
+            return result;
+        }
+
+        public record FinancialTrendPoint(int Year, int Month, string Period, decimal Income, decimal Expense, decimal NetProfit);
+
         private static bool IsDebitNormal(GlAccountType type) => type is GlAccountType.Asset or GlAccountType.Expense;
     }
 }
