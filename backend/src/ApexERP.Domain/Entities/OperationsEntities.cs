@@ -17,6 +17,10 @@ namespace ApexERP.Domain.Entities
         public string Currency { get; set; } = "USD";
         public string? BankDetailsJson { get; set; }
         public bool IsApproved { get; set; }
+        public bool IsBlacklisted { get; set; }
+        public string? BlacklistedReason { get; set; }
+        public DateTime? TaxClearanceValidTo { get; set; }
+        public DateTime? RegistrationValidTo { get; set; }
         public string? Category { get; set; }
     }
 
