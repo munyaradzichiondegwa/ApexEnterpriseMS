@@ -151,6 +151,25 @@ public sealed class OrganisationManagementController : ApiControllerBase
         return CreatedAtAction(nameof(Companies), new { id = company.Id }, new { company.Id, company.Name });
     }
 
+
+    [HttpPut("companies/{companyId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateCompany(Guid companyId, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (companyId == CompanyId) return Conflict(new { error = "Switch to another active company before deactivating the current company." });
+        using var scope = _db.SystemAccessScope("tenant administration: deactivate legal entity");
+        var company = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == companyId && x.TenantId == TenantId, ct);
+        if (company is null) return NotFound();
+        if (!company.IsActive) return Ok(new { deactivated = true });
+        var activeCount = await _db.Companies.IgnoreQueryFilters().CountAsync(x => x.TenantId == TenantId && x.IsActive, ct);
+        if (activeCount <= 1) return Conflict(new { error = "A tenant must retain at least one active legal company." });
+        company.IsActive = false;
+        var memberships = await _db.CompanyMemberships.IgnoreQueryFilters().Where(x => x.CompanyId == companyId && x.IsActive).ToListAsync(ct);
+        foreach (var membership in memberships) { membership.IsActive = false; membership.ValidTo = DateTime.UtcNow; }
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { deactivated = true, companyId });
+    }
+
     [HttpGet("companies/{companyId:guid}/branches")]
     public async Task<IActionResult> Branches(Guid companyId, CancellationToken ct)
     {
