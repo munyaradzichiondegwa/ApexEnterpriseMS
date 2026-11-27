@@ -18,6 +18,7 @@ public sealed class ConsolidationFxIntegrationTests
         var assetId = Guid.NewGuid();
         var equityId = Guid.NewGuid();
         var periodId = Guid.NewGuid();
+        var parentPeriodId = Guid.NewGuid();
 
         await using (var seed = db.NewContext(null))
         {
@@ -49,12 +50,19 @@ public sealed class ConsolidationFxIntegrationTests
                     Id = equityId, CompanyId = subsidiaryId, Code = "3000",
                     Name = "Share Capital", Type = GlAccountType.Equity, Currency = "ZWG"
                 });
-            seed.AccountingPeriods.Add(new AccountingPeriod
-            {
-                Id = periodId, CompanyId = subsidiaryId, Year = 2026, PeriodNo = 1,
-                StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 2, 1),
-                Status = PeriodStatus.Open
-            });
+            seed.AccountingPeriods.AddRange(
+                new AccountingPeriod
+                {
+                    Id = parentPeriodId, CompanyId = parentId, Year = 2026, PeriodNo = 1,
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 1, 31),
+                    Status = PeriodStatus.Open
+                },
+                new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = subsidiaryId, Year = 2026, PeriodNo = 1,
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 2, 1),
+                    Status = PeriodStatus.Open
+                });
             var journal = new JournalEntry
             {
                 CompanyId = subsidiaryId, EntryNo = "JE-FX-001",
@@ -122,6 +130,14 @@ public sealed class ConsolidationFxIntegrationTests
         Assert.InRange(Math.Abs(cta.ConsolidatedAmount - (50m - (100m / 1.80m))),
             0m, 0.000001m);
         Assert.Equal(0m, Math.Round(result.TotalAssets - result.TotalLiabilities - result.TotalGroupEquity, 6));
+
+        var parentPeriodEvidence = Assert.Single(result.PeriodEvidence, x => x.CompanyId == parentId);
+        Assert.True(parentPeriodEvidence.IsPeriodEndAligned);
+        Assert.True(parentPeriodEvidence.IsGroupPeriodAligned);
+        var subsidiaryPeriodEvidence = Assert.Single(result.PeriodEvidence, x => x.CompanyId == subsidiaryId);
+        Assert.False(subsidiaryPeriodEvidence.IsPeriodEndAligned);
+        Assert.False(subsidiaryPeriodEvidence.IsGroupPeriodAligned);
+        Assert.Contains("differs from parent", subsidiaryPeriodEvidence.Status);
     }
     [PostgresFact]
     public async Task Consolidation_calculates_indirect_non_controlling_interest_across_the_full_ownership_chain()
