@@ -60,9 +60,14 @@ public sealed class FxRevaluationService
             (a.Type == GlAccountType.Asset || a.Type == GlAccountType.Liability) && a.IsMonetary).ToDictionaryAsync(a => a.Id, ct);
 
         var currencies = balances.Select(x => x.Currency.ToUpper()).Distinct().ToList();
-        var rates = await _db.ExchangeRates
+        var directRates = await _db.ExchangeRates
             .Where(r => r.CompanyId == companyId && currencies.Contains(r.FromCurrency.ToUpper()) &&
                 r.ToCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive && r.Rate > 0)
+            .OrderByDescending(r => r.RateDate)
+            .ToListAsync(ct);
+        var inverseRates = await _db.ExchangeRates
+            .Where(r => r.CompanyId == companyId && currencies.Contains(r.ToCurrency.ToUpper()) &&
+                r.FromCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive && r.Rate > 0)
             .OrderByDescending(r => r.RateDate)
             .ToListAsync(ct);
 
@@ -72,15 +77,23 @@ public sealed class FxRevaluationService
         {
             if (!accounts.TryGetValue(balance.GlAccountId, out var account))
                 continue; // Non-monetary / non-balance-sheet accounts are not revalued here.
+            if (!string.Equals(account.Currency, balance.Currency, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Monetary account {account.Code} is configured for {account.Currency}, but its ledger contains {balance.Currency} balances.");
 
-            var rate = rates.FirstOrDefault(r => string.Equals(r.FromCurrency, balance.Currency, StringComparison.OrdinalIgnoreCase));
+            var rate = directRates.FirstOrDefault(r => string.Equals(r.FromCurrency, balance.Currency, StringComparison.OrdinalIgnoreCase));
+            var inverse = false;
+            if (rate == null)
+            {
+                rate = inverseRates.FirstOrDefault(r => string.Equals(r.ToCurrency, balance.Currency, StringComparison.OrdinalIgnoreCase));
+                inverse = rate != null;
+            }
             if (rate == null)
             {
                 missing.Add(balance.Currency.ToUpperInvariant());
                 continue;
             }
 
-            var closingRate = rate.Rate;
+            var closingRate = inverse ? 1m / rate.Rate : rate.Rate;
             var revalued = decimal.Round(balance.ForeignBalance * closingRate, 2, MidpointRounding.AwayFromZero);
             var adjustment = decimal.Round(revalued - balance.FunctionalBalance, 2, MidpointRounding.AwayFromZero);
             if (adjustment == 0m) continue;
