@@ -588,11 +588,38 @@ public sealed class PlatformAdministrationController : ControllerBase
             var job = await _db.TenantLifecycleJobs.SingleOrDefaultAsync(x => x.Id == jobId, ct);
             if (job is null) return NotFound();
             if (job.Status is "Succeeded" or "Failed" or "Cancelled") return Conflict(new { error = "Lifecycle job is already terminal." });
+            TenantSubscription? renewedSubscription = null;
+            DateTime? renewalPeriodEnd = null;
+            if (job.JobType == "Renewal" && status == "Succeeded")
+            {
+                if (!root.TryGetProperty("periodEndsAt", out var periodValue) ||
+                    !DateTimeOffset.TryParse(periodValue.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedPeriod) ||
+                    parsedPeriod <= DateTimeOffset.UtcNow)
+                    return BadRequest(new { error = "A successful renewal callback must include a future periodEndsAt timestamp." });
+                renewedSubscription = await _db.TenantSubscriptions.Where(x => x.TenantId == job.TenantId)
+                    .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+                if (renewedSubscription is null) return Conflict(new { error = "Tenant subscription record is missing." });
+                renewalPeriodEnd = parsedPeriod.UtcDateTime;
+                if (root.TryGetProperty("planId", out var planValue) && Guid.TryParse(planValue.GetString(), out var planId))
+                {
+                    if (!await _db.SubscriptionPlans.AnyAsync(x => x.Id == planId && x.IsActive, ct))
+                        return BadRequest(new { error = "Renewal callback referenced an inactive plan." });
+                    renewedSubscription.PlanId = planId;
+                }
+                if (root.TryGetProperty("externalBillingReference", out var billingRef))
+                    renewedSubscription.ExternalBillingReference = billingRef.GetString();
+            }
             job.Status = status;
             if (status == "Running") job.StartedAt ??= DateTime.UtcNow;
             if (status is "Succeeded" or "Failed") job.CompletedAt = DateTime.UtcNow;
             if (root.TryGetProperty("externalJobReference", out var reference)) job.ExternalJobReference = reference.GetString();
             if (root.TryGetProperty("resultSummary", out var summary)) job.ResultSummary = summary.GetString();
+            if (renewedSubscription is not null && renewalPeriodEnd.HasValue)
+            {
+                renewedSubscription.Status = "Active"; renewedSubscription.TrialEndsAt = null;
+                renewedSubscription.CurrentPeriodEndsAt = renewalPeriodEnd.Value;
+                renewedSubscription.SuspendedAt = null; renewedSubscription.CancelledAt = null;
+            }
             await _db.SaveChangesAsync(ct);
             await AuditAsync("tenant.lifecycle-job.worker-callback", "TenantLifecycleJob", job.Id.ToString(), new { status }, ct);
             return Ok(new { job.Id, job.Status, job.CompletedAt });
