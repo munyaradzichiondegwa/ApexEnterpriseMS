@@ -99,6 +99,18 @@ namespace ApexERP.API.Controllers
             return Ok(note);
         }
 
+        /// <summary>Monthly financial trend computed from posted ledger entries for the selected company.</summary>
+        [HttpGet("financial-trend")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetFinancialTrend([FromQuery] DateTime from, [FromQuery] DateTime to, CancellationToken ct)
+        {
+            if (from == default || to == default || from.Date > to.Date)
+                return BadRequest(new { error = "A valid from/to date range is required." });
+            if ((to.Date - from.Date).TotalDays > 3660)
+                return BadRequest(new { error = "Financial trend ranges cannot exceed ten years." });
+            return Ok(await _reports.GetFinancialTrendAsync(CompanyId, from, to, ct));
+        }
+
         /// <summary>Full statutory pack in one call: all 5 necessary financial reports for a period.</summary>
         [HttpGet("full-statement-pack")]
         [HasPermission(Permissions.ReportsFinancialRead)]
