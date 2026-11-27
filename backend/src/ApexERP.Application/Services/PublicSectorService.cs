@@ -183,40 +183,66 @@ namespace ApexERP.Application.Services
         /// appropriation surplus, per policy.</summary>
         public async Task<YearEndCloseResult> CloseYearEndAsync(Guid companyId, Guid fundCentreId, bool carryForward, CancellationToken ct = default)
         {
-            var fc = await _db.FundCentres.FirstOrDefaultAsync(f => f.Id == fundCentreId && f.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Fund centre not found.");
-            if (fc.IsClosed) throw new InvalidOperationException("This fund centre is already closed.");
-
-            var utilisation = await GetBudgetUtilizationAsync(companyId, fundCentreId, ct);
-            var unexpended = utilisation.Available;
-
-            Guid? newFundCentreId = null;
-            if (carryForward && unexpended > 0)
+            return await _db.InTransactionAsync(async token =>
             {
-                var next = new FundCentre
+                await _db.AcquireTransactionLockAsync($"public-sector-year-end:{companyId:N}:{fundCentreId:N}", token);
+                var fc = await _db.FundCentres.FirstOrDefaultAsync(f => f.Id == fundCentreId && f.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Fund centre not found.");
+                if (fc.IsClosed) throw new InvalidOperationException("This fund centre is already closed.");
+
+                var utilisation = await GetBudgetUtilizationAsync(companyId, fundCentreId, token);
+                var unexpended = utilisation.Available;
+
+                Guid? nextParentId = null;
+                if (carryForward && unexpended > 0 && fc.ParentId.HasValue)
                 {
-                    CompanyId = companyId,
-                    Code = fc.Code,
-                    Name = fc.Name,
-                    Level = fc.Level,
-                    ParentId = fc.ParentId,
-                    FinancialYear = fc.FinancialYear + 1,
-                    AppropriationAmount = 0,
-                    CarriedForwardAmount = unexpended
-                };
-                _db.FundCentres.Add(next);
-                fc.CarriedForwardAmount = 0; // moved forward, not double-counted in the old year
-                newFundCentreId = next.Id;
-            }
-            else if (unexpended > 0)
-            {
-                fc.LapsedAmount = unexpended;
-            }
+                    var priorParent = await _db.FundCentres.FirstOrDefaultAsync(
+                        f => f.Id == fc.ParentId.Value && f.CompanyId == companyId, token)
+                        ?? throw new InvalidOperationException("The parent fund centre could not be found.");
+                    var nextParent = await _db.FundCentres.FirstOrDefaultAsync(
+                        f => f.CompanyId == companyId && f.Code == priorParent.Code &&
+                             f.Level == priorParent.Level && f.FinancialYear == fc.FinancialYear + 1, token);
+                    if (nextParent == null)
+                        throw new InvalidOperationException(
+                            "Carry forward the parent fund centre first so the next-year hierarchy remains intact.");
+                    nextParentId = nextParent.Id;
+                }
 
-            fc.IsClosed = true;
-            await _db.SaveChangesAsync(ct);
+                Guid? newFundCentreId = null;
+                if (carryForward && unexpended > 0)
+                {
+                    var alreadyExists = await _db.FundCentres.AnyAsync(
+                        f => f.CompanyId == companyId && f.Code == fc.Code &&
+                             f.FinancialYear == fc.FinancialYear + 1, token);
+                    if (alreadyExists)
+                        throw new InvalidOperationException("A next-year fund centre with this code already exists.");
 
-            return new YearEndCloseResult(fundCentreId, unexpended, carryForward ? unexpended : 0, carryForward ? 0 : Math.Max(unexpended, 0), newFundCentreId);
+                    var next = new FundCentre
+                    {
+                        CompanyId = companyId,
+                        Code = fc.Code,
+                        Name = fc.Name,
+                        Level = fc.Level,
+                        ParentId = nextParentId,
+                        FinancialYear = fc.FinancialYear + 1,
+                        AppropriationAmount = 0,
+                        CarriedForwardAmount = unexpended
+                    };
+                    _db.FundCentres.Add(next);
+                    fc.CarriedForwardAmount = 0; // moved forward, not double-counted in the old year
+                    newFundCentreId = next.Id;
+                }
+                else if (unexpended > 0)
+                {
+                    fc.LapsedAmount = unexpended;
+                }
+
+                fc.IsClosed = true;
+                await _db.SaveChangesAsync(token);
+
+                return new YearEndCloseResult(fundCentreId, unexpended,
+                    carryForward ? unexpended : 0, carryForward ? 0 : Math.Max(unexpended, 0), newFundCentreId);
+            }, ct);
         }
     }
 }

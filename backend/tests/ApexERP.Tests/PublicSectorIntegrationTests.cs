@@ -174,6 +174,50 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
+        public async Task Year_end_carry_forward_preserves_the_next_year_fund_hierarchy()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId,
+                    Name = "Year End MDA",
+                    BaseCurrency = "USD",
+                    FunctionalCurrency = "USD"
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var vote = await service.CreateFundCentreAsync(companyId, "VOTE-YE", "Vote",
+                FundCentreLevel.Vote, null, 2026, 1000m, 0m);
+            var program = await service.CreateFundCentreAsync(companyId, "PROG-YE", "Programme",
+                FundCentreLevel.Program, vote.Id, 2026, 100m, 0m);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CloseYearEndAsync(companyId, program.Id, carryForward: true));
+
+            var voteClose = await service.CloseYearEndAsync(companyId, vote.Id, carryForward: true);
+            Assert.NotNull(voteClose.NewFundCentreId);
+
+            var programClose = await service.CloseYearEndAsync(companyId, program.Id, carryForward: true);
+            Assert.NotNull(programClose.NewFundCentreId);
+
+            var nextVote = await ctx.FundCentres.SingleAsync(x => x.Id == voteClose.NewFundCentreId.Value);
+            var nextProgram = await ctx.FundCentres.SingleAsync(x => x.Id == programClose.NewFundCentreId!.Value);
+            Assert.Equal(2027, nextVote.FinancialYear);
+            Assert.Equal(2027, nextProgram.FinancialYear);
+            Assert.Equal(nextVote.Id, nextProgram.ParentId);
+            Assert.Equal(100m, nextProgram.CarriedForwardAmount);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CloseYearEndAsync(companyId, program.Id, carryForward: true));
+        }
+
+        [PostgresFact]
         public async Task Tender_service_rejects_late_bids_from_evaluation()
         {
             await using var db = await TestDb.CreateAsync();
