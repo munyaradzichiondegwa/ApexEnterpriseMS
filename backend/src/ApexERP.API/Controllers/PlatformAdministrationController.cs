@@ -6,6 +6,7 @@ using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using ApexERP.API.Authorization;
 
 namespace ApexERP.API.Controllers;
 
@@ -15,7 +16,8 @@ namespace ApexERP.API.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/platform")]
-[Authorize(Policy = "PlatformAdmin")]
+[Authorize(AuthenticationSchemes = "PlatformBearer", Policy = "PlatformAdmin")]
+[AuthenticatedOnly]
 public sealed class PlatformAdministrationController : ControllerBase
 {
     private readonly ApexErpDbContext _db;
