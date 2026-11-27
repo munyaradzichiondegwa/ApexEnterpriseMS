@@ -6846,10 +6846,16 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(20,6)");
+
                     b.Property<Guid?>("ApprovalChainId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("FundCentreId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
@@ -7129,6 +7135,19 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.WorkflowRequest", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ApexERP.Domain.Entities.ApprovalChain", null)
+                        .WithMany()
+                        .HasForeignKey("ApprovalChainId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.WorkflowApproval", b =>
