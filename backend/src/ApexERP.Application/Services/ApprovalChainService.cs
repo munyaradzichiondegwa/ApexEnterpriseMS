@@ -23,7 +23,22 @@ namespace ApexERP.Application.Services
         public async Task<ApprovalChain> CreateChainAsync(Guid companyId, string name, string entityType, decimal amountThreshold,
             Guid? fundCentreId, List<(int TierOrder, Guid ApproverRoleId, int SlaHours)> tiers, CancellationToken ct = default)
         {
-            if (tiers.Count > 5) throw new InvalidOperationException("A maximum of 5 approval tiers is supported.");
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(entityType))
+                throw new InvalidOperationException("An approval-chain name and entity type are required.");
+            if (amountThreshold < 0m)
+                throw new InvalidOperationException("An approval threshold cannot be negative.");
+            if (tiers == null || tiers.Count is < 1 or > 5)
+                throw new InvalidOperationException("An approval chain must contain between one and five tiers.");
+            var orderedTiers = tiers.OrderBy(t => t.TierOrder).ToList();
+            if (orderedTiers.Select(t => t.TierOrder).Where((order, index) => order != index + 1).Any() ||
+                orderedTiers.Any(t => t.SlaHours <= 0))
+                throw new InvalidOperationException("Approval tiers must be sequentially numbered from 1 and have a positive SLA.");
+            var roleIds = orderedTiers.Select(t => t.ApproverRoleId).Distinct().ToList();
+            var validRoleCount = await _db.Roles.CountAsync(r => r.CompanyId == companyId && roleIds.Contains(r.Id), ct);
+            if (validRoleCount != roleIds.Count)
+                throw new InvalidOperationException("Every approval tier must reference a role in this company.");
+            if (fundCentreId.HasValue && !await _db.FundCentres.AnyAsync(f => f.CompanyId == companyId && f.Id == fundCentreId.Value, ct))
+                throw new InvalidOperationException("The approval chain fund centre was not found in this company.");
 
             var chain = new ApprovalChain
             {
@@ -32,7 +47,7 @@ namespace ApexERP.Application.Services
                 EntityType = entityType,
                 AmountThreshold = amountThreshold,
                 FundCentreId = fundCentreId,
-                Tiers = tiers.OrderBy(t => t.TierOrder).Select(t => new ApprovalChainTier
+                Tiers = orderedTiers.Select(t => new ApprovalChainTier
                 {
                     TierOrder = t.TierOrder,
                     ApproverRoleId = t.ApproverRoleId,
@@ -47,13 +62,16 @@ namespace ApexERP.Application.Services
         /// <summary>Finds the applicable chain for an entity type + amount (the highest threshold
         /// at or below the amount) and starts a WorkflowRequest routed through its first tier.</summary>
         public async Task<WorkflowRequest> SubmitForApprovalAsync(Guid companyId, string entityType, Guid referenceId,
-            string referenceTable, Guid submittedBy, decimal amount, Guid? fundCentreId, CancellationToken ct = default)
+            string referenceTable, Guid submittedBy, decimal amount, Guid? fundCentreId, string? notes = null, CancellationToken ct = default)
         {
             var chain = await _db.ApprovalChains.Include(c => c.Tiers)
                 .Where(c => c.CompanyId == companyId && c.EntityType == entityType && c.IsActive && c.AmountThreshold <= amount
                             && (c.FundCentreId == null || c.FundCentreId == fundCentreId))
                 .OrderByDescending(c => c.AmountThreshold)
                 .FirstOrDefaultAsync(ct);
+
+            if (chain == null || chain.Tiers.Count == 0)
+                throw new InvalidOperationException($"No active approval chain is configured for {entityType} at amount {amount:N2}. Configure an approval chain before submitting this request.");
 
             var request = new WorkflowRequest
             {
@@ -63,7 +81,8 @@ namespace ApexERP.Application.Services
                 ReferenceTable = referenceTable,
                 SubmittedBy = submittedBy,
                 Status = WorkflowStatus.Pending,
-                ApprovalChainId = chain?.Id,
+                ApprovalChainId = chain.Id,
+                Notes = notes,
                 CurrentTier = 1,
                 CurrentTierStartedAt = DateTime.UtcNow
             };
@@ -88,22 +107,19 @@ namespace ApexERP.Application.Services
             if (request.Approvals.Any(a => a.ApproverId == approverId))
                 throw new InvalidOperationException("You have already recorded a decision on this request; a different approver must handle the next tier.");
 
-            var approvalChain = request.ApprovalChainId.HasValue
-                ? await _db.ApprovalChains.Include(c => c.Tiers).FirstOrDefaultAsync(c => c.Id == request.ApprovalChainId, ct)
-                : null;
-            var currentTier = approvalChain?.Tiers.FirstOrDefault(t => t.TierOrder == request.CurrentTier);
-            if (currentTier != null)
-            {
-                // The approver must hold the role the chain requires for this tier.
-                var approver = await _db.Users.FirstOrDefaultAsync(u => u.Id == approverId && u.CompanyId == companyId && u.IsActive, ct)
-                    ?? throw new InvalidOperationException("Approver not found.");
-                if (approver.RoleId != currentTier.ApproverRoleId)
-                    throw new InvalidOperationException($"Tier {request.CurrentTier} must be decided by a user holding the required approver role.");
-            }
-            else if (request.CurrentApproverId.HasValue && request.CurrentApproverId.Value != approverId)
-            {
-                throw new InvalidOperationException("This request is assigned to a different approver.");
-            }
+            if (!request.ApprovalChainId.HasValue)
+                throw new InvalidOperationException("This multi-tier request has no approval chain. Use the assigned single-approver workflow for unchained requests.");
+            var approvalChain = await _db.ApprovalChains.Include(c => c.Tiers)
+                .FirstOrDefaultAsync(c => c.Id == request.ApprovalChainId.Value && c.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("The configured approval chain is no longer available.");
+            var currentTier = approvalChain.Tiers.FirstOrDefault(t => t.TierOrder == request.CurrentTier)
+                ?? throw new InvalidOperationException("The current approval tier is missing from its configured chain.");
+
+            // The approver must be active in this company and hold the role required for this tier.
+            var approver = await _db.Users.FirstOrDefaultAsync(u => u.Id == approverId && u.CompanyId == companyId && u.IsActive, ct)
+                ?? throw new InvalidOperationException("Approver not found.");
+            if (approver.RoleId != currentTier.ApproverRoleId)
+                throw new InvalidOperationException($"Tier {request.CurrentTier} must be decided by a user holding the required approver role.");
 
             request.Approvals.Add(new WorkflowApproval
             {
