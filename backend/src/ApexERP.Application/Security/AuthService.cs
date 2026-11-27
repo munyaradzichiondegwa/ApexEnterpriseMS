@@ -339,42 +339,66 @@ namespace ApexERP.Application.Security
             if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == normalisedEmail, ct))
                 throw new InvalidOperationException("A user with this email already exists.");
 
-            var tenant = new CustomerOrganisation { Name = companyName, LegalName = companyName };
-            var company = new Company
+            var transaction = _db.Database.CurrentTransaction;
+            var ownsTransaction = transaction is null;
+            if (ownsTransaction) transaction = await _db.Database.BeginTransactionAsync(ct);
+            try
             {
-                TenantId = tenant.Id,
-                Tenant = tenant,
-                Name = companyName,
-                BaseCurrency = "USD",
-                FunctionalCurrency = "USD"
-            };
-            var trialPlan = await _db.SubscriptionPlans.SingleOrDefaultAsync(p => p.Code == "TRIAL", ct);
-            if (trialPlan is null)
-            {
-                trialPlan = new SubscriptionPlan { Code = "TRIAL", Name = "ApexERP Trial",
-                    Description = "Default 30-day evaluation plan", MaxSeats = 5, MaxCompanies = 1,
-                    ModuleCodesJson = "[\"*\"]", Currency = "USD", IsPubliclyAvailable = true, IsActive = true };
-                _db.SubscriptionPlans.Add(trialPlan);
+                var tenant = new CustomerOrganisation { Name = companyName, LegalName = companyName };
+                var company = new Company
+                {
+                    TenantId = tenant.Id, Tenant = tenant, Name = companyName,
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                };
+                var trialPlan = await _db.SubscriptionPlans.SingleOrDefaultAsync(p => p.Code == "TRIAL", ct);
+                if (trialPlan is null)
+                {
+                    trialPlan = new SubscriptionPlan { Code = "TRIAL", Name = "ApexERP Trial",
+                        Description = "Default 30-day evaluation plan", MaxSeats = 5, MaxCompanies = 1,
+                        ModuleCodesJson = "[\"*\"]", Currency = "USD", IsPubliclyAvailable = true, IsActive = true };
+                    _db.SubscriptionPlans.Add(trialPlan);
+                }
+                else if (!trialPlan.IsActive)
+                    throw new InvalidOperationException("Self-service registration is unavailable because the trial plan is inactive.");
+
+                _db.CustomerOrganisations.Add(tenant);
+                _db.Companies.Add(company);
+                await _db.SaveChangesAsync(ct);
+
+                _db.TenantSubscriptions.Add(new TenantSubscription { TenantId = tenant.Id, PlanId = trialPlan.Id, Status = "Trial",
+                    StartsAt = DateTime.UtcNow, TrialEndsAt = DateTime.UtcNow.AddDays(30), CurrentPeriodEndsAt = DateTime.UtcNow.AddDays(30) });
+                _db.TenantOnboardings.Add(new TenantOnboarding { TenantId = tenant.Id, Status = "AdministratorCreated",
+                    CompletedStepsJson = "[\"organisation\",\"companies\",\"members\"]" });
+                await _db.SaveChangesAsync(ct);
+
+                var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
+                _db.Roles.Add(adminRole);
+                await _db.SaveChangesAsync(ct);
+
+                var user = new User
+                {
+                    CompanyId = company.Id, Email = normalisedEmail, PasswordHash = HashPassword(password), RoleId = adminRole.Id,
+                    FirstName = firstName, LastName = lastName, IsActive = true
+                };
+                _db.Users.Add(user);
+                await _db.SaveChangesAsync(ct);
+
+                _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
+                    MembershipRole = "Administrator", RoleId = adminRole.Id, IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow });
+                await _db.SaveChangesAsync(ct);
+
+                if (ownsTransaction) await transaction!.CommitAsync(ct);
+                return user;
             }
-            else if (!trialPlan.IsActive)
-                throw new InvalidOperationException("Self-service registration is unavailable because the trial plan is inactive.");
-            _db.CustomerOrganisations.Add(tenant);
-            _db.Companies.Add(company);
-            _db.TenantSubscriptions.Add(new TenantSubscription { TenantId = tenant.Id, PlanId = trialPlan.Id, Status = "Trial",
-                StartsAt = DateTime.UtcNow, TrialEndsAt = DateTime.UtcNow.AddDays(30), CurrentPeriodEndsAt = DateTime.UtcNow.AddDays(30) });
-            _db.TenantOnboardings.Add(new TenantOnboarding { TenantId = tenant.Id, Status = "AdministratorCreated",
-                CompletedStepsJson = "[\"organisation\",\"companies\",\"members\"]" });
-            var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
-            _db.Roles.Add(adminRole);
-            var user = new User
+            catch
             {
-                CompanyId = company.Id, Email = normalisedEmail, PasswordHash = HashPassword(password), RoleId = adminRole.Id,
-                FirstName = firstName, LastName = lastName, IsActive = true
-            };
-            _db.Users.Add(user);
-            _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id, MembershipRole = "Administrator", RoleId = adminRole.Id, IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow });
-            await _db.SaveChangesAsync(ct);
-            return user;
+                if (ownsTransaction && transaction is not null) await transaction.RollbackAsync(ct);
+                throw;
+            }
+            finally
+            {
+                if (ownsTransaction && transaction is not null) await transaction.DisposeAsync();
+            }
         }
     }
 }
