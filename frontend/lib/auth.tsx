@@ -26,6 +26,7 @@ interface AuthContextValue {
   can: (permission: string) => boolean;
   login: (email: string, password: string, totpCode?: string) => Promise<void>;
   register: (companyName: string, email: string, password: string, firstName: string, lastName: string) => Promise<void>;
+  switchCompany: (companyId: string) => Promise<void>;
   logout: () => void;
   /** Replace the cached profile (e.g. after the role or permissions changed). */
   refreshProfile: () => Promise<void>;
@@ -146,6 +147,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [startSession]
   );
 
+
+  const switchCompany = useCallback(async (companyId: string) => {
+    if (!user?.email) throw new Error("No active user session.");
+    try {
+      const { data } = await api.post<LoginResponse>("/auth/switch-company", { companyId });
+      startSession(data, user.email);
+    } catch (err) {
+      throw new Error(extractErrorMessage(err));
+    }
+  }, [startSession, user]);
+
   const refreshProfile = useCallback(async () => {
     const outcome = await refreshSession();
     if (outcome.ok) {
@@ -157,8 +169,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const can = useCallback((permission: string) => hasPermission(user?.permissions, permission), [user]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, sessionNotice, configError: API_CONFIG_ERROR, can, login, register, logout, refreshProfile }),
-    [user, loading, sessionNotice, can, login, register, logout, refreshProfile]
+    () => ({ user, loading, sessionNotice, configError: API_CONFIG_ERROR, can, login, register, switchCompany, logout, refreshProfile }),
+    [user, loading, sessionNotice, can, login, register, switchCompany, logout, refreshProfile]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
