@@ -15,6 +15,7 @@ namespace ApexERP.API.Services;
 public sealed class TenantLifecycleDispatcher : BackgroundService
 {
     private const int DispatchLeaseMinutes = 10;
+    private const int MaxDispatchAttempts = 8;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHttpClientFactory _clients;
     private readonly IConfiguration _configuration;
@@ -68,7 +69,8 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
                      (x.Status == "Dispatching" && x.StartedAt != null && x.StartedAt < retryBefore)))
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(x => x.Status, "Dispatching")
-                    .SetProperty(x => x.StartedAt, claimedAt), ct);
+                    .SetProperty(x => x.StartedAt, claimedAt)
+                    .SetProperty(x => x.DispatchAttempts, x => x.DispatchAttempts + 1), ct);
             if (claimed != 1) return;
         }
 
@@ -104,11 +106,14 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
             {
                 var transientFailure = (int)response.StatusCode >= 500 ||
                     response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
-                current.Status = transientFailure ? "Queued" : "Failed";
-                current.CompletedAt = transientFailure ? null : DateTime.UtcNow;
+                var retryAllowed = transientFailure && current.DispatchAttempts < MaxDispatchAttempts;
+                current.Status = retryAllowed ? "Queued" : "Failed";
+                current.CompletedAt = retryAllowed ? null : DateTime.UtcNow;
                 current.StartedAt = DateTime.UtcNow;
                 current.ResultSummary = $"Worker returned {(int)response.StatusCode}: {body[..Math.Min(body.Length, 1000)]}" +
-                    (transientFailure ? $" Retry will be attempted after {DispatchLeaseMinutes} minutes." : "");
+                    (retryAllowed
+                        ? $" Retry {current.DispatchAttempts + 1} will be attempted after {DispatchLeaseMinutes} minutes."
+                        : transientFailure ? $" Dispatch attempts exhausted ({MaxDispatchAttempts})." : "");
             }
             await updateDb.SaveChangesAsync(ct);
         }
@@ -122,11 +127,15 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
             {
                 // Dispatch is at-least-once: the worker must deduplicate on the stable jobId in
                 // the signed payload because a timeout can occur after the worker accepted it.
-                current.Status = "Queued";
+                var retryAllowed = current.DispatchAttempts < MaxDispatchAttempts;
+                current.Status = retryAllowed ? "Queued" : "Failed";
                 current.StartedAt = DateTime.UtcNow;
-                current.CompletedAt = null;
-                current.ResultSummary = $"Dispatch attempt failed; retry will be attempted after {DispatchLeaseMinutes} minutes: " +
-                    ex.Message[..Math.Min(ex.Message.Length, 900)];
+                current.CompletedAt = retryAllowed ? null : DateTime.UtcNow;
+                current.ResultSummary = retryAllowed
+                    ? $"Dispatch attempt {current.DispatchAttempts} failed; retry will be attempted after {DispatchLeaseMinutes} minutes: " +
+                        ex.Message[..Math.Min(ex.Message.Length, 850)]
+                    : $"Dispatch attempts exhausted ({MaxDispatchAttempts}). Last error: " +
+                        ex.Message[..Math.Min(ex.Message.Length, 850)];
                 await updateDb.SaveChangesAsync(ct);
             }
             _logger.LogError(ex, "Unable to dispatch tenant lifecycle job {JobId}.", job.Id);
