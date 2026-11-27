@@ -36,6 +36,25 @@ namespace ApexERP.API.Controllers
             return Ok(v);
         }
 
+        public record VendorEligibilityUpdateRequest(bool IsApproved, bool IsBlacklisted, string? BlacklistedReason,
+            DateTime? TaxClearanceValidTo, DateTime? RegistrationValidTo);
+
+        [HttpPut("vendors/{id}/eligibility")]
+        public async Task<IActionResult> UpdateVendorEligibility(Guid id, VendorEligibilityUpdateRequest request)
+        {
+            var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == id && v.CompanyId == CompanyId);
+            if (vendor == null) return NotFound();
+            if (request.IsBlacklisted && string.IsNullOrWhiteSpace(request.BlacklistedReason))
+                return BadRequest(new { error = "A documented reason is required when blacklisting a vendor." });
+            vendor.IsApproved = request.IsApproved;
+            vendor.IsBlacklisted = request.IsBlacklisted;
+            vendor.BlacklistedReason = request.IsBlacklisted ? request.BlacklistedReason!.Trim() : null;
+            vendor.TaxClearanceValidTo = request.TaxClearanceValidTo?.Date;
+            vendor.RegistrationValidTo = request.RegistrationValidTo?.Date;
+            await _db.SaveChangesAsync();
+            return Ok(vendor);
+        }
+
         [HttpGet("purchase-orders")]
         public async Task<IActionResult> GetPurchaseOrders() =>
             Ok(await _db.PurchaseOrders.Include(p => p.Lines).Where(p => p.CompanyId == CompanyId).OrderByDescending(p => p.IssueDate).ToListAsync());
