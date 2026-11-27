@@ -93,7 +93,7 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
             var updateDb = inner.ServiceProvider.GetRequiredService<ApexErpDbContext>();
             using var system = updateDb.SystemAccessScope("operations worker: record lifecycle dispatch result");
             var current = await updateDb.TenantLifecycleJobs.SingleOrDefaultAsync(x => x.Id == job.Id, ct);
-            if (current is null) return;
+            if (current is null || current.Status != "Dispatching") return; // A fast callback may already have advanced the job.
             if (response.IsSuccessStatusCode)
             {
                 current.Status = "Dispatched";
@@ -118,7 +118,7 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
             var updateDb = inner.ServiceProvider.GetRequiredService<ApexErpDbContext>();
             using var system = updateDb.SystemAccessScope("operations worker: record dispatch failure");
             var current = await updateDb.TenantLifecycleJobs.SingleOrDefaultAsync(x => x.Id == job.Id, ct);
-            if (current != null)
+            if (current != null && current.Status == "Dispatching")
             {
                 // Dispatch is at-least-once: the worker must deduplicate on the stable jobId in
                 // the signed payload because a timeout can occur after the worker accepted it.
