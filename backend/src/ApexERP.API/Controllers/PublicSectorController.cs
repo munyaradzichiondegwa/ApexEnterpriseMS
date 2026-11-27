@@ -11,6 +11,7 @@ namespace ApexERP.API.Controllers
 {
     public record CreateFundCentreRequest(string Code, string Name, FundCentreLevel Level, Guid? ParentId, int FinancialYear, decimal AppropriationAmount, decimal CarriedForward);
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
+    public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
     public record CreateTenderRequest(string Title, string? Specifications, DateTime SubmissionDeadline);
     public record SubmitBidRequest(Guid VendorId, decimal PriceAmount);
     public record ScoreBidRequest(decimal PriceScore, decimal TechnicalScore, decimal LocalContentScore, decimal PriceWeight, decimal TechnicalWeight, decimal LocalContentWeight);
@@ -25,13 +26,16 @@ namespace ApexERP.API.Controllers
         private readonly PublicSectorService _publicSector;
         private readonly TenderService _tender;
         private readonly AssetVerificationService _assetVerification;
+        private readonly ApprovalChainService _approvalChains;
 
-        public PublicSectorController(ApexErpDbContext db, PublicSectorService publicSector, TenderService tender, AssetVerificationService assetVerification)
+        public PublicSectorController(ApexErpDbContext db, PublicSectorService publicSector, TenderService tender,
+            AssetVerificationService assetVerification, ApprovalChainService approvalChains)
         {
             _db = db;
             _publicSector = publicSector;
             _tender = tender;
             _assetVerification = assetVerification;
+            _approvalChains = approvalChains;
         }
 
         // ---- Fund Centres & Commitments ----
@@ -64,6 +68,28 @@ namespace ApexERP.API.Controllers
 
         [HttpGet("fund-centres/utilization")]
         public async Task<IActionResult> GetAllUtilization([FromQuery] int year) => Ok(await _publicSector.GetAllBudgetUtilizationAsync(CompanyId, year));
+
+        [HttpPost("commitments/override/submit-for-approval")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitBudgetOverrideForApproval(SubmitBudgetOverrideApprovalRequest req)
+        {
+            try
+            {
+                if (req.Amount <= 0 || string.IsNullOrWhiteSpace(req.Reason))
+                    return BadRequest(new { error = "A positive override amount and documented reason are required." });
+                var fundCentre = await _db.FundCentres.FirstOrDefaultAsync(f => f.Id == req.FundCentreId && f.CompanyId == CompanyId);
+                var purchaseOrder = await _db.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == req.PurchaseOrderId && p.CompanyId == CompanyId);
+                if (fundCentre == null || purchaseOrder == null)
+                    return NotFound(new { error = "The fund centre or purchase order was not found in this company." });
+                if (purchaseOrder.Status != PurchaseOrderStatus.Approved || purchaseOrder.FundCentreId != req.FundCentreId ||
+                    purchaseOrder.Total != req.Amount)
+                    return BadRequest(new { error = "The override request must match an approved purchase order assigned to the selected fund centre and its exact total." });
+                var workflow = await _approvalChains.SubmitForApprovalAsync(CompanyId, "PublicSectorBudgetOverride",
+                    purchaseOrder.Id, "PurchaseOrder", UserId, req.Amount, req.FundCentreId, req.Reason.Trim());
+                return Ok(workflow);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
 
         [HttpPost("commitments")]
         public async Task<IActionResult> Commit(CommitRequest req)
