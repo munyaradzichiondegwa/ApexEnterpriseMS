@@ -327,6 +327,57 @@ namespace ApexERP.Tests
             }
         }
 
+        [PostgresFact]
+        public async Task Evidence_upload_and_download_are_bound_to_the_authenticated_company_and_target_record()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyA = Guid.NewGuid();
+            var companyB = Guid.NewGuid();
+            var ownTarget = new ControlException
+            {
+                CompanyId = companyA, DetectorCode = "TEST", Fingerprint = "own-evidence-target",
+                Category = "Test", Severity = "Low", SourceType = "Test", Description = "Own company target"
+            };
+            var foreignTarget = new ControlException
+            {
+                CompanyId = companyB, DetectorCode = "TEST", Fingerprint = "foreign-evidence-target",
+                Category = "Test", Severity = "Low", SourceType = "Test", Description = "Foreign company target"
+            };
+            var foreignContent = Encoding.UTF8.GetBytes("foreign evidence");
+            var foreignEvidence = new AuditEvidenceReference
+            {
+                CompanyId = companyB, EntityType = nameof(ControlException), EntityId = foreignTarget.Id,
+                FileName = "foreign.pdf", ContentType = "application/pdf", SizeBytes = foreignContent.Length,
+                Content = foreignContent, Sha256 = Convert.ToHexString(SHA256.HashData(foreignContent))
+            };
+            await using (var seed = db.NewContext(null))
+            {
+                seed.Companies.AddRange(
+                    new Company { Id = companyA, Name = "Evidence A", BaseCurrency = "USD", FunctionalCurrency = "USD" },
+                    new Company { Id = companyB, Name = "Evidence B", BaseCurrency = "USD", FunctionalCurrency = "USD" });
+                seed.ControlExceptions.AddRange(ownTarget, foreignTarget);
+                seed.AuditEvidenceReferences.Add(foreignEvidence);
+                await seed.SaveChangesAsync();
+            }
+
+            await using var tenantA = db.NewContext(companyA, Approver);
+            var evidence = new EvidenceService(tenantA, new AuditService(tenantA));
+            var bytes = Encoding.UTF8.GetBytes("company A evidence");
+            var attached = await evidence.AttachAsync(companyA, nameof(ControlException), ownTarget.Id,
+                "own.pdf", "application/pdf", bytes, null, Approver);
+            Assert.Equal(companyA, attached.CompanyId);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                evidence.AttachAsync(companyA, nameof(ControlException), foreignTarget.Id,
+                    "cross-tenant.pdf", "application/pdf", bytes, null, Approver));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                evidence.AttachAsync(companyB, nameof(ControlException), foreignTarget.Id,
+                    "wrong-context.pdf", "application/pdf", bytes, null, Approver));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                evidence.DownloadAsync(companyA, foreignEvidence.Id, Approver));
+            Assert.Single(await evidence.ListAsync(companyA, nameof(ControlException), ownTarget.Id));
+        }
+
         // ---- idempotency table ---------------------------------------------------------------------------------------------
 
         [PostgresFact]
