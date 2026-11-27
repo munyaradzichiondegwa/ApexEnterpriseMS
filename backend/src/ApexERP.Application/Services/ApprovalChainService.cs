@@ -94,64 +94,67 @@ namespace ApexERP.Application.Services
         /// <summary>Records one tier's decision. On approval, advances to the next configured tier
         /// (or marks the whole request Approved if this was the last tier). On rejection, the whole
         /// request is Rejected immediately regardless of tier.</summary>
-        public async Task<WorkflowRequest> DecideAsync(Guid companyId, Guid workflowRequestId, Guid approverId, bool approved, string? comments, CancellationToken ct = default)
+        public Task<WorkflowRequest> DecideAsync(Guid companyId, Guid workflowRequestId, Guid approverId,
+            bool approved, string? comments, CancellationToken ct = default)
         {
-            var request = await _db.WorkflowRequests.Include(r => r.Approvals)
-                .FirstOrDefaultAsync(r => r.Id == workflowRequestId && r.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Workflow request not found.");
-            if (request.Status != WorkflowStatus.Pending) throw new InvalidOperationException("This request has already been decided.");
-
-            // ---- Approval integrity (segregation of duties) ----
-            if (request.SubmittedBy == approverId)
-                throw new InvalidOperationException("You submitted this request, so someone else must decide it.");
-            if (request.Approvals.Any(a => a.ApproverId == approverId))
-                throw new InvalidOperationException("You have already recorded a decision on this request; a different approver must handle the next tier.");
-
-            if (!request.ApprovalChainId.HasValue)
-                throw new InvalidOperationException("This multi-tier request has no approval chain. Use the assigned single-approver workflow for unchained requests.");
-            var approvalChain = await _db.ApprovalChains.Include(c => c.Tiers)
-                .FirstOrDefaultAsync(c => c.Id == request.ApprovalChainId.Value && c.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("The configured approval chain is no longer available.");
-            var currentTier = approvalChain.Tiers.FirstOrDefault(t => t.TierOrder == request.CurrentTier)
-                ?? throw new InvalidOperationException("The current approval tier is missing from its configured chain.");
-
-            // The approver must be active in this company and hold the role required for this tier.
-            var approver = await _db.Users.FirstOrDefaultAsync(u => u.Id == approverId && u.CompanyId == companyId && u.IsActive, ct)
-                ?? throw new InvalidOperationException("Approver not found.");
-            if (approver.RoleId != currentTier.ApproverRoleId)
-                throw new InvalidOperationException($"Tier {request.CurrentTier} must be decided by a user holding the required approver role.");
-
-            request.Approvals.Add(new WorkflowApproval
+            return _db.InTransactionAsync(async token =>
             {
-                WorkflowRequestId = request.Id,
-                Tier = request.CurrentTier,
-                ApproverId = approverId,
-                Approved = approved,
-                Comments = comments,
-                DecidedAt = DateTime.UtcNow
-            });
+                await _db.AcquireTransactionLockAsync($"workflow-request:{companyId:N}:{workflowRequestId:N}", token);
+                var request = await _db.WorkflowRequests.Include(r => r.Approvals)
+                    .FirstOrDefaultAsync(r => r.Id == workflowRequestId && r.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Workflow request not found.");
+                if (request.Status != WorkflowStatus.Pending)
+                    throw new InvalidOperationException("This request has already been decided.");
 
-            if (!approved)
-            {
-                request.Status = WorkflowStatus.Rejected;
-                await _db.SaveChangesAsync(ct);
+                if (request.SubmittedBy == approverId)
+                    throw new InvalidOperationException("You submitted this request, so someone else must decide it.");
+                if (request.Approvals.Any(a => a.ApproverId == approverId))
+                    throw new InvalidOperationException("You have already recorded a decision on this request; a different approver must handle the next tier.");
+
+                if (!request.ApprovalChainId.HasValue)
+                    throw new InvalidOperationException("This multi-tier request has no approval chain. Use the assigned single-approver workflow for unchained requests.");
+                var approvalChain = await _db.ApprovalChains.Include(c => c.Tiers)
+                    .FirstOrDefaultAsync(c => c.Id == request.ApprovalChainId.Value && c.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("The configured approval chain is no longer available.");
+                var currentTier = approvalChain.Tiers.FirstOrDefault(t => t.TierOrder == request.CurrentTier)
+                    ?? throw new InvalidOperationException("The current approval tier is missing from its configured chain.");
+
+                var approver = await _db.Users.FirstOrDefaultAsync(u => u.Id == approverId && u.CompanyId == companyId && u.IsActive, token)
+                    ?? throw new InvalidOperationException("Approver not found.");
+                if (approver.RoleId != currentTier.ApproverRoleId)
+                    throw new InvalidOperationException($"Tier {request.CurrentTier} must be decided by a user holding the required approver role.");
+
+                request.Approvals.Add(new WorkflowApproval
+                {
+                    WorkflowRequestId = request.Id,
+                    Tier = request.CurrentTier,
+                    ApproverId = approverId,
+                    Approved = approved,
+                    Comments = comments,
+                    DecidedAt = DateTime.UtcNow
+                });
+                // Persist the immutable decision first, then atomically advance the request row.
+                // This avoids EF attempting a stale aggregate update when the approval collection
+                // and request status are changed in the same batch.
+                await _db.SaveChangesAsync(token);
+
+                var isFinalTier = !approved || request.CurrentTier >= approvalChain.Tiers.Count;
+                var nextStatus = !approved ? WorkflowStatus.Rejected :
+                    isFinalTier ? WorkflowStatus.Approved : WorkflowStatus.Pending;
+                var nextTier = isFinalTier ? request.CurrentTier : request.CurrentTier + 1;
+                var nextStartedAt = isFinalTier ? request.CurrentTierStartedAt : DateTime.UtcNow;
+                var affected = await _db.WorkflowRequests
+                    .Where(w => w.Id == workflowRequestId && w.CompanyId == companyId && w.Status == WorkflowStatus.Pending)
+                    .ExecuteUpdateAsync(update => update
+                        .SetProperty(w => w.Status, nextStatus)
+                        .SetProperty(w => w.CurrentTier, nextTier)
+                        .SetProperty(w => w.CurrentTierStartedAt, nextStartedAt), token);
+                if (affected != 1)
+                    throw new InvalidOperationException("The workflow request changed while this decision was being recorded; reload and retry.");
+
+                await _db.Entry(request).ReloadAsync(token);
                 return request;
-            }
-
-            var maxTier = approvalChain?.Tiers.Count ?? 1;
-
-            if (request.CurrentTier >= maxTier)
-            {
-                request.Status = WorkflowStatus.Approved;
-            }
-            else
-            {
-                request.CurrentTier += 1;
-                request.CurrentTierStartedAt = DateTime.UtcNow;
-            }
-
-            await _db.SaveChangesAsync(ct);
-            return request;
+            }, ct);
         }
 
         /// <summary>Returns every pending request whose current tier has exceeded its configured
