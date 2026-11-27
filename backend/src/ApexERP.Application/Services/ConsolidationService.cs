@@ -127,9 +127,9 @@ namespace ApexERP.Application.Services
             decimal totalEliminations = 0;
 
             // Never eliminate a one-sided or unmatched intercompany balance. A valid elimination
-            // requires a reciprocal account, the same functional currency, and equal/opposite
-            // posted balances as at the reporting date. This prevents an unmatched receivable or
-            // payable from disappearing from the consolidated statements.
+            // requires reciprocal accounts and equal/opposite balances translated into the
+            // parent's functional currency as at the reporting date. This prevents an unmatched
+            // receivable or payable from disappearing from the consolidated statements.
             foreach (var account in intercoAccounts.OrderBy(a => a.CompanyId).ThenBy(a => a.Code))
             {
                 if (eliminatedAccountIds.Contains(account.Id) ||
@@ -198,8 +198,12 @@ namespace ApexERP.Application.Services
             decimal totalNci = 0, totalGroupEquityAdj = 0;
             foreach (var sub in subsidiaries.Where(s => s.OwnershipPercentage.HasValue && s.OwnershipPercentage < 100))
             {
-                var subEquity = translatedTrialBalancesByCompany[sub.Id]
-                    .Where(l => l.Type == GlAccountType.Equity).Sum(l => l.Credit - l.Debit);
+                var subTrialBalance = translatedTrialBalancesByCompany[sub.Id];
+                // Net assets includes current-period earnings and the subsidiary's translated
+                // equity reserve, even where the local year-end close has not yet transferred P&L.
+                var subAssets = subTrialBalance.Where(l => l.Type == GlAccountType.Asset).Sum(l => l.Debit - l.Credit);
+                var subLiabilities = subTrialBalance.Where(l => l.Type == GlAccountType.Liability).Sum(l => l.Credit - l.Debit);
+                var subEquity = subAssets - subLiabilities;
                 var ownership = sub.OwnershipPercentage!.Value / 100m;
                 var nciShare = subEquity * (1 - ownership);
                 totalNci += nciShare;
@@ -207,7 +211,9 @@ namespace ApexERP.Application.Services
             }
 
             var rawEquity = lines.Where(l => l.Type == GlAccountType.Equity).Sum(l => -l.ConsolidatedAmount);
-            var totalGroupEquity = rawEquity + totalGroupEquityAdj;
+            var currentPeriodProfit = -lines.Where(l => l.Type is GlAccountType.Income or GlAccountType.Expense)
+                .Sum(l => l.ConsolidatedAmount);
+            var totalGroupEquity = rawEquity + currentPeriodProfit + totalGroupEquityAdj;
 
             return new ConsolidationResult(parentCompanyId, subsidiaries.Select(s => s.Id).ToList(), asOfDate,
                 lines, totalAssets, totalLiabilities, totalGroupEquity, totalNci, totalEliminations);
