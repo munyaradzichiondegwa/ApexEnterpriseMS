@@ -2376,6 +2376,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("PurchaseOrderId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("RealisedAmount")
+                        .HasColumnType("numeric(20,6)");
+
                     b.Property<DateTime?>("ReleasedDate")
                         .HasColumnType("timestamp with time zone");
 
@@ -2390,7 +2393,10 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Commitments");
+                    b.ToTable("Commitments", t =>
+                        {
+                            t.HasCheckConstraint("CK_Commitments_RealisedAmount", "\"RealisedAmount\" >= 0 AND \"RealisedAmount\" <= \"Amount\"");
+                        });
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.CustomerOrganisation", b =>

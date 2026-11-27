@@ -367,6 +367,10 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<IntercompanyTransaction>().HasIndex(t => t.SourceArInvoiceId).IsUnique();
             modelBuilder.Entity<ExceptionItem>().HasIndex(e => new { e.CompanyId, e.Status, e.Category });
             // Ledger lines: non-negative amounts, one side only, strictly positive FX rate.
+            modelBuilder.Entity<Commitment>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_Commitments_RealisedAmount", "\"RealisedAmount\" >= 0 AND \"RealisedAmount\" <= \"Amount\"");
+            });
             modelBuilder.Entity<JournalLine>().ToTable(t =>
             {
                 t.HasCheckConstraint("CK_JournalLines_Amounts",

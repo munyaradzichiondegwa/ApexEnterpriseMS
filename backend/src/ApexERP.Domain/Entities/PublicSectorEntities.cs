@@ -29,6 +29,8 @@ namespace ApexERP.Domain.Entities
         public Guid FundCentreId { get; set; }
         public Guid PurchaseOrderId { get; set; }
         public decimal Amount { get; set; }
+        /// <summary>Base-currency actual expenditure already posted against this commitment.</summary>
+        public decimal RealisedAmount { get; set; }
         public CommitmentStatus Status { get; set; } = CommitmentStatus.Active;
         public DateTime CommittedDate { get; set; }
         public DateTime? ReleasedDate { get; set; }
