@@ -133,6 +133,7 @@ namespace ApexERP.Domain.Entities
         public TaxType Type { get; set; }
         public bool IsActive { get; set; } = true;
         public DateTime EffectiveFrom { get; set; }
+        public DateTime? EffectiveTo { get; set; }
     }
 
     /// <summary>ZIMRA PAYE tax bands, stored with effective date ranges so annual budget changes
