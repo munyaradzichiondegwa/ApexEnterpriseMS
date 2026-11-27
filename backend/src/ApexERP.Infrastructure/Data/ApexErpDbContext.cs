@@ -197,6 +197,7 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<DeploymentProfile> DeploymentProfiles => Set<DeploymentProfile>();
         public DbSet<TenantOnboarding> TenantOnboardings => Set<TenantOnboarding>();
         public DbSet<TenantAdministratorInvitation> TenantAdministratorInvitations => Set<TenantAdministratorInvitation>();
+        public DbSet<CompanyUserInvitation> CompanyUserInvitations => Set<CompanyUserInvitation>();
         public DbSet<PlatformAuditEvent> PlatformAuditEvents => Set<PlatformAuditEvent>();
         public DbSet<TenantSupportGrant> TenantSupportGrants => Set<TenantSupportGrant>();
         public DbSet<TenantOperationalCheck> TenantOperationalChecks => Set<TenantOperationalCheck>();
@@ -234,6 +235,8 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => new { x.TenantId, x.CountryCode }).IsUnique();
             modelBuilder.Entity<TenantOnboarding>().HasIndex(x => x.TenantId).IsUnique();
             modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.TokenHash).IsUnique();
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.TokenHash).IsUnique();
+            modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => new { x.TenantId, x.Email, x.AcceptedAt });
             modelBuilder.Entity<TenantSupportGrant>().HasIndex(x => new { x.TenantId, x.Status, x.ExpiresAt });
             modelBuilder.Entity<TenantOperationalCheck>().HasIndex(x => new { x.TenantId, x.CheckCode, x.CheckedAt });
             modelBuilder.Entity<TenantLifecycleJob>().HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
