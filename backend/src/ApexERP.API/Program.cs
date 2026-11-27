@@ -411,7 +411,9 @@ app.UseAuthentication();
 // revocation, role changes and tenant suspension must take effect on the next request.
 app.Use(async (context, next) =>
 {
-    if (context.User.Identity?.IsAuthenticated == true &&
+    var allowsAnonymous = context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null;
+    if (!allowsAnonymous &&
+        context.User.Identity?.IsAuthenticated == true &&
         context.User.FindFirst("platform_admin")?.Value != "true")
     {
         var subject = context.User.FindFirst("sub") ??
