@@ -327,13 +327,15 @@ namespace ApexERP.Application.Services
                 .Where(r => r != null)
                 .ToList();
             var externalRefs = taggedReceipts.Select(r => r!.ExternalRef).Distinct().ToList();
-            var matchingMessages = externalRefs.Count == 0
-                ? new List<(string Provider, string ExternalRef)>()
-                : await _db.IntegrationMessages
+            var matchingMessages = new List<(string Provider, string ExternalRef)>();
+            if (externalRefs.Count > 0)
+            {
+                var rows = await _db.IntegrationMessages
                     .Where(m => m.CompanyId == companyId && externalRefs.Contains(m.ExternalRef))
                     .Select(m => new { m.Provider, m.ExternalRef })
-                    .ToListAsync(ct)
-                    .ContinueWith(task => task.Result.Select(x => (x.Provider, x.ExternalRef)).ToList(), ct);
+                    .ToListAsync(ct);
+                matchingMessages = rows.Select(x => (x.Provider, x.ExternalRef)).ToList();
+            }
             var knownMessageKeys = matchingMessages
                 .Select(m => $"{m.Provider.ToUpperInvariant()}:{m.ExternalRef}")
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
