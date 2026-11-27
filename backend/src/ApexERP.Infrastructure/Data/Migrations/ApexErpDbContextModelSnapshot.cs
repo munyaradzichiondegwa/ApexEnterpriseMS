@@ -3658,6 +3658,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<bool>("IsControlAccount")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsMonetary")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsIntercompanyAccount")
                         .HasColumnType("boolean");
 
