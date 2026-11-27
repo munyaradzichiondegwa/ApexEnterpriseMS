@@ -15,11 +15,11 @@ The following evidence supersedes older historical statements in this tracker wh
 | Check | Current result |
 |---|---|
 | Backend build and unit/PostgreSQL integration tests | **Pass** on commit `f0c6672311776a03b9acc9da3382850a136b3951`, workflow [#46046590970](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46046590970). This includes the new payment retry concurrency and invalid-signature/provider-normalisation tests. |
-| Frontend type-check, tests and production build | **Pass** on the same workflow. Later dashboard processing-count and presentation changes are being checked on the current branch head. |
+| Frontend type-check, tests and production build | **Pass** on workflow #46049897283, including the FX-rate source UI and consolidation translation-evidence table. |
 | EF Core migration drift, clean database install, hardening scripts and RLS runtime boot | **Pass** on workflow #46046590970. No manual migration generation is required for the current committed model. |
 | PostgreSQL integration scenarios | **Executed in CI** against real PostgreSQL, including organisation hierarchy, public-sector fund/commitment scenarios, payment webhook concurrency and tenant evidence boundaries. |
 | Dashboard operations-count change | **Pass** on workflow [#46046778338](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46046778338). |
-| Current final-head verification | The later README and dashboard presentation commits are being validated by workflow #46046974051. Do not call the current HEAD green until that run completes successfully. |
+| Current code verification | **Pass** on commit `abed068f8b344a878ef9739740b34091e74b9eb9`, workflow [#46049897283](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46049897283): backend build and PostgreSQL tests, frontend type-check/tests/build, migration drift, clean install, hardening, RLS runtime boot and restore checks all passed. This includes FX provenance/CTA, public-sector GL/lapse tests and bounded lifecycle dispatch retries. Subsequent changes are documentation-only and are being checked at current HEAD by workflow #46050091706. |
 | Production Vercel deployment | **Not verified**. The earlier deployment attempt was rate-limited by the provider; retry is required after the provider limit expires. |
 | Production backup, isolated restore, encryption/key custody and measured RPO/RTO | **Not verified**. CI restore checks are not evidence of the production environment's recovery objectives. |
 | Live payment provider certification | **Not verified**. Provider-neutral signed webhook processing is implemented; provider-specific protocols, credentials and sandbox certification remain external prerequisites. |
