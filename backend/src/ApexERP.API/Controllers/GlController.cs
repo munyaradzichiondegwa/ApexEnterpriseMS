@@ -283,8 +283,9 @@ namespace ApexERP.API.Controllers
             Run(async () =>
             {
                 if (string.IsNullOrWhiteSpace(request.FromCurrency) || string.IsNullOrWhiteSpace(request.ToCurrency) ||
-                    request.RateDate == default || request.Rate <= 0m || string.IsNullOrWhiteSpace(request.RateSource))
-                    return BadRequest(new { error = "Currency codes, a rate date, a positive exchange rate and a rate source are required." });
+                    request.RateDate == default || request.Rate <= 0m || string.IsNullOrWhiteSpace(request.RateSource) ||
+                    request.RateSource.Trim().Length > 100 || (request.SourceReference?.Trim().Length ?? 0) > 500)
+                    return BadRequest(new { error = "Currency codes, a rate date, a positive exchange rate, a rate source (max 100 characters) and a source reference (max 500 characters) are required." });
                 var from = request.FromCurrency.Trim().ToUpperInvariant();
                 var to = request.ToCurrency.Trim().ToUpperInvariant();
                 if (from.Length != 3 || to.Length != 3 || from == to)
