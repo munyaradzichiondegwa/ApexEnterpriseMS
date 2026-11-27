@@ -378,6 +378,103 @@ public sealed class PlatformAdministrationController : ControllerBase
     }
 
 
+
+    [HttpPut("tenants/{tenantId:guid}/sla-policy")]
+    public async Task<IActionResult> ConfigureSlaPolicy(Guid tenantId, [FromBody] SlaPolicyRequest request, CancellationToken ct)
+    {
+        if (request.AvailabilityTargetPercent is <= 0 or > 100 || request.ResponseTargetMinutes < 1 ||
+            request.ResolutionTargetMinutes < request.ResponseTargetMinutes || request.MonitoringWindowDays is < 1 or > 90)
+            return BadRequest(new { error = "SLA targets are outside permitted ranges." });
+        try { using var _ = JsonDocument.Parse(request.BusinessHoursJson ?? "{}"); }
+        catch { return BadRequest(new { error = "BusinessHoursJson must be valid JSON." }); }
+        using var scope = _db.SystemAccessScope("platform admin: configure tenant SLA policy");
+        if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
+        var policy = await _db.TenantSlaPolicies.SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
+        if (policy is null) { policy = new TenantSlaPolicy { TenantId = tenantId }; _db.TenantSlaPolicies.Add(policy); }
+        policy.SupportTier = request.SupportTier ?? "Standard";
+        policy.AvailabilityTargetPercent = request.AvailabilityTargetPercent;
+        policy.ResponseTargetMinutes = request.ResponseTargetMinutes;
+        policy.ResolutionTargetMinutes = request.ResolutionTargetMinutes;
+        policy.MonitoringWindowDays = request.MonitoringWindowDays;
+        policy.BusinessTimeZone = request.BusinessTimeZone ?? "UTC";
+        policy.BusinessHoursJson = request.BusinessHoursJson ?? "{}";
+        policy.IsActive = true;
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("tenant.sla-policy.updated", "TenantSlaPolicy", policy.Id.ToString(), null, ct);
+        return Ok(policy);
+    }
+
+    [HttpGet("tenants/{tenantId:guid}/sla")]
+    public async Task<IActionResult> TenantSla(Guid tenantId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("platform admin: inspect tenant SLA performance");
+        if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
+        var policy = await _db.TenantSlaPolicies.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
+        if (policy is null) return NotFound(new { error = "No SLA policy is configured for this tenant." });
+        var since = DateTime.UtcNow.AddDays(-policy.MonitoringWindowDays);
+        var checks = await _db.TenantOperationalChecks.AsNoTracking().Where(x => x.TenantId == tenantId && x.CheckedAt >= since).ToListAsync(ct);
+        var totalChecks = checks.Count;
+        var healthyChecks = checks.Count(x => x.Status == "Healthy");
+        var availability = totalChecks == 0 ? (decimal?)null : Math.Round((decimal)healthyChecks / totalChecks * 100m, 3);
+        var incidents = await _db.TenantSlaIncidents.AsNoTracking().Where(x => x.TenantId == tenantId)
+            .OrderByDescending(x => x.OpenedAt).Take(500).ToListAsync(ct);
+        var now = DateTime.UtcNow;
+        var incidentMetrics = incidents.Select(x => new
+        {
+            x.Id, x.IncidentNumber, x.Severity, x.Status, x.Summary, x.OpenedAt, x.FirstResponseAt, x.ResolvedAt,
+            responseBreached = x.FirstResponseAt == null && now > x.OpenedAt.AddMinutes(x.ResponseTargetMinutes),
+            resolutionBreached = x.ResolvedAt == null && now > x.OpenedAt.AddMinutes(x.ResolutionTargetMinutes),
+            responseMinutes = x.FirstResponseAt.HasValue ? (double?)(x.FirstResponseAt.Value - x.OpenedAt).TotalMinutes : null,
+            resolutionMinutes = x.ResolvedAt.HasValue ? (double?)(x.ResolvedAt.Value - x.OpenedAt).TotalMinutes : null
+        }).ToList();
+        return Ok(new { policy, windowStart = since, availabilityPercent = availability,
+            availabilityTargetMet = availability.HasValue && availability.Value >= policy.AvailabilityTargetPercent,
+            checks = new { total = totalChecks, healthy = healthyChecks, failed = checks.Count(x => x.Status == "Failed"), degraded = checks.Count(x => x.Status == "Degraded") },
+            incidents = incidentMetrics,
+            breachedResponseCount = incidentMetrics.Count(x => x.responseBreached),
+            breachedResolutionCount = incidentMetrics.Count(x => x.resolutionBreached) });
+    }
+
+    [HttpPost("tenants/{tenantId:guid}/sla-incidents")]
+    public async Task<IActionResult> CreateSlaIncident(Guid tenantId, [FromBody] CreateSlaIncidentRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Summary) || !new[] { "Critical", "High", "Medium", "Low" }.Contains(request.Severity))
+            return BadRequest(new { error = "Incident summary and valid severity are required." });
+        using var scope = _db.SystemAccessScope("platform admin: open tenant SLA incident");
+        if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
+        var policy = await _db.TenantSlaPolicies.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.IsActive, ct);
+        var incident = new TenantSlaIncident
+        {
+            TenantId = tenantId, IncidentNumber = $"INC-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
+            Severity = request.Severity, Summary = request.Summary.Trim(), Status = "Open",
+            ResponseTargetMinutes = policy?.ResponseTargetMinutes ?? 240,
+            ResolutionTargetMinutes = policy?.ResolutionTargetMinutes ?? 2880,
+            AssignedTo = request.AssignedTo
+        };
+        _db.TenantSlaIncidents.Add(incident);
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("tenant.sla-incident.opened", "TenantSlaIncident", incident.Id.ToString(), new { incident.IncidentNumber, incident.Severity }, ct);
+        return Created($"/api/platform/sla-incidents/{incident.Id}", incident);
+    }
+
+    [HttpPut("sla-incidents/{incidentId:guid}")]
+    public async Task<IActionResult> UpdateSlaIncident(Guid incidentId, [FromBody] UpdateSlaIncidentRequest request, CancellationToken ct)
+    {
+        if (!new[] { "Open", "Investigating", "Resolved" }.Contains(request.Status))
+            return BadRequest(new { error = "Incident status must be Open, Investigating or Resolved." });
+        using var scope = _db.SystemAccessScope("platform admin: update tenant SLA incident");
+        var incident = await _db.TenantSlaIncidents.SingleOrDefaultAsync(x => x.Id == incidentId, ct);
+        if (incident is null) return NotFound();
+        if (incident.Status == "Resolved") return Conflict(new { error = "Resolved incidents are immutable." });
+        incident.Status = request.Status;
+        if (request.Status is "Investigating" or "Resolved") incident.FirstResponseAt ??= DateTime.UtcNow;
+        if (request.Status == "Resolved") { incident.ResolvedAt = DateTime.UtcNow; incident.ResolutionNotes = request.ResolutionNotes; }
+        if (request.AssignedTo.HasValue) incident.AssignedTo = request.AssignedTo;
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync("tenant.sla-incident.updated", "TenantSlaIncident", incident.Id.ToString(), new { request.Status }, ct);
+        return Ok(incident);
+    }
+
     [HttpGet("overview")]
     public async Task<IActionResult> PlatformOverview(CancellationToken ct)
     {
@@ -532,4 +629,7 @@ public sealed record SupportGrantRequest(string Reason, int DurationMinutes = 60
 public sealed record OperationalCheckRequest(string CheckCode, string Status, long? DurationMilliseconds = null, string? DetailsJson = null);
 public sealed record LifecycleJobRequest(string JobType, string RequestedBy);
 public sealed record LifecycleJobStatusRequest(string Status, string? ExternalJobReference = null, string? ResultSummary = null);
+public sealed record SlaPolicyRequest(string? SupportTier, decimal AvailabilityTargetPercent, int ResponseTargetMinutes, int ResolutionTargetMinutes, int MonitoringWindowDays = 30, string? BusinessTimeZone = "UTC", string? BusinessHoursJson = "{}");
+public sealed record CreateSlaIncidentRequest(string Severity, string Summary, Guid? AssignedTo = null);
+public sealed record UpdateSlaIncidentRequest(string Status, string? ResolutionNotes = null, Guid? AssignedTo = null);
 public sealed record AcceptInvitationRequest(string Token, string Email, string Password, string FirstName, string LastName);
