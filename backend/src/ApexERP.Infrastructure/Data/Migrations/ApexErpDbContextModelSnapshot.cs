@@ -708,6 +708,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("DispatchAttempts")
+                        .HasColumnType("integer");
+
                     b.Property<string>("JobType")
                         .IsRequired()
                         .HasColumnType("text");
