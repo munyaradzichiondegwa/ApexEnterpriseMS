@@ -206,13 +206,18 @@ namespace ApexERP.Application.Services
             var totalAppropriation = fc.AppropriationAmount + fc.CarriedForwardAmount;
             var commitments = await _db.Commitments
                 .Where(c => c.CompanyId == companyId && c.FundCentreId == fundCentreId && c.Status == CommitmentStatus.Active)
-                 .SumAsync(c => c.Amount - c.RealisedAmount, ct);
+                .SumAsync(c => c.Amount - c.RealisedAmount, ct);
 
-            // The posted GL is the authoritative actuals ledger. AP invoice expense lines and payroll
-            // postings are tagged with FundCentreId and stored in base currency; counting AP headers as
-            // well would double-count the same expenditure and mix foreign currency with base currency.
+            var fiscalStartMonth = await _db.Companies.Where(c => c.Id == companyId)
+                .Select(c => c.FiscalYearStartMonth).FirstOrDefaultAsync(ct);
+            var periodStart = FiscalCalendar.FiscalYearStart(new DateTime(fc.FinancialYear, 12, 31), fiscalStartMonth);
+            var periodEnd = periodStart.AddYears(1);
+
+            // The posted GL is the authoritative actuals ledger. Restrict it to this fund centre's
+            // financial year; AP headers are not counted because their expense journals already are.
             var actuals = await _db.JournalLines
                 .Where(l => l.FundCentreId == fundCentreId && l.JournalEntry!.CompanyId == companyId &&
+                    l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate < periodEnd &&
                     (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
                 .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
 
