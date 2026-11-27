@@ -420,6 +420,7 @@ namespace ApexERP.Infrastructure.Data
                 .HasForeignKey(l => l.SalesOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            modelBuilder.Entity<Vendor>().Property(v => v.IsBlacklisted).HasDefaultValue(false);
             modelBuilder.Entity<PayrollRun>().Property(p => p.Currency).HasDefaultValue("USD");
             modelBuilder.Entity<PayrollRun>()
                 .HasMany(p => p.Lines)
