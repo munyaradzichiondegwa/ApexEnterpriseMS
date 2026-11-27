@@ -141,6 +141,26 @@ The consolidated candidate is not release-ready until CI includes executable tes
 - Clean database migration, upgrade from supported prior schema, migration drift, backup/restore and migration rollback are verified against real PostgreSQL.
 - Frontend typecheck, unit tests and production build pass; frontend permissions mirror but never replace backend enforcement.
 
+## 6A. Public-sector and multinational acceptance detail
+
+The product-owner's 27 November specification makes public-sector and multinational capability part of the same configurable product core. The following scenarios are mandatory acceptance evidence, not optional enhancements:
+
+| Area | Required executable evidence | Current review disposition |
+|---|---|---|
+| MDA/SOE fund hierarchy | Create Vote > Program > Sub-Program; reject skipped levels, cross-company parents, mismatched financial years, duplicate codes and invalid root levels. | Hierarchy service exists; dedicated PostgreSQL scenario coverage still required. |
+| Appropriation and budget control | Verify approved appropriation plus carry-forward, active commitments and posted actuals reconcile to available budget; prevent negative availability unless an authorised, reason-coded override is used. | Budget-utilisation and override logic exists; dedicated service/controller integration tests still required. |
+| Commitment accounting | PO approval and commitment creation are one atomic transaction; reject duplicate commitments, wrong fund centre/company, unapproved PO and amount mismatch. Release/reverse the encumbrance exactly once on the approved fulfilment/invoice or cancellation event. | Atomic PO approval and commitment path exists; end-to-end lifecycle tests and AP invoice integration evidence remain required. |
+| Commitment realisation | Reconcile the commitment amount, realised amount, released balance and posted GL actuals without double counting; enforce 0 <= realised <= commitment and preserve an audit trail. | RealisedAmount schema constraint/migration exists; its end-to-end write/reconciliation lifecycle is not yet evidenced. |
+| Budget overrides and SoD | Only the designated permission can override; justification, actor, approver, source document and before/after budget values are audited; preparer/approver separation is enforced where required. | Override permission and audit record exist; independent approval/SoD scenario evidence remains required. |
+| Public procurement and tenders | Enforce tender publication/open/close/award lifecycle, server-time deadline, immutable bid submission, vendor eligibility, scoring ranges/weight totals, award justification and separation of duties. | Tender API/service and screen exist; full lifecycle and vendor eligibility acceptance tests remain required. |
+| Government reporting | Produce vote/program/fund-level budget, commitments, actual expenditure, variances and year-end carry-forward/lapse reports; reconcile totals to the posted GL and retain period/audit provenance. | Budget utilisation and year-end service logic exist; complete government reporting pack and reconciliation evidence remain outstanding. |
+| Multi-currency and multi-country groups | Translate entity results using approved effective-dated rates; document CTA/FX treatment, reporting period alignment, intercompany matching and elimination pairs, ownership/NCI and consolidation audit trail. | Existing consolidation engine is retained; correctness and cross-currency elimination acceptance scenarios remain outstanding. |
+| Statutory jurisdiction packs | Demonstrate approved jurisdiction owner, official source, version, effective dates, legal review and repeatable tests before enabling a statutory pack. | Not verified until approved country content and jurisdiction specialists are supplied. |
+
+**Observed testing gap:** the current consolidated backend suite is green, but the reviewed integration-test files do not yet contain dedicated PublicSectorService / FundCentre / Commitment PostgreSQL lifecycle tests. The pure FinancialIdentities budget helper test is not a substitute for those scenarios. This gap remains a release gate.
+
+**Known product boundaries:** the tender service currently documents that a distinct public vendor self-registration portal is not included; bid submission is through the authenticated application. Barcode/RFID hardware integration is not included; the workflow accepts scanner-produced tag values. These boundaries must remain visible in product and deployment claims.
+
 ## 7. Existing foundation to preserve
 
 The implementation must extend the existing ApexERP codebase rather than replace it. Preserve the existing accounting engine, 16-module ERP functionality, five-statement financial reporting, IFRS controls, approvals, audit trails, existing company-level query filtering, and prior merged audit-hardening work.
