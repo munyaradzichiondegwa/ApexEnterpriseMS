@@ -60,8 +60,7 @@ public sealed class SubscriptionEntitlementMiddleware
                 try { modules = JsonSerializer.Deserialize<string[]>(plan.ModuleCodesJson) ?? Array.Empty<string>(); }
                 catch { modules = Array.Empty<string>(); }
                 if (!modules.Contains("*", StringComparer.OrdinalIgnoreCase) &&
-                    !modules.Contains(module, StringComparer.OrdinalIgnoreCase) &&
-                    !modules.Contains("core", StringComparer.OrdinalIgnoreCase))
+                    !modules.Contains(module, StringComparer.OrdinalIgnoreCase))
                 {
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     await context.Response.WriteAsJsonAsync(new { error = "This module is not included in the tenant subscription.", code = "module_not_entitled", module }, context.RequestAborted);
