@@ -16,12 +16,15 @@ namespace ApexERP.API.Controllers
         private readonly ApexErpDbContext _db;
         private readonly SupplyChainService _sc;
         private readonly PublicSectorService _publicSector;
+        private readonly AuditService _audit;
 
-        public SupplyChainController(ApexErpDbContext db, SupplyChainService sc, PublicSectorService publicSector)
+        public SupplyChainController(ApexErpDbContext db, SupplyChainService sc,
+            PublicSectorService publicSector, AuditService audit)
         {
             _db = db;
             _sc = sc;
             _publicSector = publicSector;
+            _audit = audit;
         }
 
         [HttpGet("vendors")]
@@ -38,6 +41,9 @@ namespace ApexERP.API.Controllers
                 return BadRequest(new { error = "A vendor cannot be approved without current tax-clearance and company-registration documents." });
             v.CompanyId = CompanyId;
             _db.Vendors.Add(v);
+            _audit.Record(CompanyId, UserId, "Vendor.Created", "Procurement", nameof(Vendor), v.Id,
+                before: null, after: new { v.Code, v.Name, v.IsApproved, v.IsBlacklisted,
+                    v.TaxClearanceValidTo, v.RegistrationValidTo });
             await _db.SaveChangesAsync();
             return Ok(v);
         }
@@ -56,11 +62,16 @@ namespace ApexERP.API.Controllers
             if (request.IsApproved && (!request.TaxClearanceValidTo.HasValue || request.TaxClearanceValidTo.Value.Date < today ||
                 !request.RegistrationValidTo.HasValue || request.RegistrationValidTo.Value.Date < today))
                 return BadRequest(new { error = "A vendor cannot be approved without current tax-clearance and company-registration documents." });
+            var before = new { vendor.IsApproved, vendor.IsBlacklisted, vendor.BlacklistedReason,
+                vendor.TaxClearanceValidTo, vendor.RegistrationValidTo };
             vendor.IsApproved = request.IsApproved;
             vendor.IsBlacklisted = request.IsBlacklisted;
             vendor.BlacklistedReason = request.IsBlacklisted ? request.BlacklistedReason!.Trim() : null;
             vendor.TaxClearanceValidTo = request.TaxClearanceValidTo?.Date;
             vendor.RegistrationValidTo = request.RegistrationValidTo?.Date;
+            _audit.Record(CompanyId, UserId, "Vendor.EligibilityUpdated", "Procurement", nameof(Vendor), vendor.Id,
+                before, new { vendor.IsApproved, vendor.IsBlacklisted, vendor.BlacklistedReason,
+                    vendor.TaxClearanceValidTo, vendor.RegistrationValidTo });
             await _db.SaveChangesAsync();
             return Ok(vendor);
         }
