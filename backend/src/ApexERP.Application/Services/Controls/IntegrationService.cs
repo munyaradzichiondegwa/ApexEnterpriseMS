@@ -210,6 +210,9 @@ namespace ApexERP.Application.Services
                 failedMessage.NextAttemptAt = WebhookSignature.NextAttempt(failedMessage.Attempts - 1, DateTime.UtcNow);
                 failedMessage.Status = failedMessage.NextAttemptAt == null ? "DeadLetter" : "Failed";
                 await _db.SaveChangesAsync(ct);
+                msg.Status = failedMessage.Status;
+                msg.NextAttemptAt = failedMessage.NextAttemptAt;
+                msg.LastError = failedMessage.LastError;
             }
         }
 
