@@ -30,6 +30,12 @@ namespace ApexERP.API.Controllers
         [HttpPost("vendors")]
         public async Task<IActionResult> CreateVendor([FromBody] Vendor v)
         {
+            var today = DateTime.UtcNow.Date;
+            if (v.IsBlacklisted && string.IsNullOrWhiteSpace(v.BlacklistedReason))
+                return BadRequest(new { error = "A documented reason is required when blacklisting a vendor." });
+            if (v.IsApproved && (!v.TaxClearanceValidTo.HasValue || v.TaxClearanceValidTo.Value.Date < today ||
+                !v.RegistrationValidTo.HasValue || v.RegistrationValidTo.Value.Date < today))
+                return BadRequest(new { error = "A vendor cannot be approved without current tax-clearance and company-registration documents." });
             v.CompanyId = CompanyId;
             _db.Vendors.Add(v);
             await _db.SaveChangesAsync();
@@ -44,8 +50,12 @@ namespace ApexERP.API.Controllers
         {
             var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == id && v.CompanyId == CompanyId);
             if (vendor == null) return NotFound();
+            var today = DateTime.UtcNow.Date;
             if (request.IsBlacklisted && string.IsNullOrWhiteSpace(request.BlacklistedReason))
                 return BadRequest(new { error = "A documented reason is required when blacklisting a vendor." });
+            if (request.IsApproved && (!request.TaxClearanceValidTo.HasValue || request.TaxClearanceValidTo.Value.Date < today ||
+                !request.RegistrationValidTo.HasValue || request.RegistrationValidTo.Value.Date < today))
+                return BadRequest(new { error = "A vendor cannot be approved without current tax-clearance and company-registration documents." });
             vendor.IsApproved = request.IsApproved;
             vendor.IsBlacklisted = request.IsBlacklisted;
             vendor.BlacklistedReason = request.IsBlacklisted ? request.BlacklistedReason!.Trim() : null;
