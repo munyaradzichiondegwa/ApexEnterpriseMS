@@ -418,5 +418,70 @@ namespace ApexERP.Tests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 tenderService.ScoreBidAsync(companyId, bid.Id, 80m, 90m, 70m, 0.4m, 0.4m, 0.2m));
         }
+
+        [PostgresFact]
+        public async Task Expenditure_report_separates_encumbrances_from_realised_commitments_and_resolves_hierarchy()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var vendorId = Guid.NewGuid();
+            var voteId = Guid.NewGuid();
+            var programId = Guid.NewGuid();
+            var purchaseOrderId = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Expenditure Report MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.Vendors.Add(new Vendor
+                {
+                    Id = vendorId, CompanyId = companyId, Code = "V-REPORT", Name = "Report Supplier"
+                });
+                seed.FundCentres.AddRange(
+                    new FundCentre
+                    {
+                        Id = voteId, CompanyId = companyId, Code = "VOTE-R", Name = "Education Vote",
+                        Level = FundCentreLevel.Vote, FinancialYear = 2026, AppropriationAmount = 500m
+                    },
+                    new FundCentre
+                    {
+                        Id = programId, CompanyId = companyId, Code = "PROG-R", Name = "School Programme",
+                        Level = FundCentreLevel.Program, ParentId = voteId, FinancialYear = 2026,
+                        AppropriationAmount = 100m
+                    });
+                seed.PurchaseOrders.Add(new PurchaseOrder
+                {
+                    Id = purchaseOrderId, CompanyId = companyId, VendorId = vendorId,
+                    PoNo = "PO-REPORT", IssueDate = new DateTime(2026, 2, 1),
+                    Status = PurchaseOrderStatus.Approved, Total = 60m, FundCentreId = programId
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var commitment = await service.CommitAsync(companyId, programId, purchaseOrderId,
+                60m, false, null, Guid.NewGuid());
+            await service.RealiseCommitmentAsync(companyId, commitment.Id, 20m);
+
+            var report = await service.GetExpenditureReportAsync(companyId, 2026);
+            var vote = Assert.Single(report.Where(x => x.FundCentreId == voteId));
+            var program = Assert.Single(report.Where(x => x.FundCentreId == programId));
+
+            Assert.Equal(FundCentreLevel.Vote, vote.Level);
+            Assert.Null(vote.ParentCode);
+            Assert.Equal("VOTE-R", program.ParentCode);
+            Assert.Equal("Education Vote", program.ParentName);
+            Assert.Equal(100m, program.TotalBudget);
+            Assert.Equal(60m, program.CommittedToDate);
+            Assert.Equal(20m, program.RealisedAgainstCommitments);
+            Assert.Equal(40m, program.OutstandingCommitments);
+            Assert.Equal(0m, program.PostedActuals);
+            Assert.Equal(60m, program.AvailableBudget);
+        }
+
     }
 }
