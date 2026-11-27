@@ -301,6 +301,8 @@ namespace ApexERP.Tests
             var companyId = Guid.NewGuid();
             var vendorId = Guid.NewGuid();
             var secondVendorId = Guid.NewGuid();
+            var blacklistedVendorId = Guid.NewGuid();
+            var expiredVendorId = Guid.NewGuid();
             var tenderId = Guid.NewGuid();
             var bidId = Guid.NewGuid();
             var secondBidId = Guid.NewGuid();
@@ -317,8 +319,10 @@ namespace ApexERP.Tests
                     FunctionalCurrency = "USD"
                 });
                 seed.Vendors.AddRange(
-                    new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-003", Name = "Approved Supplier", IsApproved = true },
-                    new Vendor { Id = secondVendorId, CompanyId = companyId, Code = "V-004", Name = "Second Approved Supplier", IsApproved = true });
+                    new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-003", Name = "Approved Supplier", IsApproved = true, TaxClearanceValidTo = DateTime.UtcNow.AddDays(30), RegistrationValidTo = DateTime.UtcNow.AddDays(30) },
+                    new Vendor { Id = secondVendorId, CompanyId = companyId, Code = "V-004", Name = "Second Approved Supplier", IsApproved = true, TaxClearanceValidTo = DateTime.UtcNow.AddDays(30), RegistrationValidTo = DateTime.UtcNow.AddDays(30) },
+                    new Vendor { Id = blacklistedVendorId, CompanyId = companyId, Code = "V-005", Name = "Blacklisted Supplier", IsApproved = true, IsBlacklisted = true, BlacklistedReason = "Test blacklist", TaxClearanceValidTo = DateTime.UtcNow.AddDays(30), RegistrationValidTo = DateTime.UtcNow.AddDays(30) },
+                    new Vendor { Id = expiredVendorId, CompanyId = companyId, Code = "V-006", Name = "Expired Supplier", IsApproved = true, TaxClearanceValidTo = DateTime.UtcNow.AddDays(-1), RegistrationValidTo = DateTime.UtcNow.AddDays(30) });
                 seed.Roles.Add(new Role { Id = approverRoleId, CompanyId = companyId, Name = "Tender Approver", PermissionsJson = "[]" });
                 seed.Users.AddRange(
                     new User { Id = submitterId, CompanyId = companyId, Email = "submitter@test.local", PasswordHash = "test-hash", RoleId = approverRoleId, IsActive = true },
