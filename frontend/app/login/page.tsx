@@ -38,8 +38,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-brand-900 px-4 py-8">
-      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
+    <div className="min-h-screen flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-12 bg-brand-900 px-4 py-8">
+      <div className="w-full max-w-xl lg:w-1/2 grid grid-cols-1 gap-8 items-center">
         <div className="text-center mb-8">
           <div className="flex justify-center"><BrandMark /></div>
           <div className="text-brand-300 text-sm mt-1">Zimbabwe-first Enterprise Resource Planning</div>
@@ -73,7 +73,7 @@ export default function LoginPage() {
           </p>
         </form>
       </div>
-      <div className="block">
+      <div className="block w-full max-w-2xl lg:w-1/2">
         <div className="overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-white/10">
           <img
             src="/apexerp-hero.png"
