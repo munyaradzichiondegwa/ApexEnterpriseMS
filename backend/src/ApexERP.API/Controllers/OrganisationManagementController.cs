@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ApexERP.Application.Security;
+using ApexERP.API.Authorization;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -81,8 +82,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
             roleMap[oldRole.Id] = newRole.Id;
         }
         var currentRoleId = Guid.TryParse(User.FindFirst("role_id")?.Value, out var rid) ? rid : sourceRoles.FirstOrDefault(x => x.Name == User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value)?.Id;
-        var targetRole = currentRoleId.HasValue && roleMap.TryGetValue(currentRoleId.Value, out var mapped)
-            ? mapped : roleMap.Values.FirstOrDefault();
+        Guid? targetRole = currentRoleId.HasValue && roleMap.TryGetValue(currentRoleId.Value, out var mapped)
+            ? mapped : roleMap.Values.Cast<Guid?>().FirstOrDefault();
         if (targetRole == Guid.Empty) targetRole = null;
         _db.CompanyMemberships.Add(new CompanyMembership
         {
@@ -186,8 +187,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
     public async Task<IActionResult> ConfigureJurisdiction([FromBody] ConfigureJurisdictionRequest request, CancellationToken ct)
     {
         if (DenyManagement() is { } denied) return denied;
-        if (request.CountryCode.Length != 2 || request.FiscalYearStartMonth is < 1 or > 12 ||
-            request.FunctionalCurrency.Length != 3) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
+        if (string.IsNullOrWhiteSpace(request.CountryCode) || request.CountryCode.Length != 2 || request.FiscalYearStartMonth is < 1 or > 12 ||
+            string.IsNullOrWhiteSpace(request.FunctionalCurrency) || request.FunctionalCurrency.Length != 3) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
         using var scope = _db.SystemAccessScope("tenant configuration: set jurisdiction");
         var profile = await _db.JurisdictionProfiles.SingleOrDefaultAsync(x => x.CountryCode == request.CountryCode.ToUpperInvariant() && x.IsActive, ct);
         if (profile is null) return BadRequest(new { error = "The jurisdiction is not in the configured country catalogue." });
