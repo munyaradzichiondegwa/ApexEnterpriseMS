@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ApexERP.API.Authorization;
+using ApexERP.API.Services;
 
 namespace ApexERP.API.Controllers;
 
@@ -22,7 +23,8 @@ public sealed class PlatformAdministrationController : ControllerBase
 {
     private readonly ApexErpDbContext _db;
     private readonly AuthService _auth;
-    public PlatformAdministrationController(ApexErpDbContext db, AuthService auth) { _db = db; _auth = auth; }
+    private readonly IEmailDeliveryService _email;
+    public PlatformAdministrationController(ApexErpDbContext db, AuthService auth, IEmailDeliveryService email) { _db = db; _auth = auth; _email = email; }
 
     [HttpGet("plans")]
     public async Task<IActionResult> Plans(CancellationToken ct)
@@ -96,22 +98,28 @@ public sealed class PlatformAdministrationController : ControllerBase
         _db.TenantOnboardings.Add(new TenantOnboarding { TenantId = tenant.Id, Status = "Provisioned" });
         var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken)));
-        _db.TenantAdministratorInvitations.Add(new TenantAdministratorInvitation
+        var adminInvitation = new TenantAdministratorInvitation
         {
             TenantId = tenant.Id, CompanyId = company.Id, Email = request.AdministratorEmail.Trim().ToLowerInvariant(),
             TokenHash = tokenHash, ExpiresAt = DateTime.UtcNow.AddHours(48)
-        });
+        };
+        _db.TenantAdministratorInvitations.Add(adminInvitation);
         await _db.SaveChangesAsync(ct);
         await AuditAsync("tenant.provisioned", "CustomerOrganisation", tenant.Id.ToString(),
             new { companyId = company.Id, planId = plan.Id }, ct);
         await transaction.CommitAsync(ct);
 
-        // Returned once to the authorised platform operator. Store only the hash; deliver through
-        // a configured mail provider out-of-band. This endpoint never creates a password or user.
+        var emailSent = false;
+        try
+        {
+            emailSent = await _email.SendAsync(adminInvitation.Email, "ApexERP organisation administrator invitation",
+                $"You have been invited as the initial administrator for {tenant.Name}.\n\nInvitation token: {rawToken}\n\nAccept it at the configured ApexERP onboarding page within 48 hours.");
+        }
+        catch { emailSent = false; }
         return Created($"/api/platform/tenants/{tenant.Id}", new
         {
-            tenantId = tenant.Id, companyId = company.Id, invitation = rawToken,
-            invitationExpiresAt = DateTime.UtcNow.AddHours(48), onboardingStatus = "Provisioned"
+            tenantId = tenant.Id, companyId = company.Id, invitationToken = emailSent ? null : rawToken,
+            invitationEmailSent = emailSent, invitationExpiresAt = adminInvitation.ExpiresAt, onboardingStatus = "Provisioned"
         });
     }
 
