@@ -258,6 +258,10 @@ public sealed class SupplyChainIntegrationTests
         var apControlAccountId = Guid.NewGuid();
         var vatInputAccountId = Guid.NewGuid();
         var whtPayableAccountId = Guid.NewGuid();
+        var inventoryItemId = Guid.NewGuid();
+        var inventoryAssetAccountId = Guid.NewGuid();
+        var inventoryOffsetAccountId = Guid.NewGuid();
+        var poLineId = Guid.NewGuid();
 
         await using (var seed = db.NewContext(companyId))
         {
@@ -296,6 +300,16 @@ public sealed class SupplyChainIntegrationTests
                 {
                     Id = whtPayableAccountId, CompanyId = companyId, Code = "2200",
                     Name = "Withholding tax payable", Type = GlAccountType.Liability, Currency = "USD"
+                },
+                new GlAccount
+                {
+                    Id = inventoryAssetAccountId, CompanyId = companyId, Code = "1300",
+                    Name = "Inventory asset", Type = GlAccountType.Asset, Currency = "USD"
+                },
+                new GlAccount
+                {
+                    Id = inventoryOffsetAccountId, CompanyId = companyId, Code = "5100",
+                    Name = "Inventory receipt offset", Type = GlAccountType.Expense, Currency = "USD"
                 });
             seed.FundCentres.Add(new FundCentre
             {
@@ -303,12 +317,28 @@ public sealed class SupplyChainIntegrationTests
                 Name = "AP Vote", Level = FundCentreLevel.Vote,
                 FinancialYear = 2026, AppropriationAmount = 1000m
             });
+            seed.InventoryItems.Add(new InventoryItem
+            {
+                Id = inventoryItemId, CompanyId = companyId, Sku = "AP-INV-01",
+                Name = "Programme delivery item", UnitOfMeasure = "EA",
+                AssetAccountId = inventoryAssetAccountId, CogsAccountId = inventoryOffsetAccountId,
+                ValuationMethod = ValuationMethod.FIFO, QuantityOnHand = 0m
+            });
             seed.PurchaseOrders.Add(new PurchaseOrder
             {
                 Id = poId, CompanyId = companyId, VendorId = vendorId,
                 PoNo = "PO-AP-LINK", IssueDate = new DateTime(2026, 3, 1),
                 Status = PurchaseOrderStatus.Approved, Total = 100m,
-                FundCentreId = fundCentreId
+                FundCentreId = fundCentreId,
+                Lines = new List<PurchaseOrderLine>
+                {
+                    new()
+                    {
+                        Id = poLineId, InventoryItemId = inventoryItemId,
+                        QuantityOrdered = 1m, QuantityReceived = 0m,
+                        UnitCost = 100m, LineTotal = 100m
+                    }
+                }
             });
             seed.Commitments.Add(new Commitment
             {
@@ -324,10 +354,16 @@ public sealed class SupplyChainIntegrationTests
         var gl = new GlPostingService(ctx, audit, new JournalControlOptions());
         var publicSector = new PublicSectorService(ctx, audit);
         var ap = new ApService(ctx, gl, publicSector: publicSector);
+        var supplyChain = new SupplyChainService(ctx, new InventoryService(ctx, gl));
+        await supplyChain.ReceiveGoodsAsync(companyId, poId, new DateTime(2026, 3, 5), null,
+            new[] { new GrnLineRequest(poLineId, inventoryItemId, 1m, 100m) });
+        var commitmentBeforeInvoice = await ctx.Commitments.SingleAsync(x => x.Id == commitmentId);
+        Assert.Equal(0m, commitmentBeforeInvoice.RealisedAmount);
+        Assert.Equal(CommitmentStatus.Active, commitmentBeforeInvoice.Status);
 
         var invoice = await ap.CreateInvoiceAsync(companyId, supplierId, new DateTime(2026, 3, 10),
             "USD", 1m,
-            new[] { new ApInvoiceLineRequest("Programme delivery", 1m, 75m, null, expenseAccountId) },
+            new[] { new ApInvoiceLineRequest("Programme delivery", 0.75m, 100m, null, expenseAccountId, inventoryItemId) },
             purchaseOrderId: poId);
 
         Assert.Equal(fundCentreId, invoice.FundCentreId);
@@ -342,7 +378,7 @@ public sealed class SupplyChainIntegrationTests
 
         var finalInvoice = await ap.CreateInvoiceAsync(companyId, supplierId, new DateTime(2026, 3, 11),
             "USD", 1m,
-            new[] { new ApInvoiceLineRequest("Programme delivery", 1m, 25m, null, expenseAccountId) },
+            new[] { new ApInvoiceLineRequest("Programme delivery", 0.25m, 100m, null, expenseAccountId, inventoryItemId) },
             purchaseOrderId: poId);
         await ap.PostInvoiceAsync(companyId, finalInvoice.Id, apControlAccountId,
             vatInputAccountId, whtPayableAccountId);
