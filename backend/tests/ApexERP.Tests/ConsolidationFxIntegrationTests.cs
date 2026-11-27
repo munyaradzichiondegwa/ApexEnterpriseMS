@@ -212,4 +212,59 @@ public sealed class ConsolidationFxIntegrationTests
             result.TotalNonControllingInterest, 6));
     }
 
+    [PostgresFact]
+    public async Task Consolidation_reports_each_company_period_end_alignment_for_the_reporting_date()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var tenantId = Guid.NewGuid();
+        var parentId = Guid.NewGuid();
+        var subsidiaryId = Guid.NewGuid();
+
+        await using (var seed = db.NewContext(null))
+        {
+            seed.CustomerOrganisations.Add(new CustomerOrganisation
+            {
+                Id = tenantId, Name = "Period alignment tenant", IsActive = true
+            });
+            seed.Companies.AddRange(
+                new Company
+                {
+                    Id = parentId, TenantId = tenantId, Name = "Period Parent",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD", IsActive = true
+                },
+                new Company
+                {
+                    Id = subsidiaryId, TenantId = tenantId, Name = "Period Subsidiary",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD",
+                    ParentCompanyId = parentId, OwnershipPercentage = 100m, IsActive = true
+                });
+            seed.AccountingPeriods.AddRange(
+                new AccountingPeriod
+                {
+                    CompanyId = parentId, Year = 2026, PeriodNo = 1,
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 1, 31),
+                    Status = PeriodStatus.Closed
+                },
+                new AccountingPeriod
+                {
+                    CompanyId = subsidiaryId, Year = 2026, PeriodNo = 1,
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 2, 28),
+                    Status = PeriodStatus.Open
+                });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var ctx = db.NewContext(parentId, tenantId: tenantId);
+        var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
+        var result = await service.ConsolidateAsync(parentId, new DateTime(2026, 1, 31));
+
+        var parentPeriod = Assert.Single(result.PeriodEvidence, x => x.CompanyId == parentId);
+        Assert.True(parentPeriod.IsPeriodEndAligned);
+        Assert.Equal("Period end aligned", parentPeriod.Status);
+        var subsidiaryPeriod = Assert.Single(result.PeriodEvidence, x => x.CompanyId == subsidiaryId);
+        Assert.False(subsidiaryPeriod.IsPeriodEndAligned);
+        Assert.Equal(new DateTime(2026, 2, 28), subsidiaryPeriod.PeriodEnd);
+        Assert.Equal("Reporting date falls before the period end", subsidiaryPeriod.Status);
+    }
+
 }
