@@ -508,8 +508,8 @@ namespace ApexERP.Tests
                     new JournalLine
                     {
                         JournalEntryId = actualJournal.Id, GlAccountId = cashAccountId,
-                        Debit = 25m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
-                        BaseDebit = 25m, BaseCredit = 0m
+                        Debit = 10m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                        BaseDebit = 10m, BaseCredit = 0m
                     });
                 await seed.SaveChangesAsync();
             }
