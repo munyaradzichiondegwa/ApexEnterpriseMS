@@ -124,7 +124,7 @@ namespace ApexERP.Application.Services
                 if (approver.RoleId != currentTier.ApproverRoleId)
                     throw new InvalidOperationException($"Tier {request.CurrentTier} must be decided by a user holding the required approver role.");
 
-                request.Approvals.Add(new WorkflowApproval
+                _db.WorkflowApprovals.Add(new WorkflowApproval
                 {
                     WorkflowRequestId = request.Id,
                     Tier = request.CurrentTier,
