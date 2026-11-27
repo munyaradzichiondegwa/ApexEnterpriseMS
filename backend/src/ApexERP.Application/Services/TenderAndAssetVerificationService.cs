@@ -16,10 +16,12 @@ namespace ApexERP.Application.Services
     public class TenderService
     {
         private readonly ApexErpDbContext _db;
+        private readonly ApprovalChainService _approvalChains;
 
-        public TenderService(ApexErpDbContext db)
+        public TenderService(ApexErpDbContext db, ApprovalChainService approvalChains)
         {
             _db = db;
+            _approvalChains = approvalChains;
         }
 
         public async Task<TenderNotice> CreateTenderAsync(Guid companyId, string title, string? specifications, DateTime submissionDeadline, CancellationToken ct = default)
@@ -143,6 +145,36 @@ namespace ApexERP.Application.Services
             }, ct);
         }
 
+        /// <summary>Submits the proposed winning bid to the configured multi-tier approval chain.
+        /// The approval references the immutable bid ID, so a different vendor/bid cannot be substituted later.</summary>
+        public async Task<WorkflowRequest> SubmitAwardForApprovalAsync(Guid companyId, Guid tenderNoticeId,
+            Guid winningVendorId, Guid submittedBy, CancellationToken ct = default)
+        {
+            var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Tender notice not found.");
+            if (tender.Status != TenderStatus.Evaluation)
+                throw new InvalidOperationException("Only a tender under evaluation can be submitted for award approval.");
+
+            var eligibleBids = await _db.TenderBids.Where(b => b.CompanyId == companyId &&
+                b.TenderNoticeId == tenderNoticeId && !b.IsLateRejected).ToListAsync(ct);
+            if (eligibleBids.Count == 0 || eligibleBids.Any(b => b.TotalScore <= 0))
+                throw new InvalidOperationException("Every eligible bid must be scored before award approval.");
+            var selected = eligibleBids.FirstOrDefault(b => b.VendorId == winningVendorId)
+                ?? throw new InvalidOperationException("The selected vendor has no eligible bid for this tender.");
+            var highest = eligibleBids.OrderByDescending(b => b.TotalScore).ThenBy(b => b.PriceAmount)
+                .ThenBy(b => b.SubmittedAt).First();
+            if (selected.Id != highest.Id)
+                throw new InvalidOperationException("Only the highest-scoring eligible bid can be submitted for award approval.");
+            var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == winningVendorId && v.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("The selected vendor is not registered in this company.");
+            if (!vendor.IsApproved)
+                throw new InvalidOperationException("Only an approved vendor may be proposed for award.");
+
+            return await _approvalChains.SubmitForApprovalAsync(companyId, "TenderAward", selected.Id,
+                "TenderBid", submittedBy, selected.PriceAmount, null,
+                $"Approve award of tender {tender.TenderNo} to vendor {winningVendorId}.", ct);
+        }
+
         public async Task<TenderNotice> AwardAsync(Guid companyId, Guid tenderNoticeId, Guid winningVendorId, string justification, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(justification))
@@ -154,6 +186,14 @@ namespace ApexERP.Application.Services
             var winningBid = await _db.TenderBids.FirstOrDefaultAsync(b => b.CompanyId == companyId &&
                 b.TenderNoticeId == tenderNoticeId && b.VendorId == winningVendorId && !b.IsLateRejected, ct)
                 ?? throw new InvalidOperationException("The selected vendor has no eligible bid for this tender.");
+            var approvedWorkflow = await _db.WorkflowRequests.Include(w => w.Approvals)
+                .FirstOrDefaultAsync(w => w.CompanyId == companyId && w.RequestType == "TenderAward" &&
+                    w.ReferenceTable == "TenderBid" && w.ReferenceId == winningBid.Id &&
+                    w.Status == WorkflowStatus.Approved && w.ApprovalChainId != null, ct);
+            if (approvedWorkflow == null || approvedWorkflow.Approvals.Count == 0 ||
+                approvedWorkflow.Approvals.Any(a => !a.Approved))
+                throw new InvalidOperationException("The selected bid must receive independent approval through the configured tender-award approval chain before award.");
+
             var winningVendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == winningVendorId && v.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("The selected vendor is no longer registered in this company.");
             if (!winningVendor.IsApproved)
