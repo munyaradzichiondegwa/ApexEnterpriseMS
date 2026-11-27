@@ -252,7 +252,6 @@ public sealed class SupplyChainIntegrationTests
         var supplierId = Guid.NewGuid();
         var vendorId = Guid.NewGuid();
         var fundCentreId = Guid.NewGuid();
-        var grantId = Guid.NewGuid();
         var poId = Guid.NewGuid();
         var commitmentId = Guid.NewGuid();
         var expenseAccountId = Guid.NewGuid();
@@ -290,7 +289,7 @@ public sealed class SupplyChainIntegrationTests
                 Id = poId, CompanyId = companyId, VendorId = vendorId,
                 PoNo = "PO-AP-LINK", IssueDate = new DateTime(2026, 3, 1),
                 Status = PurchaseOrderStatus.Approved, Total = 100m,
-                FundCentreId = fundCentreId, GrantId = grantId
+                FundCentreId = fundCentreId
             });
             seed.Commitments.Add(new Commitment
             {
@@ -313,7 +312,6 @@ public sealed class SupplyChainIntegrationTests
             purchaseOrderId: poId);
 
         Assert.Equal(fundCentreId, invoice.FundCentreId);
-        Assert.Equal(grantId, invoice.GrantId);
         Assert.Equal(commitmentId, invoice.CommitmentId);
         Assert.Equal(poId, invoice.PurchaseOrderId);
     }
