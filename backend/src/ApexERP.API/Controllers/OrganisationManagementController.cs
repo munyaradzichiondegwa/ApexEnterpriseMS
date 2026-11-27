@@ -171,6 +171,33 @@ public sealed class OrganisationManagementController : ApiControllerBase
         return Ok(new { deactivated = true, companyId });
     }
 
+
+    [HttpGet("companies/{companyId:guid}/roles")]
+    public async Task<IActionResult> CompanyRoles(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: list company roles");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        return Ok(await _db.Roles.IgnoreQueryFilters().AsNoTracking().Where(x => x.CompanyId == companyId)
+            .OrderBy(x => x.Name).Select(x => new { x.Id, x.Name, x.IsSystemRole }).ToListAsync(ct));
+    }
+
+    [HttpGet("jurisdiction-catalogue")]
+    public async Task<IActionResult> JurisdictionCatalogue(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant configuration: list country defaults");
+        return Ok(await _db.JurisdictionProfiles.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.CountryName)
+            .Select(x => new { x.CountryCode, x.CountryName, x.DefaultCurrency, x.DefaultTimeZone, x.DefaultReportingFramework }).ToListAsync(ct));
+    }
+
+    [HttpGet("onboarding")]
+    public async Task<IActionResult> Onboarding(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant onboarding: read wizard state");
+        var row = await _db.TenantOnboardings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == TenantId, ct);
+        if (row is null) return NotFound();
+        return Ok(new { row.Status, row.CompletedStepsJson, row.DeploymentProfileId, row.CompletedAt, row.BlockedReason });
+    }
+
     [HttpGet("companies/{companyId:guid}/branches")]
     public async Task<IActionResult> Branches(Guid companyId, CancellationToken ct)
     {
