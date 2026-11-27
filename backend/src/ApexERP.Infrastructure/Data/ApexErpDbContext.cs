@@ -35,6 +35,12 @@ namespace ApexERP.Infrastructure.Data
         /// inter-company postings). With row-level security enabled this is what lets the database allow it.</summary>
         public bool AllowCrossTenant { get; set; }
 
+        /// <summary>True only inside an explicitly named platform/system operation (authentication, tenant resolution,
+        /// webhook verification, or background-job discovery). A missing company identity alone never grants RLS bypass.</summary>
+        internal bool AllowSystemAccess { get; set; }
+
+        internal string? SystemAccessReason { get; set; }
+
         public ApexErpDbContext(DbContextOptions<ApexErpDbContext> options) : base(options) { }
 
         // Core / tenancy
