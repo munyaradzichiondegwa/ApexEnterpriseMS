@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 
 using ApexERP.Application.Security;
 using ApexERP.Application.Services;
@@ -141,18 +143,44 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
-        public async Task Changing_the_password_ends_every_existing_session()
+        public async Task Changing_the_password_revokes_sessions_across_all_companies_in_the_same_tenant()
         {
             await using var db = await TestDb.CreateAsync();
             await using var ctx = db.NewContext(null);
             var auth = new AuthService(ctx, Secret, "apex");
             var user = await auth.RegisterCompanyAndAdminAsync("Pwd Co", "pwd@example.com", "Correct-Horse-9!", "A", "B");
+            var tenantId = await ctx.Companies.IgnoreQueryFilters()
+                .Where(x => x.Id == user.CompanyId).Select(x => x.TenantId).SingleAsync();
+            var subsidiary = new Company
+            {
+                TenantId = tenantId, Name = "Pwd Subsidiary", BaseCurrency = "USD", FunctionalCurrency = "USD"
+            };
+            var subsidiaryRole = new Role
+            {
+                CompanyId = subsidiary.Id, Name = "Subsidiary Accountant",
+                PermissionsJson = "[\\"reports.financial.read\\"]"
+            };
+            ctx.Companies.Add(subsidiary);
+            ctx.Roles.Add(subsidiaryRole);
+            ctx.CompanyMemberships.Add(new CompanyMembership
+            {
+                CompanyId = subsidiary.Id, UserId = user.Id, RoleId = subsidiaryRole.Id,
+                MembershipRole = subsidiaryRole.Name, IsActive = true, ValidFrom = DateTime.UtcNow
+            });
+            await ctx.SaveChangesAsync();
+
             var session = await auth.LoginAsync("pwd@example.com", "Correct-Horse-9!");
-            await using var scoped = db.NewContext(user.CompanyId, user.Id);
+            var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(session.RefreshToken)));
+            var stored = await ctx.RefreshTokens.IgnoreQueryFilters().SingleAsync(x => x.TokenHash == tokenHash);
+            var subsidiarySession = await auth.IssueTokensForCompanyAsync(user.Id, subsidiary.Id, "127.0.0.1", stored.FamilyId);
+
+            await using var scoped = db.NewContext(user.CompanyId, user.Id, tenantId);
             await new AuthService(scoped, Secret, "apex").ChangePasswordAsync(user.Id, "Correct-Horse-9!", "Another-Strong-Pass-7!");
+
             await using var refreshCtx = db.NewContext(null);
             var refreshAuth = new AuthService(refreshCtx, Secret, "apex");
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => refreshAuth.RefreshAsync(session.RefreshToken, null));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => refreshAuth.RefreshAsync(subsidiarySession.RefreshToken, null));
         }
 
         [PostgresFact]

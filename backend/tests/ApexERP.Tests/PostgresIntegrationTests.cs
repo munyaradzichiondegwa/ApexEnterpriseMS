@@ -139,6 +139,8 @@ namespace ApexERP.Tests
             var companyA1 = Guid.NewGuid();
             var companyA2 = Guid.NewGuid();
             var companyB1 = Guid.NewGuid();
+            var memberUserId = Guid.NewGuid();
+            var unrelatedUserId = Guid.NewGuid();
 
             await using (var seed = db.NewContext(null))
             {
@@ -263,6 +265,17 @@ namespace ApexERP.Tests
                     new Company { Id = companyA1, TenantId = tenantA, Name = "RLS A1" },
                     new Company { Id = companyA2, TenantId = tenantA, Name = "RLS A2" },
                     new Company { Id = companyB1, TenantId = tenantB, Name = "RLS B1" });
+                var homeRole = new Role { CompanyId = companyA1, Name = "Home role", IsSystemRole = true, PermissionsJson = "[\\"*\\"]" };
+                var subsidiaryRole = new Role { CompanyId = companyA2, Name = "Subsidiary role", IsSystemRole = true, PermissionsJson = "[\\"*\\"]" };
+                seed.Roles.AddRange(homeRole, subsidiaryRole);
+                seed.Users.AddRange(
+                    new User { Id = memberUserId, CompanyId = companyA1, Email = "rls-member@example.com", PasswordHash = "test", FirstName = "RLS", LastName = "Member", RoleId = homeRole.Id, IsActive = true },
+                    new User { Id = unrelatedUserId, CompanyId = companyA1, Email = "rls-unrelated@example.com", PasswordHash = "test", FirstName = "RLS", LastName = "Unrelated", RoleId = homeRole.Id, IsActive = true });
+                seed.CompanyMemberships.Add(new CompanyMembership
+                {
+                    CompanyId = companyA2, UserId = memberUserId, RoleId = subsidiaryRole.Id,
+                    MembershipRole = "Subsidiary role", IsActive = true, ValidFrom = DateTime.UtcNow
+                });
                 var plan = new SubscriptionPlan { Id = Guid.NewGuid(), Code = "RLS-TEST", Name = "RLS test", MaxSeats = 10, MaxCompanies = 5, ModuleCodesJson = "[\"*\"]", Currency = "USD", IsActive = true };
                 seed.SubscriptionPlans.Add(plan);
                 seed.TenantSubscriptions.AddRange(
@@ -302,12 +315,13 @@ namespace ApexERP.Tests
                     return (long)(await command.ExecuteScalarAsync())!;
                 }
 
-                async Task SetContextAsync(Guid? tenant, Guid? company, bool bypass = false)
+                async Task SetContextAsync(Guid? tenant, Guid? company, Guid? user = null, bool bypass = false)
                 {
                     await using var command = connection.CreateCommand();
-                    command.CommandText = "SELECT set_config('app.tenant_id', @tenant, false), set_config('app.company_id', @company, false), set_config('app.rls_bypass', @bypass, false)";
+                    command.CommandText = "SELECT set_config('app.tenant_id', @tenant, false), set_config('app.company_id', @company, false), set_config('app.user_id', @user, false), set_config('app.rls_bypass', @bypass, false)";
                     command.Parameters.AddWithValue("@tenant", tenant?.ToString() ?? string.Empty);
                     command.Parameters.AddWithValue("@company", company?.ToString() ?? string.Empty);
+                    command.Parameters.AddWithValue("@user", user?.ToString() ?? string.Empty);
                     command.Parameters.AddWithValue("@bypass", bypass ? "on" : "off");
                     await command.ExecuteNonQueryAsync();
                 }
@@ -341,6 +355,22 @@ namespace ApexERP.Tests
                 Assert.Equal(1L, await CountAsync("GlAccounts"));                // company A2 only
                 Assert.Equal(1L, await CountAsync("TenantSubscriptions"));
                 Assert.Equal(1L, await CountAsync("TenantJurisdictions"));
+
+                // A user can see their own identity in another company only while an active membership exists.
+                await SetContextAsync(tenantA, companyA2, memberUserId);
+                Assert.Equal(1L, await CountAsync("Users"));
+                await SetContextAsync(tenantA, companyA2, unrelatedUserId);
+                Assert.Equal(0L, await CountAsync("Users"));
+                await using (var admin = db.NewContext(null))
+                {
+                    var membership = await admin.CompanyMemberships.IgnoreQueryFilters()
+                        .SingleAsync(x => x.CompanyId == companyA2 && x.UserId == memberUserId);
+                    membership.IsActive = false;
+                    membership.ValidTo = DateTime.UtcNow;
+                    await admin.SaveChangesAsync();
+                }
+                await SetContextAsync(tenantA, companyA2, memberUserId);
+                Assert.Equal(0L, await CountAsync("Users"));
 
                 await SetContextAsync(tenantB, companyA1);
                 Assert.Equal(1L, await CountAsync("Companies"));                 // tenant B only
