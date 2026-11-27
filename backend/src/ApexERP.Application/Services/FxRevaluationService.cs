@@ -162,7 +162,7 @@ public sealed class FxRevaluationService
                 journalLines.Add(new GlLineRequest(lossAccount.Id, totalLosses, 0m, preview.FunctionalCurrency, 1m,
                     Narrative: "Unrealised foreign-exchange loss"));
 
-            return await _gl.PostAsync(companyId, asOfDate.Date, JournalSource.Manual,
+            return await _gl.PostAsync(companyId, asOfDate.Date, JournalSource.FxRevaluation,
                 "IAS 21 foreign-currency monetary-item revaluation", reference, journalLines, token, postedBy);
         }, ct);
     }
