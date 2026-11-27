@@ -87,9 +87,9 @@ BEGIN
 END $$;
 
 
--- A user identity remains anchored to its home company, but may be read in another
--- company only when the signed-in user has an active membership there. The app.user_id
--- value is stamped from the validated JWT by TenantSession; it is never accepted from a request.
+-- User records remain anchored to their home company. In a selected company, records are
+-- visible only for users with an active membership in that same company. app.user_id is also
+-- stamped from the validated JWT for request auditing; it is never accepted from a request.
 DROP POLICY IF EXISTS apex_user_membership_access ON "Users";
 CREATE POLICY apex_user_membership_access ON "Users"
     USING (
