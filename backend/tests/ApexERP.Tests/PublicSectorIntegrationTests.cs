@@ -223,8 +223,10 @@ namespace ApexERP.Tests
             await using var db = await TestDb.CreateAsync();
             var companyId = Guid.NewGuid();
             var vendorId = Guid.NewGuid();
+            var secondVendorId = Guid.NewGuid();
             var tenderId = Guid.NewGuid();
             var bidId = Guid.NewGuid();
+            var secondBidId = Guid.NewGuid();
             await using (var seed = db.NewContext(companyId))
             {
                 seed.Companies.Add(new Company
@@ -234,18 +236,26 @@ namespace ApexERP.Tests
                     BaseCurrency = "USD",
                     FunctionalCurrency = "USD"
                 });
-                seed.Vendors.Add(new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-003", Name = "Approved Supplier", IsApproved = true });
+                seed.Vendors.AddRange(
+                    new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-003", Name = "Approved Supplier", IsApproved = true },
+                    new Vendor { Id = secondVendorId, CompanyId = companyId, Code = "V-004", Name = "Second Approved Supplier", IsApproved = true });
                 seed.TenderNotices.Add(new TenderNotice
                 {
                     Id = tenderId, CompanyId = companyId, TenderNo = "TND-2026-TEST",
                     Title = "Network equipment", SubmissionDeadline = DateTime.UtcNow.AddMinutes(-5),
                     Status = TenderStatus.Open
                 });
-                seed.TenderBids.Add(new TenderBid
-                {
-                    Id = bidId, CompanyId = companyId, TenderNoticeId = tenderId, VendorId = vendorId,
-                    PriceAmount = 1000m, SubmittedAt = DateTime.UtcNow.AddMinutes(-10), IsLateRejected = false
-                });
+                seed.TenderBids.AddRange(
+                    new TenderBid
+                    {
+                        Id = bidId, CompanyId = companyId, TenderNoticeId = tenderId, VendorId = vendorId,
+                        PriceAmount = 1000m, SubmittedAt = DateTime.UtcNow.AddMinutes(-10), IsLateRejected = false
+                    },
+                    new TenderBid
+                    {
+                        Id = secondBidId, CompanyId = companyId, TenderNoticeId = tenderId, VendorId = secondVendorId,
+                        PriceAmount = 950m, SubmittedAt = DateTime.UtcNow.AddMinutes(-9), IsLateRejected = false
+                    });
                 await seed.SaveChangesAsync();
             }
 
@@ -258,6 +268,10 @@ namespace ApexERP.Tests
                 service.ScoreBidAsync(companyId, bidId, 80m, 90m, 70m, 0.5m, 0.5m, 0.5m));
             var scored = await service.ScoreBidAsync(companyId, bidId, 80m, 90m, 70m, 0.4m, 0.4m, 0.2m);
             Assert.Equal(82m, scored.TotalScore);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ScoreBidAsync(companyId, secondBidId, 70m, 80m, 70m, 0.5m, 0.3m, 0.2m));
+            var secondScored = await service.ScoreBidAsync(companyId, secondBidId, 70m, 80m, 70m, 0.4m, 0.4m, 0.2m);
+            Assert.Equal(74m, secondScored.TotalScore);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.AwardAsync(companyId, tenderId, Guid.NewGuid(), "Unsupported supplier"));
