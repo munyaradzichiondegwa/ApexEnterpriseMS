@@ -160,6 +160,13 @@ namespace ApexERP.Tests
                 Assert.Equal(0m, utilisation.Actuals);
                 Assert.Equal(20m, utilisation.Available);
 
+                // AP invoices carry Commitment.Id; this must not be confused with PurchaseOrderId.
+                await new PublicSectorService(verify, new AuditService(verify))
+                    .ReleaseCommitmentAsync(companyId, commitment.Id);
+                var released = await verify.Commitments.SingleAsync(x => x.Id == commitment.Id);
+                Assert.Equal(CommitmentStatus.Released, released.Status);
+                Assert.NotNull(released.ReleasedDate);
+
                 await Assert.ThrowsAsync<InvalidOperationException>(() =>
                     new PublicSectorService(verify, new AuditService(verify)).CommitAsync(
                         companyId, fundCentreId, validPoId, 80m, false, null, Guid.NewGuid()));

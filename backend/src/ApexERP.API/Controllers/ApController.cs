@@ -105,7 +105,7 @@ namespace ApexERP.API.Controllers
 
                 // Public Sector: posting the actual invoice replaces the estimate -- release the commitment.
                 if (invoice.CommitmentId.HasValue)
-                    await _publicSector.ReleaseCommitmentForPoAsync(CompanyId, invoice.CommitmentId.Value);
+                    await _publicSector.ReleaseCommitmentAsync(CompanyId, invoice.CommitmentId.Value);
 
                 return Ok(invoice);
             }

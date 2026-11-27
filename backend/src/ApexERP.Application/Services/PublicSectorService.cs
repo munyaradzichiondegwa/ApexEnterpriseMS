@@ -114,8 +114,23 @@ namespace ApexERP.Application.Services
         /// the estimate). Call this from SupplyChainService/ApService when a PO with a FundCentreId is fulfilled.</summary>
         public async Task ReleaseCommitmentForPoAsync(Guid companyId, Guid purchaseOrderId, CancellationToken ct = default)
         {
-            var commitment = await _db.Commitments.FirstOrDefaultAsync(c => c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId && c.Status == CommitmentStatus.Active, ct);
-            if (commitment == null) return; // no active commitment for this PO -- not a public-sector-tracked purchase
+            var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
+                c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId &&
+                c.Status == CommitmentStatus.Active, ct);
+            if (commitment == null) return; // no active commitment for this PO -- idempotent for untracked/already released POs
+            await ReleaseCommitmentAsync(companyId, commitment.Id, ct);
+        }
+
+        /// <summary>Releases a specific encumbrance when its linked AP invoice is posted.
+        /// This is keyed by Commitment.Id, not PurchaseOrderId.</summary>
+        public async Task ReleaseCommitmentAsync(Guid companyId, Guid commitmentId, CancellationToken ct = default)
+        {
+            var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
+                c.CompanyId == companyId && c.Id == commitmentId, ct);
+            if (commitment == null)
+                throw new InvalidOperationException("Commitment not found in this company.");
+            if (commitment.Status != CommitmentStatus.Active) return;
+
             commitment.Status = CommitmentStatus.Released;
             commitment.ReleasedDate = DateTime.UtcNow;
             await _db.SaveChangesAsync(ct);
