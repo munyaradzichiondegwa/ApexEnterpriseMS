@@ -378,7 +378,7 @@ export default function OrganisationPage() {
             <label className="text-sm">Cost centre<select className="input mt-1" value={departmentForm.costCentreId} onChange={(e) => setDepartmentForm({ ...departmentForm, costCentreId: e.target.value })}><option value="">No cost centre</option>{costCentres.filter((x) => x.isActive).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</select></label>
             <label className="text-sm">Manager<select className="input mt-1" value={departmentForm.managerId} onChange={(e) => setDepartmentForm({ ...departmentForm, managerId: e.target.value })}><option value="">No manager</option>{employees.filter((x) => x.isActive).map((x) => <option key={x.id} value={x.id}>{x.employeeNo} — {x.firstName} {x.lastName}</option>)}</select></label>
             <button className="btn-primary" disabled={busy}>{editingDepartmentId ? "Save department" : "Add department"}</button>
-            {editingDepartmentId && <button type="button" className="btn-secondary" onClick={() => { setEditingDepartmentId(""); setDepartmentForm({ name: "", branchId: "", costCentreId: "" }); }}>Cancel edit</button>}
+            {editingDepartmentId && <button type="button" className="btn-secondary" onClick={() => { setEditingDepartmentId(""); setDepartmentForm({ name: "", branchId: "", costCentreId: "", managerId: "" }); }}>Cancel edit</button>}
           </form>
         </section>
       )}
@@ -398,7 +398,7 @@ export default function OrganisationPage() {
             <label className="text-sm">Branch<select className="input mt-1" value={costCentreForm.branchId} onChange={(e) => setCostCentreForm({ ...costCentreForm, branchId: e.target.value })}><option value="">No branch</option>{branches.filter((b) => b.isActive).map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></label>
             <label className="text-sm">Segment<select className="input mt-1" value={costCentreForm.segmentId} onChange={(e) => setCostCentreForm({ ...costCentreForm, segmentId: e.target.value })}><option value="">No segment</option>{segments.filter((x) => x.isActive).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</select></label>
             <button className="btn-primary" disabled={busy}>{editingCostCentreId ? "Save cost centre" : "Add cost centre"}</button>
-            {editingCostCentreId && <button type="button" className="btn-secondary" onClick={() => { setEditingCostCentreId(""); setCostCentreForm({ code: "", name: "", parentId: "", branchId: "" }); }}>Cancel edit</button>}
+            {editingCostCentreId && <button type="button" className="btn-secondary" onClick={() => { setEditingCostCentreId(""); setCostCentreForm({ code: "", name: "", parentId: "", branchId: "", segmentId: "" }); }}>Cancel edit</button>}
           </form>
         </section>
       )}
