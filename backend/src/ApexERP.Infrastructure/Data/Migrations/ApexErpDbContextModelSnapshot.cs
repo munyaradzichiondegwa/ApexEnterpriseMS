@@ -5038,6 +5038,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("Currency")
+                        .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasColumnType("text")
                         .HasDefaultValue("USD");
