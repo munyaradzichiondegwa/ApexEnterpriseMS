@@ -14,12 +14,14 @@ namespace ApexERP.Application.Services
         private readonly ApexErpDbContext _db;
         private readonly GlPostingService _gl;
         private readonly ApMatchService? _match;
+        private readonly PublicSectorService? _publicSector;
 
-        public ApService(ApexErpDbContext db, GlPostingService gl, ApMatchService? match = null)
+        public ApService(ApexErpDbContext db, GlPostingService gl, ApMatchService? match = null, PublicSectorService? publicSector = null)
         {
             _db = db;
             _gl = gl;
             _match = match;
+            _publicSector = publicSector;
         }
 
         public async Task<ApInvoice> CreateInvoiceAsync(Guid companyId, Guid supplierId, DateTime invoiceDate,
@@ -103,42 +105,63 @@ namespace ApexERP.Application.Services
         /// <summary>Posts: Dr Expense/Asset per line, Dr VAT Input, Cr Trade Creditors (net of WHT), Cr WHT Payable.
         /// If the invoice carries a FundCentreId/GrantId, every GL line is tagged with them so Public
         /// Sector budget utilisation and Grant budget-vs-actual reporting pick up the actual spend.</summary>
-        public async Task<ApInvoice> PostInvoiceAsync(Guid companyId, Guid invoiceId, Guid apControlAccountId,
+        public Task<ApInvoice> PostInvoiceAsync(Guid companyId, Guid invoiceId, Guid apControlAccountId,
             Guid vatInputAccountId, Guid whtPayableAccountId, CancellationToken ct = default)
         {
-            var invoice = await _db.ApInvoices.Include(i => i.Lines)
-                .FirstOrDefaultAsync(i => i.Id == invoiceId && i.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Invoice not found.");
-            if (invoice.Status != InvoiceStatus.Draft)
-                throw new InvalidOperationException("Only draft invoices can be posted.");
-
-            // Three-way match (spec 16): an invoice that disagrees with its purchase order / goods received cannot be posted
-            // for payment until the discrepancy is resolved or overridden by someone with authority.
-            if (_match != null && invoice.PurchaseOrderId != null)
+            return _db.InTransactionAsync(async token =>
             {
-                var result = await _match.EvaluateAndStoreAsync(companyId, invoice, ct);
-                if (result.Outcome == ApexERP.Domain.Controls.MatchOutcome.Discrepancy && invoice.MatchStatus != "Overridden")
+                var invoice = await _db.ApInvoices.Include(i => i.Lines)
+                    .FirstOrDefaultAsync(i => i.Id == invoiceId && i.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Invoice not found.");
+                if (invoice.Status != InvoiceStatus.Draft)
+                    throw new InvalidOperationException("Only draft invoices can be posted.");
+
+                if (_match != null && invoice.PurchaseOrderId != null)
                 {
-                    await _db.SaveChangesAsync(ct);
-                    throw new InvalidOperationException("Three-way match failed: " + string.Join("; ", result.Issues.Select(i => i.Message)));
+                    var result = await _match.EvaluateAndStoreAsync(companyId, invoice, token);
+                    if (result.Outcome == ApexERP.Domain.Controls.MatchOutcome.Discrepancy && invoice.MatchStatus != "Overridden")
+                    {
+                        await _db.SaveChangesAsync(token);
+                        throw new InvalidOperationException("Three-way match failed: " + string.Join("; ", result.Issues.Select(i => i.Message)));
+                    }
                 }
-            }
 
-            var glLines = new List<GlLineRequest>();
-            foreach (var group in invoice.Lines.GroupBy(l => l.GlAccountId))
-                glLines.Add(new GlLineRequest(group.Key, group.Sum(l => l.LineSubtotal), 0, invoice.Currency, invoice.ExchangeRate, null,
-                    "Purchase expense/asset", invoice.FundCentreId, invoice.GrantId));
-            if (invoice.VatAmount > 0)
-                glLines.Add(new GlLineRequest(vatInputAccountId, invoice.VatAmount, 0, invoice.Currency, invoice.ExchangeRate, null, "VAT input"));
-            if (invoice.WhtAmount > 0)
-                glLines.Add(new GlLineRequest(whtPayableAccountId, 0, invoice.WhtAmount, invoice.Currency, invoice.ExchangeRate, null, "WHT withheld, payable to ZIMRA"));
-            glLines.Add(new GlLineRequest(apControlAccountId, 0, invoice.Total - invoice.WhtAmount, invoice.Currency, invoice.ExchangeRate, null, $"AP: {invoice.InvoiceNo}"));
+                if (invoice.CommitmentId.HasValue)
+                {
+                    if (_publicSector == null)
+                        throw new InvalidOperationException("Public-sector commitment realisation is not configured.");
+                    if (!invoice.PurchaseOrderId.HasValue || !invoice.FundCentreId.HasValue)
+                        throw new InvalidOperationException("A commitment-linked invoice must retain its purchase order and fund centre.");
+                    var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
+                        c.CompanyId == companyId && c.Id == invoice.CommitmentId.Value, token)
+                        ?? throw new InvalidOperationException("The linked budget commitment was not found.");
+                    if (commitment.PurchaseOrderId != invoice.PurchaseOrderId.Value ||
+                        commitment.FundCentreId != invoice.FundCentreId.Value)
+                        throw new InvalidOperationException("The invoice purchase order and fund centre do not match its commitment.");
+                }
 
-            var je = await _gl.PostAsync(companyId, invoice.InvoiceDate, JournalSource.AP, $"AP Invoice {invoice.InvoiceNo}", invoice.InvoiceNo, glLines, ct);
-            invoice.JournalEntryId = je.Id;
-            invoice.Status = InvoiceStatus.Posted;
-            await _db.SaveChangesAsync(ct);
-            return invoice;
+                var glLines = new List<GlLineRequest>();
+                foreach (var group in invoice.Lines.GroupBy(l => l.GlAccountId))
+                    glLines.Add(new GlLineRequest(group.Key, group.Sum(l => l.LineSubtotal), 0, invoice.Currency, invoice.ExchangeRate, null,
+                        "Purchase expense/asset", invoice.FundCentreId, invoice.GrantId));
+                if (invoice.VatAmount > 0)
+                    glLines.Add(new GlLineRequest(vatInputAccountId, invoice.VatAmount, 0, invoice.Currency, invoice.ExchangeRate, null, "VAT input"));
+                if (invoice.WhtAmount > 0)
+                    glLines.Add(new GlLineRequest(whtPayableAccountId, 0, invoice.WhtAmount, invoice.Currency, invoice.ExchangeRate, null, "WHT withheld, payable to ZIMRA"));
+                glLines.Add(new GlLineRequest(apControlAccountId, 0, invoice.Total - invoice.WhtAmount, invoice.Currency, invoice.ExchangeRate, null, $"AP: {invoice.InvoiceNo}"));
+
+                var journal = await _gl.PostAsync(companyId, invoice.InvoiceDate, JournalSource.AP,
+                    $"AP Invoice {invoice.InvoiceNo}", invoice.InvoiceNo, glLines, token);
+                invoice.JournalEntryId = journal.Id;
+                invoice.Status = InvoiceStatus.Posted;
+                await _db.SaveChangesAsync(token);
+
+                if (invoice.CommitmentId.HasValue)
+                    await _publicSector!.RealiseCommitmentAsync(companyId, invoice.CommitmentId.Value,
+                        decimal.Round(invoice.Subtotal * invoice.ExchangeRate, 2, MidpointRounding.AwayFromZero), token);
+
+                return invoice;
+            }, ct);
         }
 
         public async Task<ApPayment> PayAndAllocateAsync(Guid companyId, Guid supplierId, DateTime paymentDate,
