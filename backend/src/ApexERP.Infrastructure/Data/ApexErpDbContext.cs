@@ -273,8 +273,7 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PlatformAuditEvent>().Property(x => x.DetailsJson).HasColumnType("jsonb");
             modelBuilder.Entity<TenantOperationalCheck>().Property(x => x.DetailsJson).HasColumnType("jsonb");
 
-            // Explicitly model every new FK created by the enterprise platform migration.
-            // Restrict prevents tenant/company/user deletion from cascading into audit or access records.
+            // Explicitly model every FK created by the enterprise platform migration.
             modelBuilder.Entity<OrganisationalBranch>().HasOne<Company>().WithMany()
                 .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<OrganisationalBranch>().HasOne<OrganisationalBranch>().WithMany()
