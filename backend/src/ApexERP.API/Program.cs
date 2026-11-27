@@ -158,7 +158,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var hasCompany = Guid.TryParse(principal?.FindFirst("company_id")?.Value, out _);
                 var hasTenant = Guid.TryParse(principal?.FindFirst("tenant_id")?.Value, out _);
 
-                if (isRefresh || !hasTenant || !hasCompany)
+                var isPlatformAdmin = principal?.FindFirst("platform_admin")?.Value == "true";
+                if (isRefresh || (!isPlatformAdmin && (!hasTenant || !hasCompany)))
                 {
                     context.Fail("The token is not valid for API access.");
                 }
@@ -171,7 +172,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 // Permission-based authorization.
 // Policies are created on demand and evaluated against the "permissions" claim.
 // ModulePermissionConvention makes every endpoint deny-by-default.
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // Reserved for a separately governed platform identity; tenant SUPER_ADMIN is not equivalent.
+    options.AddPolicy("PlatformAdmin", policy => policy.RequireAuthenticatedUser().RequireClaim("platform_admin", "true"));
+});
 
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 builder.Services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
@@ -363,7 +368,7 @@ app.UseAuthentication();
 // identifier supplied in a request header or query string.
 app.Use(async (context, next) =>
 {
-    if (context.User.Identity?.IsAuthenticated == true)
+    if (context.User.Identity?.IsAuthenticated == true && context.User.FindFirst("platform_admin")?.Value != "true")
     {
         if (!Guid.TryParse(context.User.FindFirst("company_id")?.Value, out var companyId) ||
             !Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId))
