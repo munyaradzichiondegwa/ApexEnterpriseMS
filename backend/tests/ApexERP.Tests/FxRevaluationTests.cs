@@ -104,4 +104,28 @@ public sealed class FxRevaluationTests
         Assert.Equal(manualDirect.Id, selected.Rate.Id);
     }
 
+    [Fact]
+    public void Same_day_manual_override_wins_even_when_system_quote_has_a_later_timestamp()
+    {
+        var systemRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), FromCurrency = "EUR", ToCurrency = "USD",
+            RateDate = new DateTime(2026, 1, 2, 16, 30, 0, DateTimeKind.Utc), Rate = 1.10m
+        };
+        var manualOverride = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), FromCurrency = "EUR", ToCurrency = "USD",
+            RateDate = new DateTime(2026, 1, 2, 9, 0, 0, DateTimeKind.Utc),
+            Rate = 1.12m, IsManualOverride = true
+        };
+
+        var selected = ExchangeRateResolver.SelectEffectiveRate(
+            new[] { systemRate, manualOverride }, Array.Empty<ExchangeRate>(),
+            new DateTime(2026, 1, 2, 23, 59, 0, DateTimeKind.Utc));
+
+        Assert.NotNull(selected);
+        Assert.Equal(manualOverride.Id, selected.Rate.Id);
+        Assert.True(selected.Rate.IsManualOverride);
+    }
+
 }
