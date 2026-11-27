@@ -204,6 +204,19 @@ namespace ApexERP.Application.Services
                 var subAssets = subTrialBalance.Where(l => l.Type == GlAccountType.Asset).Sum(l => l.Debit - l.Credit);
                 var subLiabilities = subTrialBalance.Where(l => l.Type == GlAccountType.Liability).Sum(l => l.Credit - l.Debit);
                 var subEquity = subAssets - subLiabilities;
+                var subsidiaryEliminationAdjustment = eliminatedAccountIds
+                    .Where(id => accountsById[id].CompanyId == sub.Id && translatedBalancesByAccount.ContainsKey(id))
+                    .Sum(id =>
+                    {
+                        var account = accountsById[id];
+                        var signedBalance = translatedBalancesByAccount[id];
+                        return account.Type is GlAccountType.Asset or GlAccountType.Liability
+                            ? -signedBalance
+                            : account.Type is GlAccountType.Income or GlAccountType.Expense
+                                ? signedBalance
+                                : 0m;
+                    });
+                subEquity += subsidiaryEliminationAdjustment;
                 var ownership = sub.OwnershipPercentage!.Value / 100m;
                 var nciShare = subEquity * (1 - ownership);
                 totalNci += nciShare;
