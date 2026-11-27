@@ -86,4 +86,41 @@ BEGIN
     END LOOP;
 END $$;
 
+
+-- A user identity remains anchored to its home company, but may be read in another
+-- company only when the signed-in user has an active membership there. The app.user_id
+-- value is stamped from the validated JWT by TenantSession; it is never accepted from a request.
+DROP POLICY IF EXISTS apex_user_membership_access ON "Users";
+CREATE POLICY apex_user_membership_access ON "Users"
+    USING (
+        coalesce(current_setting('app.rls_bypass', true), '') = 'on'
+        OR apex_rls_allowed("CompanyId")
+        OR (
+            "Id" = nullif(current_setting('app.user_id', true), '')::uuid
+            AND EXISTS (
+                SELECT 1 FROM "CompanyMemberships" m
+                WHERE m."UserId" = "Users"."Id"
+                  AND m."CompanyId" = nullif(current_setting('app.company_id', true), '')::uuid
+                  AND m."IsActive" = true
+                  AND (m."ValidFrom" IS NULL OR m."ValidFrom" <= now())
+                  AND (m."ValidTo" IS NULL OR m."ValidTo" > now())
+            )
+        )
+    )
+    WITH CHECK (
+        coalesce(current_setting('app.rls_bypass', true), '') = 'on'
+        OR apex_rls_allowed("CompanyId")
+        OR (
+            "Id" = nullif(current_setting('app.user_id', true), '')::uuid
+            AND EXISTS (
+                SELECT 1 FROM "CompanyMemberships" m
+                WHERE m."UserId" = "Users"."Id"
+                  AND m."CompanyId" = nullif(current_setting('app.company_id', true), '')::uuid
+                  AND m."IsActive" = true
+                  AND (m."ValidFrom" IS NULL OR m."ValidFrom" <= now())
+                  AND (m."ValidTo" IS NULL OR m."ValidTo" > now())
+            )
+        )
+    );
+
 COMMIT;
