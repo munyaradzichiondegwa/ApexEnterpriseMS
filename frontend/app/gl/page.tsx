@@ -65,8 +65,8 @@ export default function GlPage() {
   }
 
   useEffect(() => {
-    if (tab === "fx-rates") loadFxRates();
-  }, [tab]);
+    if (tab === "fx-rates" && can("gl.accounts.read")) loadFxRates();
+  }, [tab, can]);
   useEffect(load, []);
 
   const activeAccounts = useMemo(() => accounts.filter((a) => a.isActive !== false), [accounts]);
@@ -223,7 +223,7 @@ export default function GlPage() {
       <div className="flex gap-2 mb-6">
         <button className={tab === "accounts" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("accounts")}>Chart of Accounts</button>
         <button className={tab === "journals" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("journals")}>Journal Entries</button>
-        <button className={tab === "fx-rates" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("fx-rates")}>FX Rates & Sources</button>
+        {can("gl.accounts.read") && <button className={tab === "fx-rates" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("fx-rates")}>FX Rates & Sources</button>}
       </div>
 
       {error && <div className="text-sm text-red-600 mb-4" role="alert">{error}</div>}
