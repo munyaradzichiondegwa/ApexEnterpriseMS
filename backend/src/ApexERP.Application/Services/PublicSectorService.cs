@@ -86,6 +86,7 @@ namespace ApexERP.Application.Services
                         .FirstOrDefaultAsync(w => w.CompanyId == companyId &&
                             w.RequestType == "PublicSectorBudgetOverride" && w.ReferenceTable == "PurchaseOrder" &&
                             w.ReferenceId == purchaseOrderId && w.SubmittedBy == actorId &&
+                            w.Amount == amount && w.FundCentreId == fundCentreId &&
                             w.Notes == overrideReason!.Trim() && w.Status == WorkflowStatus.Approved &&
                             w.ApprovalChainId != null, token);
                     if (overrideApproval == null || overrideApproval.Approvals.Count == 0 ||
