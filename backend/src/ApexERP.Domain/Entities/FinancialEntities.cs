@@ -15,6 +15,8 @@ namespace ApexERP.Domain.Entities
         public bool IsActive { get; set; } = true;
         public bool IsBankAccount { get; set; }
         public bool IsControlAccount { get; set; }
+        /// <summary>True only for foreign-currency monetary items subject to IAS 21 closing-rate revaluation.</summary>
+        public bool IsMonetary { get; set; }
 
         /// <summary>Running balance in functional currency, maintained by GlPostingService.</summary>
         public decimal CurrentBalance { get; set; }
