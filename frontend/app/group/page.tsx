@@ -197,7 +197,7 @@ export default function GroupPage() {
                       <td>{p.periodNo ?? "—"}</td>
                       <td>{p.periodStart ? new Date(p.periodStart).toLocaleDateString() : "—"}</td>
                       <td>{p.periodEnd ? new Date(p.periodEnd).toLocaleDateString() : "—"}</td>
-                      <td className={p.isPeriodEndAligned ? "text-emerald-700 font-medium" : "text-amber-700 font-medium"}>{p.isPeriodEndAligned ? "Aligned" : "Not aligned"}</td>
+                      <td className={p.isPeriodEndAligned ? "text-emerald-700 font-medium" : "text-amber-700 font-medium"}>{p.isPeriodEndAligned ? "Aligned" : p.status}</td>
                       <td className={p.isGroupPeriodAligned ? "text-emerald-700 font-medium" : "text-amber-700 font-medium"}>{p.isGroupPeriodAligned ? "Matches parent" : "Differs / unavailable"}</td>
                     </tr>
                   ))}</tbody>
