@@ -56,7 +56,7 @@ public sealed class StatutoryPackIntegrationTests
         var packs = new StatutoryPackService(ctx, new AuditService(ctx));
         var source = new List<StatutoryPackSource>
         {
-            new("Test Revenue Authority", "Verified PAYE tables", "https://example.gov/paye", null, new DateTime(2026, 1, 1)),
+            new("Test ZIMRA", "Verified PAYE tables", "https://example.gov/paye", null, new DateTime(2026, 1, 1)),
             new("Test NSSA", "NSSA contribution rates", "https://example.gov/nssa", null, new DateTime(2026, 1, 1))
         };
         const string rules = """
@@ -89,6 +89,12 @@ public sealed class StatutoryPackIntegrationTests
         var payroll = new PayrollService(ctx, null!);
         Assert.Equal(200m, await payroll.CalculatePayeAsync(companyId, 1000m, new DateTime(2026, 6, 1), "USD"));
         Assert.Equal(100m, await payroll.CalculatePayeAsync(companyId, 1000m, new DateTime(2026, 6, 1), "ZWG"));
+        var allRates = await ctx.StatutoryRates.Where(r => r.CompanyId == companyId).ToListAsync();
+        Assert.Equal(31.5m, payroll.CalculateNssaEmployee(1000m, allRates, "USD"));
+        Assert.Equal(45m, payroll.CalculateNssaEmployer(1000m, allRates, "ZWG"));
+        Assert.Equal(6m, payroll.CalculateAidsLevy(200m, allRates, "USD"));
+        var standardVat = await ctx.TaxCodes.SingleAsync(t => t.CompanyId == companyId && t.Code == "VAT_STANDARD");
+        Assert.Equal(0.155m, standardVat.Rate);
         var levyRates = await ctx.StatutoryRates.Where(r => r.CompanyId == companyId && r.Code == "AIDS_LEVY").ToListAsync();
         Assert.Equal(2, levyRates.Count);
         Assert.All(levyRates, rate => Assert.Equal(3m, rate.RatePct));
