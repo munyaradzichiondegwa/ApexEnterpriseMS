@@ -139,3 +139,14 @@ The tenant workspace is available at `/organisation`; the separate platform cont
 - Country-specific tax/statutory packs with official sources, effective dates, approval and version history.
 
 A configured deployment must not claim payment processing, email delivery, backup completion, statutory compliance or SLA availability until the corresponding provider or evidence source has confirmed the operation.
+
+
+## Runtime configuration
+
+The Docker Compose API service maps the following deployment settings into ASP.NET Core configuration:
+
+- `PLATFORM_JWT_ISSUER`, `PLATFORM_JWT_AUDIENCE`, `PLATFORM_JWT_PUBLIC_KEY_PEM`: trusted RSA platform-token validation. Store the issuer's private signing key outside this application; the API receives only the public key. PEM newlines may be represented as `\\n`.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_ENABLE_SSL`: administrator and user invitation delivery.
+- `OPERATIONS_WORKER_URL`, `OPERATIONS_WORKER_SECRET`: signed job dispatch and callback verification for the separately deployed operations worker.
+
+The public invitation endpoint is rate-limited and consumes a token once. The tenant must remain active, its initial company must remain active, and the subscription must be within its valid period before the administrator account is created. Provider secrets must be supplied through the deployment secret manager, not committed to this repository.
