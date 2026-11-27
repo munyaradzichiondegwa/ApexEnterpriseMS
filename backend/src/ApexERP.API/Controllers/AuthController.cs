@@ -142,14 +142,30 @@ namespace ApexERP.API.Controllers
             var user = new User { CompanyId = company.Id, Email = invitation.Email,
                 PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
                 LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true };
-            _db.Users.Add(user);
-            var existingMemberships = await _db.CompanyMemberships.IgnoreQueryFilters().CountAsync(x => x.UserId == user.Id && x.IsActive, ct);
-            _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
-                MembershipRole = role.Name, RoleId = role.Id, IsDefault = existingMemberships == 0,
-                IsActive = true, ValidFrom = DateTime.UtcNow });
-            invitation.AcceptedAt = DateTime.UtcNow;
-            invitation.AcceptedUserId = user.Id;
-            await _db.SaveChangesAsync(ct);
+            var transaction = _db.Database.CurrentTransaction;
+            var ownsTransaction = transaction is null;
+            if (ownsTransaction) transaction = await _db.Database.BeginTransactionAsync(ct);
+            try
+            {
+                _db.Users.Add(user);
+                await _db.SaveChangesAsync(ct);
+                _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
+                    MembershipRole = role.Name, RoleId = role.Id, IsDefault = true,
+                    IsActive = true, ValidFrom = DateTime.UtcNow });
+                invitation.AcceptedAt = DateTime.UtcNow;
+                invitation.AcceptedUserId = user.Id;
+                await _db.SaveChangesAsync(ct);
+                if (ownsTransaction) await transaction!.CommitAsync(ct);
+            }
+            catch
+            {
+                if (ownsTransaction && transaction is not null) await transaction.RollbackAsync(ct);
+                throw;
+            }
+            finally
+            {
+                if (ownsTransaction && transaction is not null) await transaction.DisposeAsync();
+            }
             var login = await _auth.IssueTokensAsync(user, Ip, null, ct);
             return Ok(Deliver(login));
         }
