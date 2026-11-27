@@ -60,7 +60,7 @@ public sealed class StatutoryPackIntegrationTests
         {
             new("Test Revenue Authority", "Income Tax Act", "https://example.gov/legislation/income-tax", null, new DateTime(2026, 1, 1))
         };
-        const string rules = "{ \"withholding\": { \"status\": \"requires-official-verified-values\" } }";
+        const string rules = "{ \"coverage\": \"complete\", \"withholding\": { \"status\": \"reviewed\" } }";
 
         var invalidSources = new List<StatutoryPackSource>
         {
