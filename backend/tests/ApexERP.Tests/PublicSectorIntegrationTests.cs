@@ -552,5 +552,50 @@ namespace ApexERP.Tests
                 service.CloseYearEndAsync(companyId, voteId, carryForward: false));
         }
 
+        [PostgresFact]
+        public async Task Repeated_commitment_release_is_idempotent_and_audits_the_no_op()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var commitmentId = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Commitment release audit test",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-REL",
+                    Name = "Release Vote", Level = FundCentreLevel.Vote,
+                    FinancialYear = 2026, AppropriationAmount = 500m
+                });
+                seed.Commitments.Add(new Commitment
+                {
+                    Id = commitmentId, CompanyId = companyId, FundCentreId = fundCentreId,
+                    Amount = 100m, RealisedAmount = 25m,
+                    Status = CommitmentStatus.Active, CommittedDate = new DateTime(2026, 3, 1)
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            await service.ReleaseCommitmentAsync(companyId, commitmentId);
+            await service.ReleaseCommitmentAsync(companyId, commitmentId);
+
+            var commitment = await ctx.Commitments.SingleAsync(x => x.Id == commitmentId);
+            Assert.Equal(CommitmentStatus.Released, commitment.Status);
+            Assert.NotNull(commitment.ReleasedDate);
+            Assert.Equal(25m, commitment.RealisedAmount);
+            Assert.Equal(1, await ctx.AuditLogs.CountAsync(x =>
+                x.EntityId == commitmentId && x.Action == "BudgetCommitment.Released"));
+            Assert.Equal(1, await ctx.AuditLogs.CountAsync(x =>
+                x.EntityId == commitmentId && x.Action == "BudgetCommitment.ReleaseNoOp"));
+        }
+
     }
 }
