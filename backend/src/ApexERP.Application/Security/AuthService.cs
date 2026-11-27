@@ -349,7 +349,7 @@ namespace ApexERP.Application.Security
             {
                 trialPlan = new SubscriptionPlan { Code = "TRIAL", Name = "ApexERP Trial",
                     Description = "Default 30-day evaluation plan", MaxSeats = 5, MaxCompanies = 1,
-                    ModuleCodesJson = "[\\"*\\"]", Currency = "USD", IsPubliclyAvailable = true, IsActive = true };
+                    ModuleCodesJson = "[\"*\"]", Currency = "USD", IsPubliclyAvailable = true, IsActive = true };
                 _db.SubscriptionPlans.Add(trialPlan);
             }
             else if (!trialPlan.IsActive)
