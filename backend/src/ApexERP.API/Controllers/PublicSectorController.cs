@@ -15,6 +15,7 @@ namespace ApexERP.API.Controllers
     public record SubmitBidRequest(Guid VendorId, decimal PriceAmount);
     public record ScoreBidRequest(decimal PriceScore, decimal TechnicalScore, decimal LocalContentScore, decimal PriceWeight, decimal TechnicalWeight, decimal LocalContentWeight);
     public record AwardTenderRequest(Guid WinningVendorId, string Justification);
+    public record SubmitTenderAwardApprovalRequest(Guid WinningVendorId);
     public record RecordScanRequest(string ScannedTagValue, string? ConditionNotes);
 
     [Route("api/v1/public-sector")]
@@ -119,6 +120,14 @@ namespace ApexERP.API.Controllers
                     req.PriceWeight, req.TechnicalWeight, req.LocalContentWeight);
                 return Ok(bid);
             }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("tenders/{id}/award/submit-for-approval")]
+        [HasPermission(Permissions.PublicSectorTendersAward)]
+        public async Task<IActionResult> SubmitTenderAwardForApproval(Guid id, SubmitTenderAwardApprovalRequest req)
+        {
+            try { return Ok(await _tender.SubmitAwardForApprovalAsync(CompanyId, id, req.WinningVendorId, UserId)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
