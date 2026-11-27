@@ -245,7 +245,7 @@ public sealed class SupplyChainIntegrationTests
     }
 
     [PostgresFact]
-    public async Task AP_invoice_inherits_fund_centre_grant_and_active_commitment_from_its_po()
+    public async Task AP_invoice_inherits_fund_centre_and_active_commitment_from_its_po()
     {
         await using var db = await TestDb.CreateAsync();
         var companyId = Guid.NewGuid();
