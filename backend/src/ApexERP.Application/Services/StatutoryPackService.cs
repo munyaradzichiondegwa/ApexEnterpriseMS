@@ -211,7 +211,7 @@ public sealed class StatutoryPackService
             }
           },
           "nssa": {
-            "USD": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 700, "effectiveFrom": "2026-11-27", "effectiveTo": null, "verifiedAsOf": "2026-11-27" }
+            "USD": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 700, "effectiveFrom": "2026-11-27", "effectiveTo": "2026-12-31", "verifiedAsOf": "2026-11-27" }
           },
           "corporateIncomeTax": {
             "standardCompanyOrTrustRate": 0.25,
