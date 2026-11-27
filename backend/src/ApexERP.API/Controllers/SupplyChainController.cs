@@ -1,4 +1,5 @@
 using ApexERP.Application.Services;
+using ApexERP.Application.Security;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -50,15 +51,25 @@ namespace ApexERP.API.Controllers
         /// (encumbrance) immediately -- Available Budget drops right away, before any invoice exists
         /// (PRD Module 16).</summary>
         [HttpPost("purchase-orders/{id}/approve")]
-        public async Task<IActionResult> ApprovePo(Guid id, [FromQuery] bool allowBudgetOverride = false)
+        public async Task<IActionResult> ApprovePo(Guid id, [FromQuery] bool allowBudgetOverride = false,
+            [FromQuery] string? overrideReason = null, CancellationToken ct = default)
         {
+            if (allowBudgetOverride && !HasPermission(Permissions.PublicSectorBudgetOverride))
+                return Forbid();
+            if (allowBudgetOverride && string.IsNullOrWhiteSpace(overrideReason))
+                return BadRequest(new { error = "An override justification is required." });
+
             try
             {
-                var po = await _sc.ApproveAsync(CompanyId, id, UserId);
-
-                if (po.FundCentreId.HasValue)
-                    await _publicSector.CommitAsync(CompanyId, po.FundCentreId.Value, po.Id, po.Total, allowBudgetOverride);
-
+                var po = await _db.InTransactionAsync(async token =>
+                {
+                    var approved = await _sc.ApproveAsync(CompanyId, id, UserId, token);
+                    if (approved.FundCentreId.HasValue)
+                        await _publicSector.CommitAsync(CompanyId, approved.FundCentreId.Value, approved.Id, approved.Total,
+                            allowBudgetOverride, overrideReason, UserId,
+                            HttpContext.Connection.RemoteIpAddress?.ToString(), token);
+                    return approved;
+                }, ct);
                 return Ok(po);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
