@@ -181,7 +181,8 @@ namespace ApexERP.Application.Services
         {
             var now = DateTime.UtcNow;
             var dueIds = await _db.IntegrationMessages
-                .Where(m => m.CompanyId == companyId && m.Status == "Failed" &&
+                .Where(m => m.CompanyId == companyId &&
+                    (m.Status == "Failed" || m.Status == "Processing") &&
                     m.NextAttemptAt != null && m.NextAttemptAt <= now)
                 .OrderBy(m => m.NextAttemptAt)
                 .Select(m => m.Id)
@@ -194,11 +195,12 @@ namespace ApexERP.Application.Services
                 // Atomic compare-and-set claim: multiple scheduler instances may see the same
                 // due IDs, but only one can move a message from Failed to Processing.
                 var claimed = await _db.IntegrationMessages
-                    .Where(m => m.Id == id && m.CompanyId == companyId && m.Status == "Failed" &&
+                    .Where(m => m.Id == id && m.CompanyId == companyId &&
+                        (m.Status == "Failed" || m.Status == "Processing") &&
                         m.NextAttemptAt != null && m.NextAttemptAt <= now)
                     .ExecuteUpdateAsync(setters => setters
                         .SetProperty(m => m.Status, "Processing")
-                        .SetProperty(m => m.NextAttemptAt, (DateTime?)null), ct);
+                        .SetProperty(m => m.NextAttemptAt, now.AddMinutes(10)), ct);
                 if (claimed == 0) continue;
 
                 var message = await _db.IntegrationMessages
