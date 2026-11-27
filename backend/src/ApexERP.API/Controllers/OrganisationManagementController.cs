@@ -30,6 +30,56 @@ public sealed class OrganisationManagementController : ApiControllerBase
 
     private IActionResult? DenyManagement() => CanManage ? null : Forbid();
 
+
+    [HttpGet("subscription")]
+    [AuthenticatedOnly]
+    public async Task<IActionResult> Subscription(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant self-service: view subscription and usage");
+        var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId)
+            .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+        if (sub is null) return NotFound();
+        var plan = await _db.SubscriptionPlans.SingleOrDefaultAsync(x => x.Id == sub.PlanId, ct);
+        var companies = await _db.Companies.IgnoreQueryFilters().CountAsync(x => x.TenantId == TenantId && x.IsActive, ct);
+        var seats = await _db.CompanyMemberships.IgnoreQueryFilters()
+            .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
+            .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
+        return Ok(new { subscriptionId = sub.Id, status = sub.Status, plan = plan == null ? null : new {
+            plan.Code, plan.Name, plan.MaxSeats, plan.MaxCompanies, plan.ModuleCodesJson, plan.MonthlyPrice, plan.Currency },
+            trialEndsAt = sub.TrialEndsAt, currentPeriodEndsAt = sub.CurrentPeriodEndsAt,
+            suspendedAt = sub.SuspendedAt, cancelledAt = sub.CancelledAt,
+            usage = new { seats, companyCount = companies },
+            limits = new { seats = sub.SeatOverride > 0 ? sub.SeatOverride : plan?.MaxSeats,
+                companies = sub.CompanyOverride > 0 ? sub.CompanyOverride : plan?.MaxCompanies } });
+    }
+
+    [HttpGet("subscription/plans")]
+    [AuthenticatedOnly]
+    public async Task<IActionResult> AvailablePlans(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant self-service: list available plans");
+        return Ok(await _db.SubscriptionPlans.AsNoTracking().Where(x => x.IsActive && x.IsPubliclyAvailable)
+            .OrderBy(x => x.MonthlyPrice).Select(x => new { x.Id, x.Code, x.Name, x.Description,
+                x.MaxSeats, x.MaxCompanies, x.ModuleCodesJson, x.MonthlyPrice, x.Currency }).ToListAsync(ct));
+    }
+
+    [HttpPost("subscription/renewal-request")]
+    public async Task<IActionResult> RequestSubscriptionRenewal(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant self-service: request subscription renewal");
+        var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId)
+            .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+        if (sub is null) return NotFound();
+        if (sub.Status == "Cancelled") return Conflict(new { error = "A cancelled subscription must be reactivated by the platform administrator." });
+        var pending = await _db.TenantLifecycleJobs.AnyAsync(x => x.TenantId == TenantId &&
+            x.JobType == "Renewal" && (x.Status == "Queued" || x.Status == "AwaitingProvider" || x.Status == "Dispatching" || x.Status == "Dispatched" || x.Status == "Running"), ct);
+        if (pending) return Conflict(new { error = "A renewal request is already pending." });
+        var job = new TenantLifecycleJob { TenantId = TenantId, JobType = "Renewal", RequestedBy = UserId.ToString(), Status = "AwaitingProvider" };
+        _db.TenantLifecycleJobs.Add(job);
+        await _db.SaveChangesAsync(ct);
+        return Accepted(new { requestId = job.Id, status = job.Status });
+    }
+
     [HttpGet("companies")]
     public async Task<IActionResult> Companies(CancellationToken ct)
     {
