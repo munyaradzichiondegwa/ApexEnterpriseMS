@@ -120,7 +120,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             return BadRequest(new { error = "The parent company must be an active legal entity in this tenant." });
 
         var sourceRoles = await _db.Roles.IgnoreQueryFilters().Where(x => x.CompanyId == CompanyId).AsNoTracking().ToListAsync(ct);
-        if (sourceRoles.Count == 0) sourceRoles.Add(new Role { CompanyId = CompanyId, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\\"*\\"]" });
+        if (sourceRoles.Count == 0) sourceRoles.Add(new Role { CompanyId = CompanyId, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\"*\"]" });
         var company = new Company
         {
             TenantId = TenantId, Name = request.Name.Trim(), RegistrationNo = request.RegistrationNo,
