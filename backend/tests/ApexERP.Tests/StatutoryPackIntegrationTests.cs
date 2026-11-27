@@ -1,6 +1,7 @@
 using ApexERP.Application.Services;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using Xunit;
 
