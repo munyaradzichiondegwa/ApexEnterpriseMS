@@ -127,6 +127,7 @@ builder.Services.AddScoped<PeriodCloseService>();
 builder.Services.AddScoped<EvidenceService>();
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<StatutoryRateService>();
+builder.Services.AddScoped<StatutoryPackService>();
 builder.Services.AddScoped<IntegrationService>();
 builder.Services.AddHostedService<ApexERP.API.Jobs.ScheduledJobRunner>();
 
