@@ -98,17 +98,23 @@ namespace ApexERP.Application.Services
         }
 
         /// <summary>Moves an expired open tender into evaluation. The server clock is authoritative.</summary>
-        public async Task<TenderNotice> BeginEvaluationAsync(Guid companyId, Guid tenderNoticeId, CancellationToken ct = default)
+        public Task<TenderNotice> BeginEvaluationAsync(Guid companyId, Guid tenderNoticeId, CancellationToken ct = default)
         {
-            var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Tender notice not found.");
-            if (tender.Status != TenderStatus.Open)
-                throw new InvalidOperationException("Only an open tender can enter evaluation.");
-            if (DateTime.UtcNow <= tender.SubmissionDeadline)
-                throw new InvalidOperationException("Tender evaluation cannot begin before the submission deadline.");
-            tender.Status = TenderStatus.Evaluation;
-            await _db.SaveChangesAsync(ct);
-            return tender;
+            return _db.InTransactionAsync(async token =>
+            {
+                // Uses the same lock as SubmitBidAsync: no bid can pass the open-state check
+                // concurrently with the tender moving into evaluation.
+                await _db.AcquireTransactionLockAsync($"tender-submission:{companyId:N}:{tenderNoticeId:N}", token);
+                var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Tender notice not found.");
+                if (tender.Status != TenderStatus.Open)
+                    throw new InvalidOperationException("Only an open tender can enter evaluation.");
+                if (DateTime.UtcNow <= tender.SubmissionDeadline)
+                    throw new InvalidOperationException("Tender evaluation cannot begin before the submission deadline.");
+                tender.Status = TenderStatus.Evaluation;
+                await _db.SaveChangesAsync(token);
+                return tender;
+            }, ct);
         }
 
         /// <summary>Scores a bid on price/technical/local-content criteria (weights configurable per
