@@ -163,7 +163,7 @@ public sealed class StatutoryPackService
         {
           "packKind": "tax-baseline",
           "coverage": "baseline-only",
-          "approvalNotice": "DRAFT ONLY. Do not activate for statutory calculations or filing until reviewed and approved. NSSA ZWG insurable ceiling and APWCS industry-specific premiums are not included. VAT exemptions, zero-rated schedules, withholding taxes, customs, capital allowances, tax credits, special regimes and filing-specific edge cases are not fully represented.",
+          "approvalNotice": "DRAFT ONLY. Do not activate for statutory calculations or filing until reviewed and approved. NSSA ZWG insurable ceiling and age-65 exemption handling, APWCS industry-specific premiums, VAT zero-rated/exempt schedules, withholding taxes, customs, capital allowances, tax credits, special regimes and filing-specific edge cases are not fully represented.",
           "effectiveCurrencySet": ["USD", "ZWG"],
           "paye": {
             "aidsLevyRate": 0.03,
