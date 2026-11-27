@@ -208,8 +208,7 @@ namespace ApexERP.Application.Services
 
             var winningVendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == winningVendorId && v.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("The selected vendor is no longer registered in this company.");
-            if (!winningVendor.IsApproved)
-                throw new InvalidOperationException("A vendor whose approval has been revoked cannot receive a tender award.");
+            EnsureVendorEligible(winningVendor);
             var eligibleBids = await _db.TenderBids
                 .Where(b => b.CompanyId == companyId && b.TenderNoticeId == tenderNoticeId && !b.IsLateRejected)
                 .ToListAsync(ct);
