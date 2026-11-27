@@ -294,6 +294,24 @@ public sealed class OrganisationManagementController : ApiControllerBase
         return Ok(new { deactivated = true, branchId });
     }
 
+    [HttpGet("companies/{companyId:guid}/segments")]
+    public async Task<IActionResult> CompanySegments(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: list company segments");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        return Ok(await _db.Segments.IgnoreQueryFilters().AsNoTracking().Where(x => x.CompanyId == companyId)
+            .OrderBy(x => x.Code).Select(x => new { x.Id, x.Code, x.Name, x.IsActive }).ToListAsync(ct));
+    }
+
+    [HttpGet("companies/{companyId:guid}/employees")]
+    public async Task<IActionResult> CompanyEmployees(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: list company employees");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        return Ok(await _db.Employees.IgnoreQueryFilters().AsNoTracking().Where(x => x.CompanyId == companyId)
+            .OrderBy(x => x.EmployeeNo).Select(x => new { x.Id, x.EmployeeNo, x.FirstName, x.LastName, x.IsActive }).ToListAsync(ct));
+    }
+
     [HttpGet("companies/{companyId:guid}/departments")]
     public async Task<IActionResult> Departments(Guid companyId, CancellationToken ct)
     {
@@ -367,7 +385,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         department.Name = name;
         department.BranchId = request.BranchId;
         department.CostCentreId = request.CostCentreId;
-        department.ManagerId = request.ManagerId ?? department.ManagerId;
+        department.ManagerId = request.ClearManager ? null : request.ManagerId ?? department.ManagerId;
         await _db.SaveChangesAsync(ct);
         return Ok(new { department.Id, department.Name, department.BranchId, department.CostCentreId, department.ManagerId, department.IsActive });
     }
@@ -477,7 +495,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
                 return BadRequest(new { error = "A child cost centre must use the same branch as its parent." });
         }
         centre.Code = code; centre.Name = request.Name.Trim(); centre.ParentId = request.ParentId;
-        centre.BranchId = request.BranchId; centre.SegmentId = request.SegmentId ?? centre.SegmentId;
+        centre.BranchId = request.BranchId; centre.SegmentId = request.ClearSegment ? null : request.SegmentId ?? centre.SegmentId;
         await _db.SaveChangesAsync(ct);
         return Ok(new { centre.Id, centre.Code, centre.Name, centre.ParentId, centre.BranchId, centre.SegmentId, centre.IsActive });
     }
@@ -767,8 +785,8 @@ public sealed record AssignBranchRequest(Guid? BranchId);
 public sealed record CreateDepartmentRequest(string Name, Guid? BranchId = null, Guid? CostCentreId = null, Guid? ManagerId = null);
 public sealed record CreateCostCentreRequest(string Code, string Name, Guid? ParentId = null, Guid? BranchId = null, Guid? SegmentId = null);
 public sealed record UpdateBranchRequest(string Code, string Name, Guid? ParentBranchId = null);
-public sealed record UpdateDepartmentRequest(string Name, Guid? BranchId = null, Guid? CostCentreId = null, Guid? ManagerId = null);
-public sealed record UpdateCostCentreRequest(string Code, string Name, Guid? ParentId = null, Guid? BranchId = null, Guid? SegmentId = null);
+public sealed record UpdateDepartmentRequest(string Name, Guid? BranchId = null, Guid? CostCentreId = null, Guid? ManagerId = null, bool ClearManager = false);
+public sealed record UpdateCostCentreRequest(string Code, string Name, Guid? ParentId = null, Guid? BranchId = null, Guid? SegmentId = null, bool ClearSegment = false);
 public sealed record AddCompanyMemberRequest(Guid UserId, Guid RoleId);
 public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
