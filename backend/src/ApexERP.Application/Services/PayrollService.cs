@@ -18,11 +18,8 @@ namespace ApexERP.Application.Services
         private readonly ApexErpDbContext _db;
         private readonly GlPostingService _gl;
 
-        // Official NSSA POBS USD baseline: 4.5% employee + 4.5% employer, capped at USD 700.
-        // Other currencies require an approved, effective-dated StatutoryRate; never reuse a USD ceiling.
-        private const decimal NssaUsdInsurableCeiling = 700m;
-        private const decimal NssaRate = 0.045m;
-        private const decimal AidsLevyRate = 0.03m;
+        // Statutory contributions must come from an approved, effective-dated jurisdiction pack.
+        // No hard-coded rate or foreign-currency ceiling is used as a fallback.
 
         public PayrollService(ApexErpDbContext db, GlPostingService gl)
         {
@@ -58,31 +55,27 @@ namespace ApexERP.Application.Services
         public decimal CalculateNssaEmployee(decimal monthlyGross, IReadOnlyList<StatutoryRate>? rates = null, string currency = "USD")
         {
             currency = (currency ?? string.Empty).Trim().ToUpperInvariant();
-            var r = Pick(rates, "NSSA_EMPLOYEE", currency);
-            if (r == null && currency != "USD")
-                throw new InvalidOperationException($"No approved NSSA employee rate and insurable ceiling are configured for {currency}.");
-            var insurable = r != null
-                ? (r.Ceiling.HasValue ? Math.Min(monthlyGross, r.Ceiling.Value) : monthlyGross)
-                : Math.Min(monthlyGross, NssaUsdInsurableCeiling);
-            return Math.Round(insurable * (r != null ? r.RatePct / 100m : NssaRate), 6);
+            var r = Pick(rates, "NSSA_EMPLOYEE", currency)
+                ?? throw new InvalidOperationException($"No approved NSSA employee rate and insurable ceiling are configured for {currency}.");
+            var insurable = r.Ceiling.HasValue ? Math.Min(monthlyGross, r.Ceiling.Value) : monthlyGross;
+            return Math.Round(insurable * r.RatePct / 100m, 6);
         }
 
         public decimal CalculateNssaEmployer(decimal monthlyGross, IReadOnlyList<StatutoryRate>? rates = null, string currency = "USD")
         {
             currency = (currency ?? string.Empty).Trim().ToUpperInvariant();
-            var r = Pick(rates, "NSSA_EMPLOYER", currency);
-            if (r == null && currency != "USD")
-                throw new InvalidOperationException($"No approved NSSA employer rate and insurable ceiling are configured for {currency}.");
-            var insurable = r != null
-                ? (r.Ceiling.HasValue ? Math.Min(monthlyGross, r.Ceiling.Value) : monthlyGross)
-                : Math.Min(monthlyGross, NssaUsdInsurableCeiling);
-            return Math.Round(insurable * (r != null ? r.RatePct / 100m : NssaRate), 6);
+            var r = Pick(rates, "NSSA_EMPLOYER", currency)
+                ?? throw new InvalidOperationException($"No approved NSSA employer rate and insurable ceiling are configured for {currency}.");
+            var insurable = r.Ceiling.HasValue ? Math.Min(monthlyGross, r.Ceiling.Value) : monthlyGross;
+            return Math.Round(insurable * r.RatePct / 100m, 6);
         }
 
         public decimal CalculateAidsLevy(decimal paye, IReadOnlyList<StatutoryRate>? rates = null, string currency = "USD")
         {
-            var r = Pick(rates, "AIDS_LEVY", currency);
-            return Math.Round(paye * (r != null ? r.RatePct / 100m : AidsLevyRate), 6);
+            currency = (currency ?? string.Empty).Trim().ToUpperInvariant();
+            var r = Pick(rates, "AIDS_LEVY", currency)
+                ?? throw new InvalidOperationException($"No approved AIDS Levy rate is configured for {currency}.");
+            return Math.Round(paye * r.RatePct / 100m, 6);
         }
 
         /// <summary>
