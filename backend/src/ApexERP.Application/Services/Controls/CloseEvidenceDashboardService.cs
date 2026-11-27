@@ -364,6 +364,7 @@ namespace ApexERP.Application.Services
             var operations = new
             {
                 IntegrationPending = await _db.IntegrationMessages.CountAsync(m => m.CompanyId == companyId && m.Status == "Pending", ct),
+                IntegrationProcessing = await _db.IntegrationMessages.CountAsync(m => m.CompanyId == companyId && m.Status == "Processing", ct),
                 IntegrationDeadLetter = await _db.IntegrationMessages.CountAsync(m => m.CompanyId == companyId && m.Status == "DeadLetter", ct),
                 BackgroundJobFailures7d = await _db.JobExecutions.CountAsync(j => j.CompanyId == companyId && j.Status == "Failed" && j.StartedAt >= weekAgo, ct),
                 LastJobSuccess = await _db.JobExecutions.Where(j => j.CompanyId == companyId && j.Status == "Succeeded").MaxAsync(j => (DateTime?)j.FinishedAt, ct)
