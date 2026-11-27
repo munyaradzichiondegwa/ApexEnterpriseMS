@@ -2,6 +2,7 @@ using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace ApexERP.Application.Services
 {
@@ -86,28 +87,60 @@ namespace ApexERP.Application.Services
 
         /// <summary>Scores a bid on price/technical/local-content criteria (weights configurable per
         /// call) and rolls them into a total score for the evaluation matrix.</summary>
-        public async Task<TenderBid> ScoreBidAsync(Guid companyId, Guid bidId, decimal priceScore, decimal technicalScore,
+        private sealed record TenderEvaluationWeights(decimal Price, decimal Technical, decimal LocalContent);
+
+        /// <summary>
+        /// Scores every bid against one immutable weighting matrix per tender. The first valid
+        /// scoring operation locks the weights; subsequent bids must use exactly the same matrix.
+        /// </summary>
+        public Task<TenderBid> ScoreBidAsync(Guid companyId, Guid bidId, decimal priceScore, decimal technicalScore,
             decimal localContentScore, decimal priceWeight, decimal technicalWeight, decimal localContentWeight, CancellationToken ct = default)
         {
-            var bid = await _db.TenderBids.FirstOrDefaultAsync(b => b.Id == bidId && b.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Bid not found.");
-            if (bid.IsLateRejected) throw new InvalidOperationException("This bid was submitted after the deadline and cannot be scored.");
-            var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == bid.TenderNoticeId && t.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Tender notice not found.");
-            if (tender.Status != TenderStatus.Evaluation)
-                throw new InvalidOperationException("A tender must be in evaluation before bids can be scored.");
             if (priceScore is < 0 or > 100 || technicalScore is < 0 or > 100 || localContentScore is < 0 or > 100)
                 throw new InvalidOperationException("Each evaluation score must be between 0 and 100.");
             if (priceWeight < 0 || technicalWeight < 0 || localContentWeight < 0 ||
                 Math.Abs(priceWeight + technicalWeight + localContentWeight - 1m) > 0.0001m)
                 throw new InvalidOperationException("Evaluation weights must be non-negative and total exactly 100%.");
 
-            bid.PriceScore = priceScore;
-            bid.TechnicalScore = technicalScore;
-            bid.LocalContentScore = localContentScore;
-            bid.TotalScore = (priceScore * priceWeight) + (technicalScore * technicalWeight) + (localContentScore * localContentWeight);
-            await _db.SaveChangesAsync(ct);
-            return bid;
+            return _db.InTransactionAsync(async token =>
+            {
+                var bid = await _db.TenderBids.FirstOrDefaultAsync(b => b.Id == bidId && b.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Bid not found.");
+                if (bid.IsLateRejected) throw new InvalidOperationException("This bid was submitted after the deadline and cannot be scored.");
+                var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == bid.TenderNoticeId && t.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Tender notice not found.");
+                if (tender.Status != TenderStatus.Evaluation)
+                    throw new InvalidOperationException("A tender must be in evaluation before bids can be scored.");
+
+                await _db.AcquireTransactionLockAsync($"tender-evaluation-weights:{companyId:N}:{tender.Id:N}", token);
+                var settingKey = $"tender.evaluation.weights:{tender.Id:N}";
+                var setting = await _db.CompanySettings.FirstOrDefaultAsync(s => s.CompanyId == companyId && s.Key == settingKey, token);
+                var requested = new TenderEvaluationWeights(priceWeight, technicalWeight, localContentWeight);
+                if (setting == null)
+                {
+                    _db.CompanySettings.Add(new CompanySetting
+                    {
+                        CompanyId = companyId,
+                        Key = settingKey,
+                        Value = JsonSerializer.Serialize(requested)
+                    });
+                }
+                else
+                {
+                    TenderEvaluationWeights? locked;
+                    try { locked = JsonSerializer.Deserialize<TenderEvaluationWeights>(setting.Value); }
+                    catch (JsonException) { throw new InvalidOperationException("The tender's locked evaluation weights are invalid; administrator review is required."); }
+                    if (locked == null || locked != requested)
+                        throw new InvalidOperationException("Evaluation weights are locked by the first scored bid and cannot be changed for this tender.");
+                }
+
+                bid.PriceScore = priceScore;
+                bid.TechnicalScore = technicalScore;
+                bid.LocalContentScore = localContentScore;
+                bid.TotalScore = (priceScore * priceWeight) + (technicalScore * technicalWeight) + (localContentScore * localContentWeight);
+                await _db.SaveChangesAsync(token);
+                return bid;
+            }, ct);
         }
 
         public async Task<TenderNotice> AwardAsync(Guid companyId, Guid tenderNoticeId, Guid winningVendorId, string justification, CancellationToken ct = default)
@@ -125,8 +158,15 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("The selected vendor is no longer registered in this company.");
             if (!winningVendor.IsApproved)
                 throw new InvalidOperationException("A vendor whose approval has been revoked cannot receive a tender award.");
-            if (winningBid.TotalScore <= 0)
-                throw new InvalidOperationException("The selected bid must be evaluated before award.");
+            var eligibleBids = await _db.TenderBids
+                .Where(b => b.CompanyId == companyId && b.TenderNoticeId == tenderNoticeId && !b.IsLateRejected)
+                .ToListAsync(ct);
+            if (eligibleBids.Count == 0 || eligibleBids.Any(b => b.TotalScore <= 0))
+                throw new InvalidOperationException("Every eligible bid must be scored before the tender can be awarded.");
+            var highestRankedBid = eligibleBids.OrderByDescending(b => b.TotalScore)
+                .ThenBy(b => b.PriceAmount).ThenBy(b => b.SubmittedAt).First();
+            if (highestRankedBid.Id != winningBid.Id)
+                throw new InvalidOperationException("The award must go to the highest-scoring eligible bid (lowest price breaks a score tie).");
             tender.Status = TenderStatus.Awarded;
             tender.AwardedVendorId = winningVendorId;
             tender.AwardJustification = justification;
