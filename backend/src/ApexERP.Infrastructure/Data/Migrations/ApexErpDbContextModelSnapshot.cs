@@ -2661,6 +2661,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("ParentId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("BranchId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("SegmentId")
                         .HasColumnType("uuid");
 
@@ -2671,6 +2674,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "BranchId");
 
                     b.ToTable("CostCentres");
                 });
@@ -2857,6 +2862,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("CostCentreId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("BranchId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2883,6 +2891,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "BranchId");
 
                     b.ToTable("Departments");
                 });
