@@ -229,6 +229,7 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.UserId, x.IsActive });
             modelBuilder.Entity<SubscriptionPlan>().HasIndex(x => x.Code).IsUnique();
             modelBuilder.Entity<TenantSubscription>().HasIndex(x => new { x.TenantId, x.Status });
+            modelBuilder.Entity<DeploymentProfile>().HasIndex(x => x.Code).IsUnique();
             modelBuilder.Entity<JurisdictionProfile>().HasIndex(x => x.CountryCode).IsUnique();
             modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => new { x.TenantId, x.CountryCode }).IsUnique();
             modelBuilder.Entity<TenantOnboarding>().HasIndex(x => x.TenantId).IsUnique();
