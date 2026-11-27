@@ -37,7 +37,8 @@ namespace ApexERP.API.Controllers
             if (user == null) return Forbid();
 
             var roleChainIds = _db.ApprovalChainTiers
-                .Where(t => t.ApproverRoleId == user.RoleId)
+                .Where(t => t.ApproverRoleId == user.RoleId &&
+                    _db.ApprovalChains.Any(chain => chain.Id == t.ApprovalChainId && chain.CompanyId == CompanyId))
                 .Select(t => t.ApprovalChainId);
 
             var pending = await _db.WorkflowRequests
