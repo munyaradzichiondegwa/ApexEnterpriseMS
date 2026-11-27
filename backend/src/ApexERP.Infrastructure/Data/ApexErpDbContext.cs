@@ -232,7 +232,7 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<TenantSubscription>().HasIndex(x => new { x.TenantId, x.Status });
             modelBuilder.Entity<DeploymentProfile>().HasIndex(x => x.Code).IsUnique();
             modelBuilder.Entity<JurisdictionProfile>().HasIndex(x => x.CountryCode).IsUnique();
-            modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => new { x.TenantId, x.CountryCode }).IsUnique();
+            modelBuilder.Entity<TenantJurisdiction>().HasIndex(x => new { x.TenantId, x.CompanyId, x.CountryCode }).IsUnique();
             modelBuilder.Entity<TenantOnboarding>().HasIndex(x => x.TenantId).IsUnique();
             modelBuilder.Entity<TenantAdministratorInvitation>().HasIndex(x => x.TokenHash).IsUnique();
             modelBuilder.Entity<CompanyUserInvitation>().HasIndex(x => x.TokenHash).IsUnique();
