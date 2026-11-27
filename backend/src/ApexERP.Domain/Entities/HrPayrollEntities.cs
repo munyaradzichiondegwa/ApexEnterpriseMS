@@ -7,6 +7,7 @@ namespace ApexERP.Domain.Entities
     public class Department : TenantEntity
     {
         public string Name { get; set; } = string.Empty;
+        public bool IsActive { get; set; } = true;
         public Guid? ManagerId { get; set; }
         public Guid? CostCentreId { get; set; }
         public Guid? BranchId { get; set; }
