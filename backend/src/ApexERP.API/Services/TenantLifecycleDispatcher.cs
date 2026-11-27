@@ -15,7 +15,7 @@ namespace ApexERP.API.Services;
 public sealed class TenantLifecycleDispatcher : BackgroundService
 {
     private const int DispatchLeaseMinutes = 10;
-    private const int MaxDispatchAttempts = 8;
+    public const int MaxDispatchAttempts = 8;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHttpClientFactory _clients;
     private readonly IConfiguration _configuration;
@@ -112,9 +112,8 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
             }
             else
             {
-                var transientFailure = (int)response.StatusCode >= 500 ||
-                    response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
-                var retryAllowed = transientFailure && current.DispatchAttempts < MaxDispatchAttempts;
+                var transientFailure = IsTransientFailure(response.StatusCode);
+                var retryAllowed = ShouldRetry(response.StatusCode, current.DispatchAttempts);
                 current.Status = retryAllowed ? "Queued" : "Failed";
                 current.CompletedAt = retryAllowed ? null : DateTime.UtcNow;
                 current.StartedAt = DateTime.UtcNow;
@@ -135,7 +134,7 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
             {
                 // Dispatch is at-least-once: the worker must deduplicate on the stable jobId in
                 // the signed payload because a timeout can occur after the worker accepted it.
-                var retryAllowed = current.DispatchAttempts < MaxDispatchAttempts;
+                var retryAllowed = HasAttemptsRemaining(current.DispatchAttempts);
                 current.Status = retryAllowed ? "Queued" : "Failed";
                 current.StartedAt = DateTime.UtcNow;
                 current.CompletedAt = retryAllowed ? null : DateTime.UtcNow;
@@ -149,6 +148,16 @@ public sealed class TenantLifecycleDispatcher : BackgroundService
             _logger.LogError(ex, "Unable to dispatch tenant lifecycle job {JobId}.", job.Id);
         }
     }
+
+    public static bool IsTransientFailure(HttpStatusCode statusCode) =>
+        (int)statusCode >= 500 ||
+        statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
+
+    public static bool HasAttemptsRemaining(int dispatchAttempts) =>
+        dispatchAttempts >= 0 && dispatchAttempts < MaxDispatchAttempts;
+
+    public static bool ShouldRetry(HttpStatusCode statusCode, int dispatchAttempts) =>
+        IsTransientFailure(statusCode) && HasAttemptsRemaining(dispatchAttempts);
 
     public static string Sign(string secret, string value) =>
         Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(value)));
