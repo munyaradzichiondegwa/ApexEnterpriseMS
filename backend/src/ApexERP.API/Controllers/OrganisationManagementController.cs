@@ -141,7 +141,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         }
         var currentRoleId = Guid.TryParse(User.FindFirst("role_id")?.Value, out var rid) ? rid : sourceRoles.FirstOrDefault(x => x.Name == User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value)?.Id;
         Guid? targetRole = currentRoleId.HasValue && roleMap.TryGetValue(currentRoleId.Value, out var mapped)
-            ? mapped : roleMap.Values.Cast<Guid?>().FirstOrDefault();
+            ? mapped : roleMap.Values.Select(x => (Guid?)x).FirstOrDefault();
         if (targetRole == Guid.Empty) targetRole = null;
         _db.CompanyMemberships.Add(new CompanyMembership
         {
