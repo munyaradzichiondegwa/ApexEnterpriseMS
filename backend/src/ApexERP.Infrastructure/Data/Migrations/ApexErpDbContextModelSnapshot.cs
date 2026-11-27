@@ -66,6 +66,28 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("OrganisationalBranches");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.CompanyUserInvitation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("TenantId").HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("RoleId").HasColumnType("uuid");
+                    b.Property<string>("Email").IsRequired().HasColumnType("text");
+                    b.Property<string>("TokenHash").IsRequired().HasColumnType("text");
+                    b.Property<DateTime>("ExpiresAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid>("InvitedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("AcceptedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("AcceptedUserId").HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("TokenHash").IsUnique();
+                    b.HasIndex("TenantId", "Email", "AcceptedAt");
+                    b.ToTable("CompanyUserInvitations");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.CompanyMembership", b =>
                 {
                     b.Property<Guid>("Id")
