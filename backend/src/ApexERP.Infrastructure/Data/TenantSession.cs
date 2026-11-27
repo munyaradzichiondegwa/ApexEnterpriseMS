@@ -17,17 +17,18 @@ namespace ApexERP.Infrastructure.Data
     {
         public static bool Enabled { get; set; }
 
-        internal static (string CompanyId, string TenantId, string Bypass) ValuesFor(ApexErpDbContext db) =>
+        internal static (string CompanyId, string TenantId, string UserId, string Bypass) ValuesFor(ApexErpDbContext db) =>
             (db.CurrentCompanyId?.ToString() ?? string.Empty,
              db.CurrentTenantId?.ToString() ?? string.Empty,
+             db.CurrentUserId?.ToString() ?? string.Empty,
              db.AllowSystemAccess || db.AllowCrossTenant ? "on" : "off");
 
-        public const string Sql = "SELECT set_config('app.company_id', @c, false), set_config('app.tenant_id', @t, false), set_config('app.rls_bypass', @b, false)";
+        public const string Sql = "SELECT set_config('app.company_id', @c, false), set_config('app.tenant_id', @t, false), set_config('app.user_id', @u, false), set_config('app.rls_bypass', @b, false)";
 
         // Settings are session-scoped because ordinary read requests are not wrapped in transactions.
         // The interceptor re-stamps every pooled connection checkout and clears the session before it
         // is returned to Npgsql's pool, so a previous request's identity or bypass cannot survive reuse.
-        public const string ResetSql = "SELECT set_config('app.company_id', '', false), set_config('app.tenant_id', '', false), set_config('app.rls_bypass', 'off', false)";
+        public const string ResetSql = "SELECT set_config('app.company_id', '', false), set_config('app.tenant_id', '', false), set_config('app.user_id', '', false), set_config('app.rls_bypass', 'off', false)";
 
         internal static void Clear(DbConnection connection)
         {
@@ -47,19 +48,19 @@ namespace ApexERP.Infrastructure.Data
 
         internal static void Apply(DbConnection connection, ApexErpDbContext db)
         {
-            var (company, tenant, bypass) = ValuesFor(db);
+            var (company, tenant, user, bypass) = ValuesFor(db);
             using var cmd = connection.CreateCommand();
             cmd.CommandText = Sql;
-            AddParam(cmd, "@c", company); AddParam(cmd, "@t", tenant); AddParam(cmd, "@b", bypass);
+            AddParam(cmd, "@c", company); AddParam(cmd, "@t", tenant); AddParam(cmd, "@u", user); AddParam(cmd, "@b", bypass);
             cmd.ExecuteNonQuery();
         }
 
         internal static async Task ApplyAsync(DbConnection connection, ApexErpDbContext db, CancellationToken ct)
         {
-            var (company, tenant, bypass) = ValuesFor(db);
+            var (company, tenant, user, bypass) = ValuesFor(db);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = Sql;
-            AddParam(cmd, "@c", company); AddParam(cmd, "@t", tenant); AddParam(cmd, "@b", bypass);
+            AddParam(cmd, "@c", company); AddParam(cmd, "@t", tenant); AddParam(cmd, "@u", user); AddParam(cmd, "@b", bypass);
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
@@ -72,15 +73,15 @@ namespace ApexERP.Infrastructure.Data
         public static async Task RefreshAsync(ApexErpDbContext db, CancellationToken ct = default)
         {
             if (!Enabled) return;
-            var (company, tenant, bypass) = ValuesFor(db);
-            await db.Database.ExecuteSqlRawAsync(Sql.Replace("@c", "{0}").Replace("@t", "{1}").Replace("@b", "{2}"), new object[] { company, tenant, bypass }, ct);
+            var (company, tenant, user, bypass) = ValuesFor(db);
+            await db.Database.ExecuteSqlRawAsync(Sql.Replace("@c", "{0}").Replace("@t", "{1}").Replace("@u", "{2}").Replace("@b", "{3}"), new object[] { company, tenant, user, bypass }, ct);
         }
 
         public static void RefreshSync(ApexErpDbContext db)
         {
             if (!Enabled) return;
-            var (company, tenant, bypass) = ValuesFor(db);
-            db.Database.ExecuteSqlRaw(Sql.Replace("@c", "{0}").Replace("@t", "{1}").Replace("@b", "{2}"), company, tenant, bypass);
+            var (company, tenant, user, bypass) = ValuesFor(db);
+            db.Database.ExecuteSqlRaw(Sql.Replace("@c", "{0}").Replace("@t", "{1}").Replace("@u", "{2}").Replace("@b", "{3}"), company, tenant, user, bypass);
         }
 
         /// <summary>
