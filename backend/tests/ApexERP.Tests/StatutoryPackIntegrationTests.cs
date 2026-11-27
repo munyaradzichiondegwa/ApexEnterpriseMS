@@ -1,12 +1,42 @@
 using ApexERP.Application.Services;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
+using System.Text.Json;
 using Xunit;
 
 namespace ApexERP.Tests;
 
 public sealed class StatutoryPackIntegrationTests
 {
+    [PostgresFact]
+    public async Task Zimbabwe_2026_baseline_is_imported_as_unapproved_draft_with_official_sources()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var companyId = Guid.NewGuid();
+        await using (var seed = db.NewContext(companyId))
+        {
+            seed.Companies.Add(new Company
+            {
+                Id = companyId, Name = "Zimbabwe Statutory Baseline",
+                BaseCurrency = "USD", FunctionalCurrency = "USD"
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var ctx = db.NewContext(companyId);
+        var service = new StatutoryPackService(ctx, new AuditService(ctx));
+        var draft = await service.CreateZimbabwe2026BaselineDraftAsync(companyId, Guid.NewGuid());
+        Assert.Equal("ZW", draft.JurisdictionCode);
+        Assert.Equal(1, draft.Version);
+        Assert.Equal("Draft", draft.Status);
+        Assert.Equal(new DateTime(2026, 1, 1), draft.EffectiveFrom);
+        Assert.Equal(5, draft.Sources.Count);
+        using var rules = JsonDocument.Parse(draft.RulesJson);
+        Assert.Equal(0.155m, rules.RootElement.GetProperty("vat").GetProperty("standardRate").GetDecimal());
+        Assert.Equal(0.03m, rules.RootElement.GetProperty("paye").GetProperty("aidsLevyRate").GetDecimal());
+        Assert.Equal("baseline-only", rules.RootElement.GetProperty("coverage").GetString());
+    }
+
     [PostgresFact]
     public async Task Statutory_pack_requires_independent_review_approval_and_publication()
     {
