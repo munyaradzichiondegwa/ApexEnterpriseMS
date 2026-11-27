@@ -327,6 +327,17 @@ namespace ApexERP.Tests
                     new GlAccount { CompanyId = companyA1, Code = "RLS1000", Name = "A1 Cash", Type = GlAccountType.Asset },
                     new GlAccount { CompanyId = companyA2, Code = "RLS1000", Name = "A2 Cash", Type = GlAccountType.Asset },
                     new GlAccount { CompanyId = companyB1, Code = "RLS1000", Name = "B1 Cash", Type = GlAccountType.Asset });
+                seed.AuditEvidenceReferences.AddRange(
+                    new AuditEvidenceReference { CompanyId = companyA1, EntityType = "JournalEntry", EntityId = Guid.NewGuid(), FileName = "a1.pdf", ContentType = "application/pdf", Content = new byte[] { 1 }, SizeBytes = 1, Sha256 = "A1" },
+                    new AuditEvidenceReference { CompanyId = companyA2, EntityType = "JournalEntry", EntityId = Guid.NewGuid(), FileName = "a2.pdf", ContentType = "application/pdf", Content = new byte[] { 2 }, SizeBytes = 1, Sha256 = "A2" },
+                    new AuditEvidenceReference { CompanyId = companyB1, EntityType = "JournalEntry", EntityId = Guid.NewGuid(), FileName = "b1.pdf", ContentType = "application/pdf", Content = new byte[] { 3 }, SizeBytes = 1, Sha256 = "B1" });
+                seed.JobExecutions.AddRange(
+                    new JobExecution { CompanyId = companyA1, JobCode = "rls.probe", RunKey = "A1" },
+                    new JobExecution { CompanyId = companyA2, JobCode = "rls.probe", RunKey = "A2" },
+                    new JobExecution { CompanyId = companyB1, JobCode = "rls.probe", RunKey = "B1" });
+                seed.TenantLifecycleJobs.AddRange(
+                    new TenantLifecycleJob { TenantId = tenantA, JobType = "RLS probe", RequestedBy = "test", Status = "Queued" },
+                    new TenantLifecycleJob { TenantId = tenantB, JobType = "RLS probe", RequestedBy = "test", Status = "Queued" });
                 await seed.SaveChangesAsync();
             }
 
@@ -386,6 +397,9 @@ namespace ApexERP.Tests
                 Assert.Equal(1L, await CountAsync("GlAccounts"));                // only the selected company
                 Assert.Equal(1L, await CountAsync("TenantSubscriptions"));      // tenant-only records follow tenant identity
                 Assert.Equal(1L, await CountAsync("TenantJurisdictions"));      // tenant + selected company
+                Assert.Equal(1L, await CountAsync("AuditEvidenceReferences"));    // uploaded file bytes are company-scoped
+                Assert.Equal(1L, await CountAsync("JobExecutions"));               // scheduled-job execution records are company-scoped
+                Assert.Equal(1L, await CountAsync("TenantLifecycleJobs"));         // platform worker queue is tenant-scoped
 
                 await SetContextAsync(tenantA, companyA2);
                 Assert.Equal(2L, await CountAsync("Companies"));
@@ -393,6 +407,9 @@ namespace ApexERP.Tests
                 Assert.Equal(1L, await CountAsync("GlAccounts"));                // company A2 only
                 Assert.Equal(1L, await CountAsync("TenantSubscriptions"));
                 Assert.Equal(1L, await CountAsync("TenantJurisdictions"));
+                Assert.Equal(1L, await CountAsync("AuditEvidenceReferences"));
+                Assert.Equal(1L, await CountAsync("JobExecutions"));
+                Assert.Equal(1L, await CountAsync("TenantLifecycleJobs"));
 
                 // A user can see their own identity in another company only while an active membership exists.
                 await SetContextAsync(tenantA, companyA2, memberUserId);
@@ -416,6 +433,9 @@ namespace ApexERP.Tests
                 Assert.Equal(0L, await CountAsync("GlAccounts"));                // A1 does not belong to tenant B
                 Assert.Equal(1L, await CountAsync("TenantSubscriptions"));
                 Assert.Equal(0L, await CountAsync("TenantJurisdictions"));
+                Assert.Equal(0L, await CountAsync("AuditEvidenceReferences"));
+                Assert.Equal(0L, await CountAsync("JobExecutions"));
+                Assert.Equal(0L, await CountAsync("TenantLifecycleJobs"));
 
                 await SetContextAsync(null, null, bypass: true);
                 Assert.Equal(3L, await CountAsync("Companies"));
@@ -423,6 +443,9 @@ namespace ApexERP.Tests
                 Assert.Equal(3L, await CountAsync("GlAccounts"));
                 Assert.Equal(2L, await CountAsync("TenantSubscriptions"));
                 Assert.Equal(3L, await CountAsync("TenantJurisdictions"));
+                Assert.Equal(3L, await CountAsync("AuditEvidenceReferences"));
+                Assert.Equal(3L, await CountAsync("JobExecutions"));
+                Assert.Equal(2L, await CountAsync("TenantLifecycleJobs"));
 
                 await using var flags = connection.CreateCommand();
                 flags.CommandText = @"SELECT COUNT(*), bool_and(relrowsecurity), bool_and(relforcerowsecurity)
