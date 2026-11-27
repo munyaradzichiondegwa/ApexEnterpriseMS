@@ -46,6 +46,18 @@ namespace ApexERP.Application.Services
                 using var scope = root.CreateScope();
                 var sp = scope.ServiceProvider;
                 var db = sp.GetRequiredService<ApexErpDbContext>();
+
+                // Resolve and revalidate the owning tenant for each isolated job context.
+                // This also prevents a company deactivated after the scheduler's initial scan
+                // from receiving work, and supplies both identities required by tenant RLS.
+                var tenantId = await db.Companies.IgnoreQueryFilters()
+                    .Where(c => c.Id == companyId && c.IsActive && c.TenantId.HasValue &&
+                                c.Tenant != null && c.Tenant.IsActive)
+                    .Select(c => c.TenantId)
+                    .SingleOrDefaultAsync(ct);
+                if (!tenantId.HasValue) continue;
+
+                db.CurrentTenantId = tenantId.Value;
                 db.CurrentCompanyId = companyId;
                 var key = job.RunKey(nowUtc);
 
