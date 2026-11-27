@@ -200,9 +200,15 @@ namespace ApexERP.Application.Services
             {
                 // The posting transaction has rolled back. Persist the retry/dead-letter outcome
                 // separately so a failed posting never leaves a half-written ledger transaction.
-                msg.LastError = ex.Message[..Math.Min(ex.Message.Length, 2000)];
-                msg.NextAttemptAt = WebhookSignature.NextAttempt(msg.Attempts - 1, DateTime.UtcNow);
-                msg.Status = msg.NextAttemptAt == null ? "DeadLetter" : "Failed";
+                _db.ChangeTracker.Clear();
+                var failedMessage = await _db.IntegrationMessages.IgnoreQueryFilters()
+                    .SingleOrDefaultAsync(m => m.Id == msg.Id && m.CompanyId == msg.CompanyId, ct);
+                if (failedMessage == null) return;
+
+                failedMessage.Attempts = msg.Attempts;
+                failedMessage.LastError = ex.Message[..Math.Min(ex.Message.Length, 2000)];
+                failedMessage.NextAttemptAt = WebhookSignature.NextAttempt(failedMessage.Attempts - 1, DateTime.UtcNow);
+                failedMessage.Status = failedMessage.NextAttemptAt == null ? "DeadLetter" : "Failed";
                 await _db.SaveChangesAsync(ct);
             }
         }
