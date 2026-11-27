@@ -265,8 +265,8 @@ namespace ApexERP.Tests
                     new Company { Id = companyA1, TenantId = tenantA, Name = "RLS A1" },
                     new Company { Id = companyA2, TenantId = tenantA, Name = "RLS A2" },
                     new Company { Id = companyB1, TenantId = tenantB, Name = "RLS B1" });
-                var homeRole = new Role { CompanyId = companyA1, Name = "Home role", IsSystemRole = true, PermissionsJson = "[\\"*\\"]" };
-                var subsidiaryRole = new Role { CompanyId = companyA2, Name = "Subsidiary role", IsSystemRole = true, PermissionsJson = "[\\"*\\"]" };
+                var homeRole = new Role { CompanyId = companyA1, Name = "Home role", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
+                var subsidiaryRole = new Role { CompanyId = companyA2, Name = "Subsidiary role", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
                 seed.Roles.AddRange(homeRole, subsidiaryRole);
                 seed.Users.AddRange(
                     new User { Id = memberUserId, CompanyId = companyA1, Email = "rls-member@example.com", PasswordHash = "test", FirstName = "RLS", LastName = "Member", RoleId = homeRole.Id, IsActive = true },
