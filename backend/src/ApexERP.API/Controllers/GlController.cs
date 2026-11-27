@@ -249,7 +249,8 @@ namespace ApexERP.API.Controllers
             });
 
     public record SetExchangeRateRequest(string FromCurrency, string ToCurrency, DateTime RateDate,
-        decimal Rate, bool IsManualOverride = false);
+        decimal Rate, bool IsManualOverride = false, string RateSource = "Manual entry",
+        string? SourceReference = null);
 
         [HttpGet("fx-rates")]
         [HasPermission(Permissions.GlAccountsRead)]
@@ -282,8 +283,8 @@ namespace ApexERP.API.Controllers
             Run(async () =>
             {
                 if (string.IsNullOrWhiteSpace(request.FromCurrency) || string.IsNullOrWhiteSpace(request.ToCurrency) ||
-                    request.RateDate == default || request.Rate <= 0m)
-                    return BadRequest(new { error = "Currency codes, a rate date and a positive exchange rate are required." });
+                    request.RateDate == default || request.Rate <= 0m || string.IsNullOrWhiteSpace(request.RateSource))
+                    return BadRequest(new { error = "Currency codes, a rate date, a positive exchange rate and a rate source are required." });
                 var from = request.FromCurrency.Trim().ToUpperInvariant();
                 var to = request.ToCurrency.Trim().ToUpperInvariant();
                 if (from.Length != 3 || to.Length != 3 || from == to)
@@ -295,22 +296,27 @@ namespace ApexERP.API.Controllers
                     var existing = await _db.ExchangeRates.FirstOrDefaultAsync(r => r.CompanyId == CompanyId &&
                         r.FromCurrency == from && r.ToCurrency == to && r.RateDate == rateDate, token);
                     var before = existing == null ? null : new { existing.FromCurrency, existing.ToCurrency,
-                        existing.RateDate, existing.Rate, existing.IsManualOverride };
+                        existing.RateDate, existing.Rate, existing.IsManualOverride,
+                        existing.RateSource, existing.SourceReference };
                     if (existing == null)
                     {
                         existing = new ExchangeRate { CompanyId = CompanyId, FromCurrency = from,
                             ToCurrency = to, RateDate = rateDate, Rate = request.Rate,
-                            IsManualOverride = request.IsManualOverride };
+                            IsManualOverride = request.IsManualOverride,
+                            RateSource = request.RateSource.Trim(),
+                            SourceReference = string.IsNullOrWhiteSpace(request.SourceReference) ? null : request.SourceReference.Trim() };
                         _db.ExchangeRates.Add(existing);
                     }
                     else
                     {
                         existing.Rate = request.Rate;
                         existing.IsManualOverride = request.IsManualOverride;
+                        existing.RateSource = request.RateSource.Trim();
+                        existing.SourceReference = string.IsNullOrWhiteSpace(request.SourceReference) ? null : request.SourceReference.Trim();
                     }
                     _audit.Record(CompanyId, UserId, "FxRate.Upserted", "GL", nameof(ExchangeRate), existing.Id,
                         before, new { existing.FromCurrency, existing.ToCurrency, existing.RateDate,
-                            existing.Rate, existing.IsManualOverride });
+                            existing.Rate, existing.IsManualOverride, existing.RateSource, existing.SourceReference });
                     await _db.SaveChangesAsync(token);
                 });
                 return Ok(await _db.ExchangeRates.FirstAsync(r => r.CompanyId == CompanyId &&
