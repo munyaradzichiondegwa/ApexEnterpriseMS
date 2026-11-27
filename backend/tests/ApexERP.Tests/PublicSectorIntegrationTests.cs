@@ -429,6 +429,8 @@ namespace ApexERP.Tests
             var programId = Guid.NewGuid();
             var purchaseOrderId = Guid.NewGuid();
             var expenseAccountId = Guid.NewGuid();
+            var incomeAccountId = Guid.NewGuid();
+            var cashAccountId = Guid.NewGuid();
             var periodId = Guid.NewGuid();
 
             await using (var seed = db.NewContext(companyId))
@@ -460,11 +462,22 @@ namespace ApexERP.Tests
                     PoNo = "PO-REPORT", IssueDate = new DateTime(2026, 2, 1),
                     Status = PurchaseOrderStatus.Approved, Total = 60m, FundCentreId = programId
                 });
-                seed.GlAccounts.Add(new GlAccount
-                {
-                    Id = expenseAccountId, CompanyId = companyId, Code = "5000",
-                    Name = "School Supplies", Type = GlAccountType.Expense, Currency = "USD"
-                });
+                seed.GlAccounts.AddRange(
+                    new GlAccount
+                    {
+                        Id = expenseAccountId, CompanyId = companyId, Code = "5000",
+                        Name = "School Supplies", Type = GlAccountType.Expense, Currency = "USD"
+                    },
+                    new GlAccount
+                    {
+                        Id = incomeAccountId, CompanyId = companyId, Code = "4000",
+                        Name = "Programme Income", Type = GlAccountType.Income, Currency = "USD"
+                    },
+                    new GlAccount
+                    {
+                        Id = cashAccountId, CompanyId = companyId, Code = "1000",
+                        Name = "Cash", Type = GlAccountType.Asset, Currency = "USD"
+                    });
                 seed.AccountingPeriods.Add(new AccountingPeriod
                 {
                     Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 3,
@@ -478,12 +491,26 @@ namespace ApexERP.Tests
                     PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
                 };
                 seed.JournalEntries.Add(actualJournal);
-                seed.JournalLines.Add(new JournalLine
-                {
-                    JournalEntryId = actualJournal.Id, GlAccountId = expenseAccountId,
-                    Debit = 15m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
-                    BaseDebit = 15m, BaseCredit = 0m, FundCentreId = programId
-                });
+                seed.JournalLines.AddRange(
+                    new JournalLine
+                    {
+                        JournalEntryId = actualJournal.Id, GlAccountId = expenseAccountId,
+                        Debit = 15m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                        BaseDebit = 15m, BaseCredit = 0m, FundCentreId = programId
+                    },
+                    // A tagged income line must not reduce the Vote/Programme expenditure actual.
+                    new JournalLine
+                    {
+                        JournalEntryId = actualJournal.Id, GlAccountId = incomeAccountId,
+                        Debit = 0m, Credit = 25m, Currency = "USD", ExchangeRate = 1m,
+                        BaseDebit = 0m, BaseCredit = 25m, FundCentreId = programId
+                    },
+                    new JournalLine
+                    {
+                        JournalEntryId = actualJournal.Id, GlAccountId = cashAccountId,
+                        Debit = 25m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                        BaseDebit = 25m, BaseCredit = 0m
+                    });
                 await seed.SaveChangesAsync();
             }
 
@@ -507,6 +534,9 @@ namespace ApexERP.Tests
             Assert.Equal(40m, program.OutstandingCommitments);
             Assert.Equal(15m, program.PostedActuals);
             Assert.Equal(45m, program.AvailableBudget);
+            var utilisation = await service.GetBudgetUtilizationAsync(companyId, programId);
+            Assert.Equal(15m, utilisation.Actuals);
+            Assert.Equal(45m, utilisation.Available);
         }
 
         [PostgresFact]
