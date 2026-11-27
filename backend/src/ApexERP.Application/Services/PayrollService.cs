@@ -10,7 +10,7 @@ namespace ApexERP.Application.Services
     /// <summary>
     /// Implements PRD Module 8 (Payroll & HR): per-employee gross-to-net calculation using ZIMRA
     /// PAYE tax bands stored in the database (config-driven, no redeploy needed for annual budget
-    /// changes), NSSA (3% employee / 3% employer, capped at the NSSA insurable ceiling), and the
+    /// changes), NSSA (4.5% employee / 4.5% employer, subject to the currency-specific insurable ceiling), and the
     /// AIDS Levy (3% of PAYE). Auto-posts the payroll run to the GL on approval.
     /// </summary>
     public class PayrollService
