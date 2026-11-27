@@ -83,7 +83,7 @@ public sealed class OrganisationHierarchyIntegrationTests
         Assert.Equal(1, await ScheduledJobs.RunDueForCompanyAsync(provider, companyB.Id,
             new DateTime(2026, 11, 27, 12, 0, 0, DateTimeKind.Utc), new[] { job }));
 
-        Assert.Equal(new[] { (companyA.Id, (Guid?)tenantA.Id), (companyB.Id, (Guid?)tenantB.Id) }, observed);
+        Assert.Equal(new (Guid? CompanyId, Guid? TenantId)[] { (companyA.Id, tenantA.Id), (companyB.Id, tenantB.Id) }, observed);
         await using var verify = db.NewContext(null);
         var executions = await verify.JobExecutions.IgnoreQueryFilters().Where(x => x.JobCode == job.Code).ToListAsync();
         Assert.Equal(2, executions.Count);
