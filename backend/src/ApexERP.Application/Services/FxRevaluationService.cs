@@ -43,7 +43,7 @@ public sealed class FxRevaluationService
             .Where(l => l.JournalEntry!.CompanyId == companyId &&
                 (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed) &&
                 l.JournalEntry.EntryDate < asOfExclusive &&
-                l.Currency != functionalCurrency)
+                l.Currency.ToUpper() != functionalCurrency)
             .GroupBy(l => new { l.GlAccountId, l.Currency })
             .Select(g => new
             {
