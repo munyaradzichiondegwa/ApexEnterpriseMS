@@ -218,6 +218,58 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
+        public async Task Tender_evaluation_requires_approved_vendor_valid_scoring_and_eligible_award()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var vendorId = Guid.NewGuid();
+            var tenderId = Guid.NewGuid();
+            var bidId = Guid.NewGuid();
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId,
+                    Name = "Tender Evaluation MDA",
+                    BaseCurrency = "USD",
+                    FunctionalCurrency = "USD"
+                });
+                seed.Vendors.Add(new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-003", Name = "Approved Supplier", IsApproved = true });
+                seed.TenderNotices.Add(new TenderNotice
+                {
+                    Id = tenderId, CompanyId = companyId, TenderNo = "TND-2026-TEST",
+                    Title = "Network equipment", SubmissionDeadline = DateTime.UtcNow.AddMinutes(-5),
+                    Status = TenderStatus.Open
+                });
+                seed.TenderBids.Add(new TenderBid
+                {
+                    Id = bidId, CompanyId = companyId, TenderNoticeId = tenderId, VendorId = vendorId,
+                    PriceAmount = 1000m, SubmittedAt = DateTime.UtcNow.AddMinutes(-10), IsLateRejected = false
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new TenderService(ctx);
+            var evaluation = await service.BeginEvaluationAsync(companyId, tenderId);
+            Assert.Equal(TenderStatus.Evaluation, evaluation.Status);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ScoreBidAsync(companyId, bidId, 80m, 90m, 70m, 0.5m, 0.5m, 0.5m));
+            var scored = await service.ScoreBidAsync(companyId, bidId, 80m, 90m, 70m, 0.4m, 0.4m, 0.2m);
+            Assert.Equal(82m, scored.TotalScore);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.AwardAsync(companyId, tenderId, Guid.NewGuid(), "Unsupported supplier"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.AwardAsync(companyId, tenderId, vendorId, " "));
+
+            var awarded = await service.AwardAsync(companyId, tenderId, vendorId, "Highest evaluated compliant bid.");
+            Assert.Equal(TenderStatus.Awarded, awarded.Status);
+            Assert.Equal(vendorId, awarded.AwardedVendorId);
+        }
+
+        [PostgresFact]
         public async Task Tender_service_rejects_late_bids_from_evaluation()
         {
             await using var db = await TestDb.CreateAsync();
@@ -232,7 +284,7 @@ namespace ApexERP.Tests
                     BaseCurrency = "USD",
                     FunctionalCurrency = "USD"
                 });
-                seed.Vendors.Add(new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-002", Name = "Late Supplier" });
+                seed.Vendors.Add(new Vendor { Id = vendorId, CompanyId = companyId, Code = "V-002", Name = "Late Supplier", IsApproved = true });
                 await seed.SaveChangesAsync();
             }
 
