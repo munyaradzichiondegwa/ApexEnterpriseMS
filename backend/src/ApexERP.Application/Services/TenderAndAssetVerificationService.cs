@@ -70,6 +70,20 @@ namespace ApexERP.Application.Services
             return bid;
         }
 
+        /// <summary>Moves an expired open tender into evaluation. The server clock is authoritative.</summary>
+        public async Task<TenderNotice> BeginEvaluationAsync(Guid companyId, Guid tenderNoticeId, CancellationToken ct = default)
+        {
+            var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Tender notice not found.");
+            if (tender.Status != TenderStatus.Open)
+                throw new InvalidOperationException("Only an open tender can enter evaluation.");
+            if (DateTime.UtcNow <= tender.SubmissionDeadline)
+                throw new InvalidOperationException("Tender evaluation cannot begin before the submission deadline.");
+            tender.Status = TenderStatus.Evaluation;
+            await _db.SaveChangesAsync(ct);
+            return tender;
+        }
+
         /// <summary>Scores a bid on price/technical/local-content criteria (weights configurable per
         /// call) and rolls them into a total score for the evaluation matrix.</summary>
         public async Task<TenderBid> ScoreBidAsync(Guid companyId, Guid bidId, decimal priceScore, decimal technicalScore,
