@@ -82,12 +82,20 @@ CREATE TABLE "TenantLifecycleJobs" (
  "RequestedBy" text NOT NULL, "ExternalJobReference" text NULL, "StartedAt" timestamptz NULL, "CompletedAt" timestamptz NULL,
  "ResultSummary" text NULL, "CreatedAt" timestamptz NOT NULL, "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
 CREATE INDEX "IX_TenantLifecycleJobs_TenantId_Status_CreatedAt" ON "TenantLifecycleJobs" ("TenantId","Status","CreatedAt");
+CREATE TABLE "CompanyUserInvitations" (
+ "Id" uuid PRIMARY KEY, "TenantId" uuid NOT NULL, "CompanyId" uuid NOT NULL, "RoleId" uuid NOT NULL,
+ "Email" text NOT NULL, "TokenHash" text NOT NULL, "ExpiresAt" timestamptz NOT NULL, "InvitedBy" uuid NOT NULL,
+ "AcceptedAt" timestamptz NULL, "AcceptedUserId" uuid NULL, "CreatedAt" timestamptz NOT NULL,
+ "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
+CREATE UNIQUE INDEX "IX_CompanyUserInvitations_TokenHash" ON "CompanyUserInvitations" ("TokenHash");
+CREATE INDEX "IX_CompanyUserInvitations_TenantId_Email_AcceptedAt" ON "CompanyUserInvitations" ("TenantId","Email","AcceptedAt");
 """);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("""
+DROP TABLE IF EXISTS "CompanyUserInvitations";
 DROP TABLE IF EXISTS "TenantLifecycleJobs";
 DROP TABLE IF EXISTS "TenantOperationalChecks";
 DROP TABLE IF EXISTS "TenantSupportGrants";
