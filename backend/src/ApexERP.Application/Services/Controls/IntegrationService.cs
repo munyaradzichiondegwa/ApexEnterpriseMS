@@ -295,17 +295,80 @@ namespace ApexERP.Application.Services
         /// <summary>Provider transactions the bank never received, or receipts with no provider message: the integration-to-ledger reconciliation (spec 25.3).</summary>
         public async Task<object> ReconcileAsync(Guid companyId, DateTime from, DateTime to, CancellationToken ct = default)
         {
-            var msgs = await _db.IntegrationMessages.Where(m => m.CompanyId == companyId && m.CreatedAt >= from && m.CreatedAt <= to).ToListAsync(ct);
-            var receiptIds = msgs.Where(m => m.ResultReceiptId != null).Select(m => m.ResultReceiptId!.Value).ToList();
-            var receipts = await _db.ArReceipts.Where(r => r.CompanyId == companyId && receiptIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, ct);
+            if (to < from) throw new InvalidOperationException("The reconciliation end date must be on or after the start date.");
+
+            var msgs = await _db.IntegrationMessages
+                .Where(m => m.CompanyId == companyId && m.CreatedAt >= from && m.CreatedAt <= to)
+                .ToListAsync(ct);
+            var receiptIds = msgs.Where(m => m.ResultReceiptId != null)
+                .Select(m => m.ResultReceiptId!.Value).Distinct().ToList();
+            var receipts = await _db.ArReceipts
+                .Where(r => r.CompanyId == companyId && receiptIds.Contains(r.Id))
+                .ToDictionaryAsync(r => r.Id, ct);
+
+            // Also look for provider-tagged receipts that have no corresponding integration message.
+            // Search by receipt date so a late-arriving webhook does not hide an older orphaned receipt.
+            var providerReceipts = await _db.ArReceipts
+                .Where(r => r.CompanyId == companyId && r.ReceiptDate >= from.Date &&
+                    r.ReceiptDate < to.Date.AddDays(1) && r.Reference != null)
+                .Select(r => new { r.Id, r.Reference, r.ReceiptNo, r.ReceiptDate, r.Amount, r.Currency })
+                .ToListAsync(ct);
+            var taggedReceipts = providerReceipts
+                .Select(r =>
+                {
+                    var separator = r.Reference!.IndexOf(':');
+                    if (separator <= 0) return null;
+                    var provider = r.Reference[..separator];
+                    var externalRef = r.Reference[(separator + 1)..];
+                    return Providers.Contains(provider, StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(externalRef)
+                        ? new { r.Id, r.Reference, r.ReceiptNo, r.ReceiptDate, r.Amount, r.Currency, Provider = Providers.First(p => p.Equals(provider, StringComparison.OrdinalIgnoreCase)), ExternalRef = externalRef }
+                        : null;
+                })
+                .Where(r => r != null)
+                .ToList();
+            var externalRefs = taggedReceipts.Select(r => r!.ExternalRef).Distinct().ToList();
+            var matchingMessages = externalRefs.Count == 0
+                ? new List<(string Provider, string ExternalRef)>()
+                : await _db.IntegrationMessages
+                    .Where(m => m.CompanyId == companyId && externalRefs.Contains(m.ExternalRef))
+                    .Select(m => new { m.Provider, m.ExternalRef })
+                    .ToListAsync(ct)
+                    .ContinueWith(task => task.Result.Select(x => (x.Provider, x.ExternalRef)).ToList(), ct);
+            var knownMessageKeys = matchingMessages
+                .Select(m => $"{m.Provider.ToUpperInvariant()}:{m.ExternalRef}")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var unlinkedReceipts = taggedReceipts
+                .Where(r => r != null && !knownMessageKeys.Contains($"{r.Provider}:{r.ExternalRef}"))
+                .Select(r => new { r!.Id, r.ReceiptNo, r.Reference, r.ReceiptDate, r.Amount, r.Currency })
+                .ToList();
+
+            var paidMessagesWithoutReceipt = msgs
+                .Where(m => m.Status == "Processed" && m.ResultReceiptId == null &&
+                    _adapters.TryGetValue(m.Provider, out var adapter) &&
+                    SafeIsPaid(adapter, m.PayloadJson))
+                .Select(m => new { m.Id, m.Provider, m.ExternalRef, m.Status, m.LastError })
+                .ToList();
+
             return new
             {
                 From = from, To = to, Messages = msgs.Count,
                 Processed = msgs.Count(m => m.Status == "Processed"), Pending = msgs.Count(m => m.Status == "Pending"),
+                Processing = msgs.Count(m => m.Status == "Processing"),
                 Failed = msgs.Count(m => m.Status == "Failed"), DeadLetter = msgs.Count(m => m.Status == "DeadLetter"),
                 PostedTotal = receipts.Values.Sum(r => r.Amount),
-                NeedsAttention = msgs.Where(m => m.Status is "Failed" or "DeadLetter").Select(m => new { m.Id, m.Provider, m.ExternalRef, m.Status, m.LastError, m.Attempts }).ToList()
+                UnlinkedReceipts = unlinkedReceipts,
+                PaidMessagesWithoutReceipt = paidMessagesWithoutReceipt,
+                NeedsAttention = msgs.Where(m => m.Status is "Failed" or "DeadLetter" or "Processing")
+                    .Select(m => new { m.Id, m.Provider, m.ExternalRef, m.Status, m.LastError, m.Attempts, m.NextAttemptAt })
+                    .ToList()
             };
+        }
+
+        private static bool SafeIsPaid(IPaymentProviderAdapter adapter, string payload)
+        {
+            try { return adapter.Parse(payload).Status == "Paid"; }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException) { return false; }
         }
     }
 }
