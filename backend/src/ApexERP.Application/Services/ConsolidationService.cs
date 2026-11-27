@@ -294,32 +294,28 @@ namespace ApexERP.Application.Services
             var functionalCurrency = company.FunctionalCurrency.Trim().ToUpperInvariant();
             var targetCurrency = groupCurrency.Trim().ToUpperInvariant();
             var sameCurrency = string.Equals(functionalCurrency, targetCurrency, StringComparison.OrdinalIgnoreCase);
-            var rates = new List<ExchangeRate>();
-            var inverseRates = false;
+            var directRates = new List<ExchangeRate>();
+            var inverseRateRecords = new List<ExchangeRate>();
             Func<DateTime, decimal> rateAt = _ => 1m;
             if (!sameCurrency)
             {
-                rates = await _db.ExchangeRates.IgnoreQueryFilters()
+                directRates = await _db.ExchangeRates.IgnoreQueryFilters()
                     .Where(r => r.CompanyId == company.Id && r.FromCurrency.ToUpper() == functionalCurrency &&
                         r.ToCurrency.ToUpper() == targetCurrency && r.RateDate < asOfExclusive && r.Rate > 0)
-                    .OrderBy(r => r.RateDate).ToListAsync(ct);
-                if (rates.Count == 0)
-                {
-                    rates = await _db.ExchangeRates.IgnoreQueryFilters()
-                        .Where(r => r.CompanyId == company.Id && r.FromCurrency.ToUpper() == targetCurrency &&
-                            r.ToCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive && r.Rate > 0)
-                        .OrderBy(r => r.RateDate).ToListAsync(ct);
-                    inverseRates = true;
-                }
-                if (rates.Count == 0)
+                    .ToListAsync(ct);
+                inverseRateRecords = await _db.ExchangeRates.IgnoreQueryFilters()
+                    .Where(r => r.CompanyId == company.Id && r.FromCurrency.ToUpper() == targetCurrency &&
+                        r.ToCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive && r.Rate > 0)
+                    .ToListAsync(ct);
+                if (directRates.Count == 0 && inverseRateRecords.Count == 0)
                     throw new InvalidOperationException($"Missing exchange rates to translate subsidiary {company.Name} from {functionalCurrency} to group currency {targetCurrency}.");
 
                 rateAt = date =>
                 {
-                    var rate = rates.LastOrDefault(r => r.RateDate.Date <= date.Date);
-                    if (rate == null)
+                    var selected = ExchangeRateResolver.SelectEffectiveRate(directRates, inverseRateRecords, date);
+                    if (selected == null)
                         throw new InvalidOperationException($"No {functionalCurrency}/{targetCurrency} exchange rate is available on or before {date:yyyy-MM-dd} for subsidiary {company.Name}.");
-                    return inverseRates ? 1m / rate.Rate : rate.Rate;
+                    return selected.IsInverse ? 1m / selected.Rate.Rate : selected.Rate.Rate;
                 };
             }
 
