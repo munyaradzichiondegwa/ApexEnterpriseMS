@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
@@ -210,7 +211,7 @@ public sealed class StatutoryPackService
             }
           },
           "nssa": {
-            "USD": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 700, "effectiveFrom": "2024-06-01" }
+            "USD": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 700, "effectiveFrom": "2026-11-27", "effectiveTo": null, "verifiedAsOf": "2026-11-27" }
           },
           "corporateIncomeTax": {
             "standardCompanyOrTrustRate": 0.25,
@@ -371,7 +372,7 @@ public sealed class StatutoryPackService
             var previousBands = await _db.PayeTaxBands.Where(b => b.CompanyId == companyId && b.Currency == currency &&
                 b.EffectiveFrom < document.EffectiveFrom && (!b.EffectiveTo.HasValue || b.EffectiveTo >= document.EffectiveFrom)).ToListAsync(ct);
             foreach (var previous in previousBands)
-                previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
+                previous.EffectiveTo = nssaEffectiveFrom.AddDays(-1);
 
             foreach (var band in bands)
             {
@@ -401,6 +402,12 @@ public sealed class StatutoryPackService
             var employerRate = nssaCurrency.GetProperty("employerRate").GetDecimal();
             var ceilingElement = nssaCurrency.GetProperty("ceiling");
             decimal? nssaCeiling = ceilingElement.ValueKind == JsonValueKind.Null ? null : ceilingElement.GetDecimal();
+            var nssaEffectiveFrom = nssaCurrency.TryGetProperty("effectiveFrom", out var nssaFrom)
+                ? DateTime.Parse(nssaFrom.GetString()!, CultureInfo.InvariantCulture).Date
+                : document.EffectiveFrom;
+            DateTime? nssaEffectiveTo = nssaCurrency.TryGetProperty("effectiveTo", out var nssaTo)
+                ? (nssaTo.ValueKind == JsonValueKind.Null ? null : DateTime.Parse(nssaTo.GetString()!, CultureInfo.InvariantCulture).Date)
+                : document.EffectiveTo;
             if (employeeRate is < 0m or > 1m || employerRate is < 0m or > 1m ||
                 (nssaCeiling.HasValue && nssaCeiling.Value <= 0m))
                 throw new InvalidOperationException($"NSSA rates or ceiling for {currency} are invalid.");
@@ -408,11 +415,11 @@ public sealed class StatutoryPackService
             foreach (var code in new[] { "NSSA_EMPLOYEE", "NSSA_EMPLOYER" })
             {
                 if (await _db.StatutoryRates.AnyAsync(r => r.CompanyId == companyId && r.Code == code &&
-                    r.Currency == currency && r.EffectiveFrom == document.EffectiveFrom, ct))
+                    r.Currency == currency && r.EffectiveFrom == nssaEffectiveFrom, ct))
                     throw new InvalidOperationException($"A {code} rate for {currency} already exists with this effective date.");
                 var previousRates = await _db.StatutoryRates.Where(r => r.CompanyId == companyId &&
-                    r.Code == code && r.Currency == currency && r.EffectiveFrom < document.EffectiveFrom &&
-                    (!r.EffectiveTo.HasValue || r.EffectiveTo >= document.EffectiveFrom)).ToListAsync(ct);
+                    r.Code == code && r.Currency == currency && r.EffectiveFrom < nssaEffectiveFrom &&
+                    (!r.EffectiveTo.HasValue || r.EffectiveTo >= nssaEffectiveFrom)).ToListAsync(ct);
                 foreach (var previous in previousRates)
                     previous.EffectiveTo = document.EffectiveFrom.AddDays(-1);
 
@@ -420,8 +427,8 @@ public sealed class StatutoryPackService
                 {
                     CompanyId = companyId, Code = code,
                     RatePct = (code == "NSSA_EMPLOYEE" ? employeeRate : employerRate) * 100m,
-                    Ceiling = nssaCeiling, Currency = currency, EffectiveFrom = document.EffectiveFrom,
-                    EffectiveTo = document.EffectiveTo, SourceReference = source.Title + " — " + source.Url,
+                    Ceiling = nssaCeiling, Currency = currency, EffectiveFrom = nssaEffectiveFrom,
+                    EffectiveTo = nssaEffectiveTo, SourceReference = source.Title + " — " + source.Url,
                     CreatedBy = document.CreatedBy, ApprovedBy = document.ApprovedBy
                 });
             }
