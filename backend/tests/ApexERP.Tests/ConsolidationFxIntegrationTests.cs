@@ -97,8 +97,8 @@ public sealed class ConsolidationFxIntegrationTests
         var result = await service.ConsolidateAsync(parentId, new DateTime(2026, 1, 31));
 
         Assert.Equal(2, result.RateEvidence.Count);
-        var transactionDateRate = Assert.Single(result.RateEvidence.Where(x =>
-            x.EffectiveDate == new DateTime(2026, 1, 5)));
+        var transactionDateRate = Assert.Single(result.RateEvidence, x =>
+            x.EffectiveDate == new DateTime(2026, 1, 5));
         Assert.Equal("ZWG", transactionDateRate.FromCurrency);
         Assert.Equal("USD", transactionDateRate.ToCurrency);
         Assert.Equal(new DateTime(2026, 1, 1), transactionDateRate.RateDate);
@@ -108,8 +108,8 @@ public sealed class ConsolidationFxIntegrationTests
         Assert.Equal("RBZ daily bulletin", transactionDateRate.RateSource);
         Assert.Equal("RBZ/FX/2026-01-01", transactionDateRate.SourceReference);
 
-        var closingRate = Assert.Single(result.RateEvidence.Where(x =>
-            x.EffectiveDate == new DateTime(2026, 1, 31)));
+        var closingRate = Assert.Single(result.RateEvidence, x =>
+            x.EffectiveDate == new DateTime(2026, 1, 31));
         Assert.Equal(new DateTime(2026, 1, 10), closingRate.RateDate);
         Assert.Equal(1.80m, closingRate.QuotedRate);
         Assert.Equal(1m / 1.80m, closingRate.AppliedRate);
@@ -118,7 +118,7 @@ public sealed class ConsolidationFxIntegrationTests
         Assert.Equal("Bank treasury quote", closingRate.RateSource);
         Assert.Equal("TREASURY/2026-01-10", closingRate.SourceReference);
 
-        var cta = Assert.Single(result.Lines.Where(x => x.Code == "FX-CTA"));
+        var cta = Assert.Single(result.Lines, x => x.Code == "FX-CTA");
         Assert.Equal(50m - (100m / 1.80m), cta.ConsolidatedAmount);
         Assert.Equal(0m, Math.Round(result.TotalAssets - result.TotalLiabilities - result.TotalGroupEquity, 6));
     }
