@@ -416,10 +416,15 @@ app.Use(async (context, next) =>
     {
         var subject = context.User.FindFirst("sub") ??
                       context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+        var roleName = context.User.FindFirst("role") ??
+                       context.User.FindFirst(System.Security.Claims.ClaimTypes.Role);
+        var tokenPermissions = context.User.FindFirst("permissions")?.Value;
         if (!Guid.TryParse(context.User.FindFirst("company_id")?.Value, out var companyId) ||
             !Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId) ||
             !Guid.TryParse(subject?.Value, out var userId) ||
-            !Guid.TryParse(context.User.FindFirst("role_id")?.Value, out var roleId))
+            !Guid.TryParse(context.User.FindFirst("role_id")?.Value, out var roleId) ||
+            string.IsNullOrWhiteSpace(roleName?.Value) ||
+            string.IsNullOrWhiteSpace(tokenPermissions))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
@@ -427,7 +432,7 @@ app.Use(async (context, next) =>
 
         var dbContext = context.RequestServices.GetRequiredService<ApexErpDbContext>();
         var valid = await TenantMembershipValidator.IsValidAsync(
-            dbContext, userId, tenantId, companyId, roleId, context.RequestAborted);
+            dbContext, userId, tenantId, companyId, roleId, roleName.Value, tokenPermissions, context.RequestAborted);
         if (!valid)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;

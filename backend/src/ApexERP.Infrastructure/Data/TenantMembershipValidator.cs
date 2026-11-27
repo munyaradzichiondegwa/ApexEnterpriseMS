@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 
 namespace ApexERP.Infrastructure.Data;
@@ -15,6 +16,8 @@ public static class TenantMembershipValidator
         Guid tenantId,
         Guid companyId,
         Guid tokenRoleId,
+        string tokenRoleName,
+        string tokenPermissionsJson,
         CancellationToken cancellationToken = default)
     {
         using var systemAccess = db.SystemAccessScope("tenant resolution: revalidate signed user, company and role claims");
@@ -30,7 +33,7 @@ public static class TenantMembershipValidator
 
         var user = await db.Users.IgnoreQueryFilters()
             .SingleOrDefaultAsync(x => x.Id == userId && x.IsActive, cancellationToken);
-        if (user is null) return false;
+        if (user is null || (user.LockedUntil.HasValue && user.LockedUntil.Value > now)) return false;
 
         var homeTenantId = await db.Companies.IgnoreQueryFilters()
             .Where(x => x.Id == user.CompanyId)
@@ -54,7 +57,25 @@ public static class TenantMembershipValidator
         }
 
         if (!currentRoleId.HasValue || currentRoleId.Value != tokenRoleId) return false;
-        return await db.Roles.IgnoreQueryFilters()
-            .AnyAsync(x => x.Id == tokenRoleId && x.CompanyId == companyId, cancellationToken);
+        var role = await db.Roles.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == tokenRoleId && x.CompanyId == companyId, cancellationToken);
+        if (role is null || !string.Equals(role.Name, tokenRoleName, StringComparison.Ordinal)) return false;
+        return PermissionsMatch(role.PermissionsJson, tokenPermissionsJson);
+    }
+
+    private static bool PermissionsMatch(string? currentJson, string? tokenJson)
+    {
+        try
+        {
+            var current = JsonSerializer.Deserialize<string[]>(currentJson ?? "[]");
+            var token = JsonSerializer.Deserialize<string[]>(tokenJson ?? "");
+            if (current is null || token is null) return false;
+            return new HashSet<string>(current, StringComparer.OrdinalIgnoreCase)
+                .SetEquals(token);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 }

@@ -160,19 +160,32 @@ namespace ApexERP.Tests
             context.CompanyMemberships.Add(membership);
             await context.SaveChangesAsync();
 
-            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId!.Value, user.CompanyId, user.RoleId));
-            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id, role.Id));
+            var homeRole = await context.Roles.IgnoreQueryFilters().SingleAsync(x => x.Id == user.RoleId);
+            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId!.Value, user.CompanyId,
+                user.RoleId, homeRole.Name, homeRole.PermissionsJson));
+            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id,
+                role.Id, role.Name, role.PermissionsJson));
 
             membership.RoleId = replacementRole.Id;
             membership.MembershipRole = replacementRole.Name;
             await context.SaveChangesAsync();
-            Assert.False(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id, role.Id));
-            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id, replacementRole.Id));
+            Assert.False(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id,
+                role.Id, role.Name, role.PermissionsJson));
+            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id,
+                replacementRole.Id, replacementRole.Name, replacementRole.PermissionsJson));
+
+            replacementRole.PermissionsJson = "[\\"reports.financial.read\\",\\"ap.write\\"]";
+            await context.SaveChangesAsync();
+            Assert.False(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id,
+                replacementRole.Id, replacementRole.Name, "[\\"reports.financial.read\\"]"));
+            Assert.True(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id,
+                replacementRole.Id, replacementRole.Name, replacementRole.PermissionsJson));
 
             membership.IsActive = false;
             membership.ValidTo = DateTime.UtcNow;
             await context.SaveChangesAsync();
-            Assert.False(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id, replacementRole.Id));
+            Assert.False(await TenantMembershipValidator.IsValidAsync(context, user.Id, tenantId.Value, company.Id,
+                replacementRole.Id, replacementRole.Name, replacementRole.PermissionsJson));
         }
 
         [PostgresFact]
