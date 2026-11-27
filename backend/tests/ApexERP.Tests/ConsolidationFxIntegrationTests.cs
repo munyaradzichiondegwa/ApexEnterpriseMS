@@ -123,4 +123,93 @@ public sealed class ConsolidationFxIntegrationTests
             0m, 0.000001m);
         Assert.Equal(0m, Math.Round(result.TotalAssets - result.TotalLiabilities - result.TotalGroupEquity, 6));
     }
+    [PostgresFact]
+    public async Task Consolidation_calculates_indirect_non_controlling_interest_across_the_full_ownership_chain()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var tenantId = Guid.NewGuid();
+        var parentId = Guid.NewGuid();
+        var subsidiaryId = Guid.NewGuid();
+        var grandchildId = Guid.NewGuid();
+        var cashAccountId = Guid.NewGuid();
+        var equityAccountId = Guid.NewGuid();
+        var periodId = Guid.NewGuid();
+
+        await using (var seed = db.NewContext(null))
+        {
+            seed.CustomerOrganisations.Add(new CustomerOrganisation
+            {
+                Id = tenantId, Name = "Indirect NCI test tenant", IsActive = true
+            });
+            seed.Companies.AddRange(
+                new Company
+                {
+                    Id = parentId, TenantId = tenantId, Name = "NCI Parent",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD", IsActive = true
+                },
+                new Company
+                {
+                    Id = subsidiaryId, TenantId = tenantId, Name = "NCI Subsidiary",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD",
+                    ParentCompanyId = parentId, OwnershipPercentage = 80m, IsActive = true
+                },
+                new Company
+                {
+                    Id = grandchildId, TenantId = tenantId, Name = "NCI Grandchild",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD",
+                    ParentCompanyId = subsidiaryId, OwnershipPercentage = 70m, IsActive = true
+                });
+            seed.GlAccounts.AddRange(
+                new GlAccount
+                {
+                    Id = cashAccountId, CompanyId = grandchildId, Code = "1000",
+                    Name = "Cash", Type = GlAccountType.Asset, Currency = "USD"
+                },
+                new GlAccount
+                {
+                    Id = equityAccountId, CompanyId = grandchildId, Code = "3000",
+                    Name = "Share Capital", Type = GlAccountType.Equity, Currency = "USD"
+                });
+            seed.AccountingPeriods.Add(new AccountingPeriod
+            {
+                Id = periodId, CompanyId = grandchildId, Year = 2026, PeriodNo = 1,
+                StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 2, 1),
+                Status = PeriodStatus.Open
+            });
+            var journal = new JournalEntry
+            {
+                CompanyId = grandchildId, EntryNo = "JE-NCI-001",
+                Description = "Grandchild opening net assets", EntryDate = new DateTime(2026, 1, 5),
+                PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+            };
+            seed.JournalEntries.Add(journal);
+            seed.JournalLines.AddRange(
+                new JournalLine
+                {
+                    JournalEntryId = journal.Id, GlAccountId = cashAccountId,
+                    Debit = 100m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                    BaseDebit = 100m, BaseCredit = 0m
+                },
+                new JournalLine
+                {
+                    JournalEntryId = journal.Id, GlAccountId = equityAccountId,
+                    Debit = 0m, Credit = 100m, Currency = "USD", ExchangeRate = 1m,
+                    BaseDebit = 0m, BaseCredit = 100m
+                });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var ctx = db.NewContext(parentId, tenantId: tenantId);
+        var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
+        var result = await service.ConsolidateAsync(parentId, new DateTime(2026, 1, 31));
+
+        Assert.Equal(44m, result.TotalNonControllingInterest);
+        Assert.Equal(56m, result.TotalGroupEquity);
+        Assert.Equal(100m, result.TotalAssets);
+        Assert.Equal(0m, result.TotalLiabilities);
+        Assert.Equal(0m, Math.Round(
+            result.TotalAssets - result.TotalLiabilities - result.TotalGroupEquity -
+            result.TotalNonControllingInterest, 6));
+    }
+
 }
