@@ -217,13 +217,13 @@ namespace ApexERP.Tests
             var scope = new GroupScopeService(context);
 
             var visible = await scope.GetVisibleCompanyIdsAsync(caller);
-            Assert.Equal(new[] { caller, tenantAChild }, visible.OrderBy(x => x).ToArray());
+            Assert.Equal(new[] { caller, tenantAChild }.OrderBy(x => x).ToArray(), visible.OrderBy(x => x).ToArray());
             Assert.DoesNotContain(consentingParent, visible);
             Assert.DoesNotContain(foreignChild, visible);
 
             var consolidation = new ConsolidationService(context, new ReportingService(context), scope);
             var consolidatedGroup = await consolidation.GetGroupStructureAsync(caller);
-            Assert.Equal(new[] { caller, tenantAChild }, consolidatedGroup.Select(x => x.Id).OrderBy(x => x).ToArray());
+            Assert.Equal(new[] { caller, tenantAChild }.OrderBy(x => x).ToArray(), consolidatedGroup.Select(x => x.Id).OrderBy(x => x).ToArray());
 
             await using var childContext = db.NewContext(childWithExternalParent, tenantId: tenantA);
             var childScope = new GroupScopeService(childContext);
