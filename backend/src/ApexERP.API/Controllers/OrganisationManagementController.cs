@@ -237,6 +237,37 @@ public sealed class OrganisationManagementController : ApiControllerBase
         return Ok(new { deactivated = true });
     }
 
+
+    [HttpPut("companies/{companyId:guid}/departments/{departmentId:guid}/branch")]
+    public async Task<IActionResult> AssignDepartmentBranch(Guid companyId, Guid departmentId, [FromBody] AssignBranchRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        using var scope = _db.SystemAccessScope("tenant administration: assign department to branch");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        var department = await _db.Departments.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == departmentId && x.CompanyId == companyId, ct);
+        if (department is null) return NotFound();
+        if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters().AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Branch must belong to the same company." });
+        department.BranchId = request.BranchId;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { department.Id, department.BranchId });
+    }
+
+    [HttpPut("companies/{companyId:guid}/cost-centres/{costCentreId:guid}/branch")]
+    public async Task<IActionResult> AssignCostCentreBranch(Guid companyId, Guid costCentreId, [FromBody] AssignBranchRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        using var scope = _db.SystemAccessScope("tenant administration: assign cost centre to branch");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        var costCentre = await _db.CostCentres.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == costCentreId && x.CompanyId == companyId, ct);
+        if (costCentre is null) return NotFound();
+        if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters().AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Branch must belong to the same company." });
+        costCentre.BranchId = request.BranchId;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { costCentre.Id, costCentre.BranchId });
+    }
+
     [HttpGet("jurisdictions")]
     public async Task<IActionResult> Jurisdictions(CancellationToken ct)
     {
@@ -325,6 +356,7 @@ public sealed record CreateLegalCompanyRequest(string Name, string? Registration
     string? FunctionalCurrency = null, int FiscalYearStartMonth = 1, string? Timezone = "UTC",
     string? Sector = null, Guid? ParentCompanyId = null, decimal? OwnershipPercentage = null, bool IsPublicSectorEntity = false);
 public sealed record CreateBranchRequest(string Code, string Name, Guid? ParentBranchId = null);
+public sealed record AssignBranchRequest(Guid? BranchId);
 public sealed record AddCompanyMemberRequest(Guid UserId, Guid RoleId);
 public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
