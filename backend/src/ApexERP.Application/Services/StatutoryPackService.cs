@@ -242,7 +242,7 @@ public sealed class StatutoryPackService
                 "https://www.zimra.co.zw/domestic-taxes/vat/mechanics-of-vat", null, new DateTime(2026, 1, 1)),
             new("Zimbabwe Revenue Authority (ZIMRA)", "Public Notice 7 of 2026: VAT rate change effective 1 January 2026",
                 "https://www.zimra.co.zw/public-notices?download=4441%3Apublic-notice-07-of-2026-change-of-vat-rate-on-submission-of-return-category-a",
-                new DateTime(2026, 1, 7), new DateTime(2026, 1, 1)),
+                new DateTime(2026, 2, 9), new DateTime(2026, 1, 1)),
             new("National Social Security Authority (NSSA)", "Pension and Other Benefits Scheme contribution rates and USD ceiling",
                 "https://www.nssa.org.zw/contributions/", null, new DateTime(2026, 1, 1)),
             new("National Social Security Authority (NSSA)", "Schedule of insurable earnings",
