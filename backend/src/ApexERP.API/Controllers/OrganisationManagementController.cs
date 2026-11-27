@@ -374,8 +374,12 @@ public sealed class OrganisationManagementController : ApiControllerBase
         using var scope = _db.SystemAccessScope("tenant onboarding: update wizard progress");
         var row = await _db.TenantOnboardings.SingleOrDefaultAsync(x => x.TenantId == TenantId, ct);
         if (row is null) return NotFound();
-        if (request.DeploymentProfileId.HasValue && !await _db.DeploymentProfiles.AnyAsync(x => x.Id == request.DeploymentProfileId && x.IsActive, ct))
-            return BadRequest(new { error = "The selected deployment profile is unavailable." });
+        DeploymentProfile? selectedProfile = null;
+        if (request.DeploymentProfileId.HasValue)
+        {
+            selectedProfile = await _db.DeploymentProfiles.SingleOrDefaultAsync(x => x.Id == request.DeploymentProfileId && x.IsActive, ct);
+            if (selectedProfile is null) return BadRequest(new { error = "The selected deployment profile is unavailable." });
+        }
         if (request.Completed)
         {
             var required = new[] { "organisation", "companies", "jurisdiction", "review" };
@@ -395,6 +399,15 @@ public sealed class OrganisationManagementController : ApiControllerBase
         }
         row.CompletedStepsJson = JsonSerializer.Serialize(request.CompletedSteps.Distinct());
         row.DeploymentProfileId = request.DeploymentProfileId;
+        if (selectedProfile is not null)
+        {
+            var tenantCompanies = await _db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId && x.IsActive).ToListAsync(ct);
+            foreach (var company in tenantCompanies)
+            {
+                company.Sector = selectedProfile.Sector;
+                company.IsPublicSectorEntity = selectedProfile.Sector is "PUBLIC_SECTOR" or "STATE_OWNED";
+            }
+        }
         row.Status = request.Completed ? "Completed" : "InProgress";
         row.CompletedAt = request.Completed ? DateTime.UtcNow : null;
         await _db.SaveChangesAsync(ct);
