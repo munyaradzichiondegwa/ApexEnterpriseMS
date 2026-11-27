@@ -108,6 +108,54 @@ CREATE TABLE "TenantSlaIncidents" (
  "CreatedAt" timestamptz NOT NULL, "UpdatedAt" timestamptz NULL, "CreatedBy" uuid NULL, "UpdatedBy" uuid NULL);
 CREATE UNIQUE INDEX "IX_TenantSlaIncidents_TenantId_IncidentNumber" ON "TenantSlaIncidents" ("TenantId","IncidentNumber");
 CREATE INDEX "IX_TenantSlaIncidents_TenantId_Status_OpenedAt" ON "TenantSlaIncidents" ("TenantId","Status","OpenedAt");
+ALTER TABLE "OrganisationalBranches" ADD CONSTRAINT "FK_OrganisationalBranches_Companies_CompanyId"
+ FOREIGN KEY ("CompanyId") REFERENCES "Companies" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "OrganisationalBranches" ADD CONSTRAINT "FK_OrganisationalBranches_OrganisationalBranches_ParentBranchId"
+ FOREIGN KEY ("ParentBranchId") REFERENCES "OrganisationalBranches" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "CompanyMemberships" ADD CONSTRAINT "FK_CompanyMemberships_Companies_CompanyId"
+ FOREIGN KEY ("CompanyId") REFERENCES "Companies" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "CompanyMemberships" ADD CONSTRAINT "FK_CompanyMemberships_Users_UserId"
+ FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "CompanyMemberships" ADD CONSTRAINT "FK_CompanyMemberships_Roles_RoleId"
+ FOREIGN KEY ("RoleId") REFERENCES "Roles" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantSubscriptions" ADD CONSTRAINT "FK_TenantSubscriptions_CustomerOrganisations_TenantId"
+ FOREIGN KEY ("TenantId") REFERENCES "CustomerOrganisations" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantSubscriptions" ADD CONSTRAINT "FK_TenantSubscriptions_SubscriptionPlans_PlanId"
+ FOREIGN KEY ("PlanId") REFERENCES "SubscriptionPlans" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantJurisdictions" ADD CONSTRAINT "FK_TenantJurisdictions_CustomerOrganisations_TenantId"
+ FOREIGN KEY ("TenantId") REFERENCES "CustomerOrganisations" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantJurisdictions" ADD CONSTRAINT "FK_TenantJurisdictions_Companies_CompanyId"
+ FOREIGN KEY ("CompanyId") REFERENCES "Companies" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantJurisdictions" ADD CONSTRAINT "FK_TenantJurisdictions_JurisdictionProfiles_CountryCode"
+ FOREIGN KEY ("CountryCode") REFERENCES "JurisdictionProfiles" ("CountryCode") ON DELETE RESTRICT;
+ALTER TABLE "TenantOnboardings" ADD CONSTRAINT "FK_TenantOnboardings_CustomerOrganisations_TenantId"
+ FOREIGN KEY ("TenantId") REFERENCES "CustomerOrganisations" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantOnboardings" ADD CONSTRAINT "FK_TenantOnboardings_DeploymentProfiles_DeploymentProfileId"
+ FOREIGN KEY ("DeploymentProfileId") REFERENCES "DeploymentProfiles" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantAdministratorInvitations" ADD CONSTRAINT "FK_TenantAdministratorInvitations_CustomerOrganisations_TenantId"
+ FOREIGN KEY ("TenantId") REFERENCES "CustomerOrganisations" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantAdministratorInvitations" ADD CONSTRAINT "FK_TenantAdministratorInvitations_Companies_CompanyId"
+ FOREIGN KEY ("CompanyId") REFERENCES "Companies" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantAdministratorInvitations" ADD CONSTRAINT "FK_TenantAdministratorInvitations_Users_AcceptedUserId"
+ FOREIGN KEY ("AcceptedUserId") REFERENCES "Users" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "CompanyUserInvitations" ADD CONSTRAINT "FK_CompanyUserInvitations_CustomerOrganisations_TenantId"
+ FOREIGN KEY ("TenantId") REFERENCES "CustomerOrganisations" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "CompanyUserInvitations" ADD CONSTRAINT "FK_CompanyUserInvitations_Companies_CompanyId"
+ FOREIGN KEY ("CompanyId") REFERENCES "Companies" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "CompanyUserInvitations" ADD CONSTRAINT "FK_CompanyUserInvitations_Roles_RoleId"
+ FOREIGN KEY ("RoleId") REFERENCES "Roles" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "CompanyUserInvitations" ADD CONSTRAINT "FK_CompanyUserInvitations_Users_InvitedBy"
+ FOREIGN KEY ("InvitedBy") REFERENCES "Users" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "CompanyUserInvitations" ADD CONSTRAINT "FK_CompanyUserInvitations_Users_AcceptedUserId"
+ FOREIGN KEY ("AcceptedUserId") REFERENCES "Users" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "Departments" ADD CONSTRAINT "FK_Departments_OrganisationalBranches_BranchId"
+ FOREIGN KEY ("BranchId") REFERENCES "OrganisationalBranches" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "CostCentres" ADD CONSTRAINT "FK_CostCentres_OrganisationalBranches_BranchId"
+ FOREIGN KEY ("BranchId") REFERENCES "OrganisationalBranches" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantSlaPolicies" ADD CONSTRAINT "FK_TenantSlaPolicies_CustomerOrganisations_TenantId"
+ FOREIGN KEY ("TenantId") REFERENCES "CustomerOrganisations" ("Id") ON DELETE RESTRICT;
+ALTER TABLE "TenantSlaIncidents" ADD CONSTRAINT "FK_TenantSlaIncidents_CustomerOrganisations_TenantId"
+ FOREIGN KEY ("TenantId") REFERENCES "CustomerOrganisations" ("Id") ON DELETE RESTRICT;
 -- Existing users already have an unambiguous primary company and role. Preserve that
 -- established access as their default membership; this does not infer tenant ownership.
 INSERT INTO "CompanyMemberships"
