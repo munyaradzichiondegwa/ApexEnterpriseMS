@@ -8,19 +8,22 @@ Maps every section of *APEXERP: Enterprise Readiness and Accounting Controls Enh
 | 🟢 **Built** | Implemented, wired into the API/UI, and type-checked against the real entity model. It runs for the first time on your machine (`dotnet build`, `dotnet test`, then use). It was **not executed** against EF Core and PostgreSQL here |
 | ⛔ **Needs input** | Cannot be completed from here: it depends on something only you or a third party holds |
 
-## What was checked, and what was not
+## Current branch verification (27 November 2026)
 
-| Check | Result |
+The following evidence supersedes older historical statements in this tracker where they conflict.
+
+| Check | Current result |
 |---|---|
-| 36 rule tests (TOTP against the RFC 6238 vectors, webhook HMAC, schedules, three-way match, impairment, NRV, ECL, SoD, approval matrix, fingerprints, secret encryption) | **36 pass** |
-| Whole backend (Domain, Application, controllers, filters, middleware, jobs, tests) compiled against the real entities with stand-ins for EF Core/JWT | **0 errors** (this catches wrong names, types and signatures; it cannot catch SQL translation or runtime behaviour) |
-| Append-only database triggers on PostgreSQL 16 | **Pass**: 7 tamper attempts and an invalid status move rejected; valid moves allowed; idempotent; Down/Up round-trip |
-| Row-level security on PostgreSQL 16 with a non-superuser role | **Pass**: fail-closed, isolation, WITH CHECK, system bypass, cross-tenant scope, idempotent, disable |
-| Backup, encrypted backup, restore test, tamper detection | **Pass** |
-| Rate limiting and security headers (standalone ASP.NET Core 8 app) | **Pass** |
-| Frontend: type-check, 54 tests, production build (34 routes) | **Pass** |
-| Full backend `dotnet build` / `dotnet test` with real packages, and the PostgreSQL integration tests (including 9 new ones in `ControlsIntegrationTests.cs`) | **Not run here** (NuGet unreachable). Run them first |
-| EF migration for the new tables/columns | **You generate it** (`scripts/generate-migrations.ps1 -MigrationName ControlsAndAutomation`). Sign-in will fail until it is applied |
+| Backend build and unit/PostgreSQL integration tests | **Pass** on commit `f0c6672311776a03b9acc9da3382850a136b3951`, workflow [#46046590970](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46046590970). This includes the new payment retry concurrency and invalid-signature/provider-normalisation tests. |
+| Frontend type-check, tests and production build | **Pass** on the same workflow. Later dashboard processing-count and presentation changes are being checked on the current branch head. |
+| EF Core migration drift, clean database install, hardening scripts and RLS runtime boot | **Pass** on workflow #46046590970. No manual migration generation is required for the current committed model. |
+| PostgreSQL integration scenarios | **Executed in CI** against real PostgreSQL, including organisation hierarchy, public-sector fund/commitment scenarios, payment webhook concurrency and tenant evidence boundaries. |
+| Dashboard operations-count change | **Pass** on workflow [#46046778338](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46046778338). |
+| Current final-head verification | The later README and dashboard presentation commits are being validated by workflow #46046974051. Do not call the current HEAD green until that run completes successfully. |
+| Production Vercel deployment | **Not verified**. The earlier deployment attempt was rate-limited by the provider; retry is required after the provider limit expires. |
+| Production backup, isolated restore, encryption/key custody and measured RPO/RTO | **Not verified**. CI restore checks are not evidence of the production environment's recovery objectives. |
+| Live payment provider certification | **Not verified**. Provider-neutral signed webhook processing is implemented; provider-specific protocols, credentials and sandbox certification remain external prerequisites. |
+| Approved jurisdiction statutory content | **Not verified**. The Zimbabwe 2026 baseline remains Draft / baseline-only and cannot be published until specialist legal review and complete schedules are supplied. |
 
 ## Part II: Accounting engine
 
@@ -85,7 +88,7 @@ Maps every section of *APEXERP: Enterprise Readiness and Accounting Controls Enh
 | 17 | Credit limits (blocks posting, overrides with approval), credit notes with VAT, ECL matrix and provision with approval, customer statements | 🟢; credit and ECL maths ✔ |
 | 18 | Bank reconciliation certification (preparer ≠ reviewer), petty cash (imprest, vouchers, replenishment), 13-week forecast | 🟢; forecast ✔ |
 | 19 | IAS 2 NRV write-down, obsolescence, write-off with approval | 🟢; NRV ✔ |
-| 20, 21 | Grants and public-sector budget rules | ✔ existing (`FinancialIdentities` available for commitment checks) |
+| 20, 21 | Grants and public-sector budget rules | ✔ PostgreSQL tests cover fund hierarchy, atomic PO commitment, budget rejection/rollback, duplicate commitments, partial/cumulative realisation, over-realisation rejection, late bids, release and year-end hierarchy. Vote/Programme/Sub-Programme expenditure schedule is implemented; posted-GL and formal year-end lapse acceptance remains open. |
 
 ## Part VII: Architecture and database
 
@@ -105,8 +108,8 @@ Maps every section of *APEXERP: Enterprise Readiness and Accounting Controls Enh
 | 25.1 | Fiscal device key (persistent, loaded from `FDMS_DEVICE_KEY_PEM`), honest "not fiscalised" records when unset, verifiable signatures, gateway interface | 🟢 |
 | 25.1 | Submission to ZIMRA | ⛔ needs the registered device, its key and ZIMRA's current API specification: implement `IFdmsGateway` |
 | 25.2 | Statutory rates as effective-dated, approved configuration with source reference; payroll uses them (falls back to old defaults) | 🟢 |
-| 25.3, 25.5 | Payment integration pipeline: signature check (HMAC, replay window), idempotent receipt posting, retry with back-off, dead-letter queue, reconciliation | 🟢; signature and back-off ✔ |
-| 25.3 | Provider-specific formats (EcoCash, OneMoney, PayNow, ZimSwitch, bank APIs) and outbound payments | ⛔ needs each provider's specification and sandbox credentials: one `IPaymentProviderAdapter` per provider |
+| 25.3, 25.5 | Payment integration pipeline: HMAC/replay checks, duplicate-delivery protection, atomic receipt + GL + invoice allocation, retry claim/lease recovery, dead-letter queue and exception reconciliation | ✔ backend and PostgreSQL concurrency tests pass; provider-specific sandbox certification remains pending |
+| 25.3 | Provider-specific formats (EcoCash, OneMoney, PayNow, ZimSwitch, bank APIs) and outbound payments | ⛔ provider-specific protocol adapters, credentials and sandbox tests still require each provider's specification; current signed-JSON adapter is a provider-neutral contract, not live certification |
 
 ## Part XI to XII: Testing and production
 
@@ -114,7 +117,7 @@ Maps every section of *APEXERP: Enterprise Readiness and Accounting Controls Enh
 |---|---|---|
 | 28.4 | Tests A to H as runtime self-tests (nightly) and in the integration suite | 🟢 |
 | 28.5 | CI/CD: build, tests, vulnerability reports, audit gate, migration job, staged deploy with approval and automatic rollback | 🟢 workflows validated as YAML; need your GitHub Environments |
-| 29 | Backup, encryption, retention, off-site hook, restore test, RPO/RTO evidence | ✔ scripts exercised |
+| 29 | Backup, encryption, retention, off-site hook, restore test, RPO/RTO evidence | ✔ CI backup/restore checks; ⛔ production encryption/key custody, isolated recovery and measured RPO/RTO remain deployment acceptance items |
 | 29 | Production compose: health checks, limits, log rotation, database not published, backup service | 🟢 |
 | 29 | Monitoring and runbooks | 🟢 `docs/OPERATIONS.md` |
 | | npm advisories | Production: 1 high (PostCSS inside Next; fix is Next 16, a major upgrade). Dev only: Vitest chain (fix is Vitest 5, major). Left deliberately; upgrade and re-run tests |
@@ -127,7 +130,7 @@ Maps every section of *APEXERP: Enterprise Readiness and Accounting Controls Enh
 | AR-002 Atomic posting | 🟢 integration test exists; run it |
 | AR-003 Duplicate prevention | 🟢 idempotency + duplicate invoice index |
 | AR-004 Closed periods | 🟢 integration test exists; checklist added |
-| AR-005 Tenant isolation | ✔ filters and RLS SQL; 🟢 integration test |
+| AR-005 Tenant isolation | ✔ query filters/RLS checks and PostgreSQL evidence for company-scoped evidence and scheduled-job tenant context; broader files/exports/cache acceptance remains open |
 | AR-006 Segregation of duties | 🟢 |
 | AR-007 Approval integrity | 🟢 |
 | AR-008 Statement reconciliation | 🟢 |
@@ -136,7 +139,7 @@ Maps every section of *APEXERP: Enterprise Readiness and Accounting Controls Enh
 | AR-011 Database integrity | ✔ triggers, constraints; 🟢 migration job |
 | AR-012 Automated schedules | 🟢 |
 | AR-013 Backup and recovery | ✔ restore test; real RTO to be measured on your data |
-| AR-014 Production integrations | ⛔ see above |
+| AR-014 Production integrations | ⛔ provider-specific sandbox certification, ZIMRA device registration and production SMTP/provider credentials remain external prerequisites |
 | AR-015 Operational monitoring | 🟢 health, dashboard, correlation ids, runbooks |
 
-**Classification (spec 32).** Scoring needs demonstrated evidence. Treat the system as **ready for a controlled pilot once the migration is applied, `dotnet test` (including the PostgreSQL integration tests) passes on your machine, and the two external integrations are either connected or consciously out of scope**. Do not rely on fiscalisation or provider payments until those adapters exist.
+**Classification (spec 32).** The consolidated branch has passing backend/PostgreSQL, frontend, migration and hardening CI evidence on the commits identified above. It is **not yet release-certified**: current-head CI must finish green, deployment-specific RPO/RTO and worker evidence must be supplied, provider-specific payment/fiscalisation integrations must be certified or explicitly scoped out, and jurisdiction packs require legal approval. Do not treat a green CI run as production deployment or statutory certification.
