@@ -195,10 +195,10 @@ public sealed class StatutoryPackService
         {
             new("Zimbabwe Revenue Authority (ZIMRA)", "PAYE USD tax tables, 1 January–31 December 2026",
                 "https://www.zimra.co.zw/domestic-taxes/tax-tables?download=4523%3Ausd-paye-tax-tables-2026",
-                new DateTime(2026, 1, 1), new DateTime(2026, 1, 1)),
+                null, new DateTime(2026, 1, 1)),
             new("Zimbabwe Revenue Authority (ZIMRA)", "PAYE ZWG tax tables, 1 January–31 December 2026",
                 "https://www.zimra.co.zw/domestic-taxes/tax-tables?download=4522%3Azwg-paye-tax-tables-2026",
-                new DateTime(2026, 1, 1), new DateTime(2026, 1, 1)),
+                null, new DateTime(2026, 1, 1)),
             new("Zimbabwe Revenue Authority (ZIMRA)", "Corporate income tax rates",
                 "https://www.zimra.co.zw/domestic-taxes/corporate/tax-rates", null, new DateTime(2026, 1, 1)),
             new("Zimbabwe Revenue Authority (ZIMRA)", "VAT mechanics and standard rate",
