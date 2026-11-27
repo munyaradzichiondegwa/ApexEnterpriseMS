@@ -186,6 +186,26 @@ public sealed class ConsolidationIntercompanyIntegrationTests
     }
 
     [PostgresFact]
+    public async Task Cross_currency_intercompany_difference_is_not_hidden_by_elimination()
+    {
+        await using var db = await TestDb.CreateAsync();
+        // USD 100 receivable versus EUR 49 payable translated at USD 2/EUR = USD 98.
+        var group = await SeedGroupAsync(db, 49m, buyerCurrency: "EUR", buyerToGroupRate: 2m);
+
+        await using var ctx = db.NewContext(group.ParentId, tenantId: group.TenantId);
+        var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
+        var result = await service.ConsolidateAsync(group.ParentId, new DateTime(2026, 1, 31));
+
+        var exception = Assert.Single(result.IntercompanyExceptions);
+        Assert.Equal("IC-100", exception.AccountCode);
+        Assert.Equal(2m, exception.Difference);
+        Assert.Equal(0m, result.TotalEliminations);
+        var intercompanyLine = Assert.Single(result.Lines, x => x.Code == "IC-100");
+        Assert.Equal(2m, intercompanyLine.ConsolidatedAmount);
+        Assert.Contains("do not agree", exception.Reason);
+    }
+
+    [PostgresFact]
     public async Task Unmatched_intercompany_balances_are_reported_and_neither_side_is_eliminated()
     {
         await using var db = await TestDb.CreateAsync();
