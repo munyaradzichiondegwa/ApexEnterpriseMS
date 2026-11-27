@@ -46,30 +46,42 @@ namespace ApexERP.Application.Services
 
         /// <summary>Submits a bid. Late bids are rejected automatically by comparing the server's
         /// own clock against the tender's deadline -- not a manual review step.</summary>
-        public async Task<TenderBid> SubmitBidAsync(Guid companyId, Guid tenderNoticeId, Guid vendorId, decimal priceAmount, CancellationToken ct = default)
+        public Task<TenderBid> SubmitBidAsync(Guid companyId, Guid tenderNoticeId, Guid vendorId, decimal priceAmount, CancellationToken ct = default)
         {
             if (priceAmount <= 0) throw new InvalidOperationException("A bid price must be greater than zero.");
-            var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Tender notice not found.");
-            if (tender.Status != TenderStatus.Open)
-                throw new InvalidOperationException("Bids can only be submitted while the tender is open.");
-            var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == vendorId && v.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Vendor is not registered in this company.");
-            EnsureVendorEligible(vendor);
 
-            var now = DateTime.UtcNow;
-            var bid = new TenderBid
+            // Serialise bid submission with deadline closure/evaluation and with another submission
+            // from the same vendor. This makes the open-state/deadline check authoritative under load.
+            return _db.InTransactionAsync(async token =>
             {
-                CompanyId = companyId,
-                TenderNoticeId = tenderNoticeId,
-                VendorId = vendorId,
-                PriceAmount = priceAmount,
-                SubmittedAt = now,
-                IsLateRejected = now > tender.SubmissionDeadline
-            };
-            _db.TenderBids.Add(bid);
-            await _db.SaveChangesAsync(ct);
-            return bid;
+                await _db.AcquireTransactionLockAsync($"tender-submission:{companyId:N}:{tenderNoticeId:N}", token);
+                var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Tender notice not found.");
+                if (tender.Status != TenderStatus.Open)
+                    throw new InvalidOperationException("Bids can only be submitted while the tender is open.");
+
+                var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == vendorId && v.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Vendor is not registered in this company.");
+                EnsureVendorEligible(vendor);
+
+                if (await _db.TenderBids.AnyAsync(b => b.CompanyId == companyId &&
+                    b.TenderNoticeId == tenderNoticeId && b.VendorId == vendorId, token))
+                    throw new InvalidOperationException("This vendor has already submitted a bid for this tender.");
+
+                var now = DateTime.UtcNow;
+                var bid = new TenderBid
+                {
+                    CompanyId = companyId,
+                    TenderNoticeId = tenderNoticeId,
+                    VendorId = vendorId,
+                    PriceAmount = priceAmount,
+                    SubmittedAt = now,
+                    IsLateRejected = now > tender.SubmissionDeadline
+                };
+                _db.TenderBids.Add(bid);
+                await _db.SaveChangesAsync(token);
+                return bid;
+            }, ct);
         }
 
         private static void EnsureVendorEligible(Vendor vendor)
