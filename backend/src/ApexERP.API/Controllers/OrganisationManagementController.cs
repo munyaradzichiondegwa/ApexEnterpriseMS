@@ -367,7 +367,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         department.Name = name;
         department.BranchId = request.BranchId;
         department.CostCentreId = request.CostCentreId;
-        department.ManagerId = request.ManagerId;
+        department.ManagerId = request.ManagerId ?? department.ManagerId;
         await _db.SaveChangesAsync(ct);
         return Ok(new { department.Id, department.Name, department.BranchId, department.CostCentreId, department.ManagerId, department.IsActive });
     }
@@ -477,7 +477,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
                 return BadRequest(new { error = "A child cost centre must use the same branch as its parent." });
         }
         centre.Code = code; centre.Name = request.Name.Trim(); centre.ParentId = request.ParentId;
-        centre.BranchId = request.BranchId; centre.SegmentId = request.SegmentId;
+        centre.BranchId = request.BranchId; centre.SegmentId = request.SegmentId ?? centre.SegmentId;
         await _db.SaveChangesAsync(ct);
         return Ok(new { centre.Id, centre.Code, centre.Name, centre.ParentId, centre.BranchId, centre.SegmentId, centre.IsActive });
     }
