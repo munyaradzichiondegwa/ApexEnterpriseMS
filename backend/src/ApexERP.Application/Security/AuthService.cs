@@ -252,6 +252,7 @@ namespace ApexERP.Application.Security
 
         public async Task RevokeAllForUserAsync(Guid userId, string reason, CancellationToken ct = default)
         {
+            using var systemAccess = _db.SystemAccessScope("authentication: revoke every company session for user");
             var live = await _db.RefreshTokens.IgnoreQueryFilters().Where(t => t.UserId == userId && t.RevokedAt == null).ToListAsync(ct);
             foreach (var t in live) { t.RevokedAt = DateTime.UtcNow; t.RevokedReason = reason; }
             await _db.SaveChangesAsync(ct);
@@ -269,6 +270,7 @@ namespace ApexERP.Application.Security
         // ---------------------------------------------------------------------------------------------
         public async Task ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct = default)
         {
+            using var systemAccess = _db.SystemAccessScope("authentication: change authenticated user's password");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (!VerifyPassword(currentPassword ?? "", user.PasswordHash)) throw new UnauthorizedAccessException("The current password is not correct.");
             var problem = PasswordPolicy.Validate(newPassword, user.Email);
@@ -281,6 +283,7 @@ namespace ApexERP.Application.Security
 
         public async Task<MfaSetup> BeginMfaSetupAsync(Guid userId, CancellationToken ct = default)
         {
+            using var systemAccess = _db.SystemAccessScope("authentication: begin authenticated user's MFA setup");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (user.TotpEnabled) throw new InvalidOperationException("Two-step verification is already on. Turn it off first to enrol a new device.");
             var secret = Totp.GenerateSecret();
@@ -292,6 +295,7 @@ namespace ApexERP.Application.Security
         /// <summary>Confirms the first code from the authenticator app, turns MFA on and returns one-time recovery codes (shown once).</summary>
         public async Task<IReadOnlyList<string>> ConfirmMfaAsync(Guid userId, string code, CancellationToken ct = default)
         {
+            using var systemAccess = _db.SystemAccessScope("authentication: confirm authenticated user's MFA setup");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (user.TotpSecret == null) throw new InvalidOperationException("Start MFA setup first.");
             if (!Totp.Verify(_protector.Unprotect(user.TotpSecret), code, DateTime.UtcNow)) throw new InvalidOperationException("That code is not valid. Check the time on your phone and try again.");
@@ -306,6 +310,7 @@ namespace ApexERP.Application.Security
 
         public async Task DisableMfaAsync(Guid userId, string password, string code, CancellationToken ct = default)
         {
+            using var systemAccess = _db.SystemAccessScope("authentication: disable authenticated user's MFA");
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct) ?? throw new InvalidOperationException("User not found.");
             if (!VerifyPassword(password ?? "", user.PasswordHash)) throw new UnauthorizedAccessException("The password is not correct.");
             if (user.TotpEnabled && !await VerifySecondFactorAsync(user, code ?? "", DateTime.UtcNow, ct)) throw new UnauthorizedAccessException("The verification code is not valid.");
@@ -334,42 +339,66 @@ namespace ApexERP.Application.Security
             if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == normalisedEmail, ct))
                 throw new InvalidOperationException("A user with this email already exists.");
 
-            var tenant = new CustomerOrganisation { Name = companyName, LegalName = companyName };
-            var company = new Company
+            var transaction = _db.Database.CurrentTransaction;
+            var ownsTransaction = transaction is null;
+            if (ownsTransaction) transaction = await _db.Database.BeginTransactionAsync(ct);
+            try
             {
-                TenantId = tenant.Id,
-                Tenant = tenant,
-                Name = companyName,
-                BaseCurrency = "USD",
-                FunctionalCurrency = "USD"
-            };
-            var trialPlan = await _db.SubscriptionPlans.SingleOrDefaultAsync(p => p.Code == "TRIAL", ct);
-            if (trialPlan is null)
-            {
-                trialPlan = new SubscriptionPlan { Code = "TRIAL", Name = "ApexERP Trial",
-                    Description = "Default 30-day evaluation plan", MaxSeats = 5, MaxCompanies = 1,
-                    ModuleCodesJson = "[\"*\"]", Currency = "USD", IsPubliclyAvailable = true, IsActive = true };
-                _db.SubscriptionPlans.Add(trialPlan);
+                var tenant = new CustomerOrganisation { Name = companyName, LegalName = companyName };
+                var company = new Company
+                {
+                    TenantId = tenant.Id, Tenant = tenant, Name = companyName,
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                };
+                var trialPlan = await _db.SubscriptionPlans.SingleOrDefaultAsync(p => p.Code == "TRIAL", ct);
+                if (trialPlan is null)
+                {
+                    trialPlan = new SubscriptionPlan { Code = "TRIAL", Name = "ApexERP Trial",
+                        Description = "Default 30-day evaluation plan", MaxSeats = 5, MaxCompanies = 1,
+                        ModuleCodesJson = "[\"*\"]", Currency = "USD", IsPubliclyAvailable = true, IsActive = true };
+                    _db.SubscriptionPlans.Add(trialPlan);
+                }
+                else if (!trialPlan.IsActive)
+                    throw new InvalidOperationException("Self-service registration is unavailable because the trial plan is inactive.");
+
+                _db.CustomerOrganisations.Add(tenant);
+                _db.Companies.Add(company);
+                await _db.SaveChangesAsync(ct);
+
+                _db.TenantSubscriptions.Add(new TenantSubscription { TenantId = tenant.Id, PlanId = trialPlan.Id, Status = "Trial",
+                    StartsAt = DateTime.UtcNow, TrialEndsAt = DateTime.UtcNow.AddDays(30), CurrentPeriodEndsAt = DateTime.UtcNow.AddDays(30) });
+                _db.TenantOnboardings.Add(new TenantOnboarding { TenantId = tenant.Id, Status = "AdministratorCreated",
+                    CompletedStepsJson = "[\"organisation\",\"companies\",\"members\"]" });
+                await _db.SaveChangesAsync(ct);
+
+                var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
+                _db.Roles.Add(adminRole);
+                await _db.SaveChangesAsync(ct);
+
+                var user = new User
+                {
+                    CompanyId = company.Id, Email = normalisedEmail, PasswordHash = HashPassword(password), RoleId = adminRole.Id,
+                    FirstName = firstName, LastName = lastName, IsActive = true
+                };
+                _db.Users.Add(user);
+                await _db.SaveChangesAsync(ct);
+
+                _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
+                    MembershipRole = "Administrator", RoleId = adminRole.Id, IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow });
+                await _db.SaveChangesAsync(ct);
+
+                if (ownsTransaction) await transaction!.CommitAsync(ct);
+                return user;
             }
-            else if (!trialPlan.IsActive)
-                throw new InvalidOperationException("Self-service registration is unavailable because the trial plan is inactive.");
-            _db.CustomerOrganisations.Add(tenant);
-            _db.Companies.Add(company);
-            _db.TenantSubscriptions.Add(new TenantSubscription { TenantId = tenant.Id, PlanId = trialPlan.Id, Status = "Trial",
-                StartsAt = DateTime.UtcNow, TrialEndsAt = DateTime.UtcNow.AddDays(30), CurrentPeriodEndsAt = DateTime.UtcNow.AddDays(30) });
-            _db.TenantOnboardings.Add(new TenantOnboarding { TenantId = tenant.Id, Status = "AdministratorCreated",
-                CompletedStepsJson = "[\"organisation\",\"companies\",\"members\"]" });
-            var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
-            _db.Roles.Add(adminRole);
-            var user = new User
+            catch
             {
-                CompanyId = company.Id, Email = normalisedEmail, PasswordHash = HashPassword(password), RoleId = adminRole.Id,
-                FirstName = firstName, LastName = lastName, IsActive = true
-            };
-            _db.Users.Add(user);
-            _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id, MembershipRole = "Administrator", RoleId = adminRole.Id, IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow });
-            await _db.SaveChangesAsync(ct);
-            return user;
+                if (ownsTransaction && transaction is not null) await transaction.RollbackAsync(ct);
+                throw;
+            }
+            finally
+            {
+                if (ownsTransaction && transaction is not null) await transaction.DisposeAsync();
+            }
         }
     }
 }
