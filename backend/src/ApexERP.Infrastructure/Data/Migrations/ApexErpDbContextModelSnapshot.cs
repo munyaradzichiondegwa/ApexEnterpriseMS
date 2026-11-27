@@ -6804,6 +6804,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("ApproverId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Comments")
                         .HasColumnType("text");
 
@@ -6829,6 +6832,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
 
                     b.HasIndex("WorkflowRequestId");
 
@@ -7128,6 +7133,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("ApexERP.Domain.Entities.WorkflowApproval", b =>
                 {
+                    b.HasOne("ApexERP.Domain.Entities.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ApexERP.Domain.Entities.WorkflowRequest", null)
                         .WithMany("Approvals")
                         .HasForeignKey("WorkflowRequestId")
