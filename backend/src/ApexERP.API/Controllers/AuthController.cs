@@ -189,6 +189,7 @@ namespace ApexERP.API.Controllers
 
         [HttpGet("companies")]
         [Authorize]
+        [AuthenticatedOnly]
         public async Task<IActionResult> MyCompanies(CancellationToken ct)
         {
             var userId = CurrentUserId;
@@ -209,6 +210,7 @@ namespace ApexERP.API.Controllers
 
         [HttpPost("switch-company")]
         [Authorize]
+        [AuthenticatedOnly]
         [EnableRateLimiting("auth")]
         public async Task<IActionResult> SwitchCompany(SwitchCompanyRequest request, CancellationToken ct)
         {
