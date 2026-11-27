@@ -155,6 +155,61 @@ namespace ApexERP.Tests
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => refreshAuth.RefreshAsync(session.RefreshToken, null));
         }
 
+        [PostgresFact]
+        public async Task Company_switch_uses_the_target_company_role_and_rejects_revoked_or_cross_tenant_membership()
+        {
+            await using var db = await TestDb.CreateAsync();
+            await using var ctx = db.NewContext(null);
+            var auth = new AuthService(ctx, Secret, "apex");
+            var user = await auth.RegisterCompanyAndAdminAsync(
+                "Multi-company tenant", "multi-company@example.com", "Correct-Horse-9!", "Multi", "Company");
+            var tenantId = await ctx.Companies.IgnoreQueryFilters()
+                .Where(x => x.Id == user.CompanyId).Select(x => x.TenantId).SingleAsync();
+
+            var targetCompany = new Company
+            {
+                TenantId = tenantId, Name = "Subsidiary", BaseCurrency = "USD", FunctionalCurrency = "USD"
+            };
+            var targetRole = new Role
+            {
+                CompanyId = targetCompany.Id, Name = "Subsidiary Accountant",
+                PermissionsJson = "[\\"reports.financial.read\\"]"
+            };
+            ctx.Companies.Add(targetCompany);
+            ctx.Roles.Add(targetRole);
+            var membership = new CompanyMembership
+            {
+                CompanyId = targetCompany.Id, UserId = user.Id, RoleId = targetRole.Id,
+                MembershipRole = targetRole.Name, IsActive = true, ValidFrom = DateTime.UtcNow
+            };
+            ctx.CompanyMemberships.Add(membership);
+            await ctx.SaveChangesAsync();
+
+            var switched = await auth.IssueTokensForCompanyAsync(user.Id, targetCompany.Id, "127.0.0.1");
+            var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(switched.AccessToken);
+            Assert.Equal(targetCompany.Id.ToString(), jwt.Claims.Single(x => x.Type == "company_id").Value);
+            Assert.Equal(targetRole.Id.ToString(), jwt.Claims.Single(x => x.Type == "role_id").Value);
+            Assert.Equal("Subsidiary Accountant", jwt.Claims.Single(x => x.Type == System.Security.Claims.ClaimTypes.Role).Value);
+
+            membership.IsActive = false;
+            membership.ValidTo = DateTime.UtcNow;
+            await ctx.SaveChangesAsync();
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                () => auth.IssueTokensForCompanyAsync(user.Id, targetCompany.Id, "127.0.0.1"));
+
+            var foreignTenant = new CustomerOrganisation { Name = "Separate tenant" };
+            var foreignCompany = new Company
+            {
+                Tenant = foreignTenant, TenantId = foreignTenant.Id, Name = "Foreign company",
+                BaseCurrency = "USD", FunctionalCurrency = "USD"
+            };
+            ctx.CustomerOrganisations.Add(foreignTenant);
+            ctx.Companies.Add(foreignCompany);
+            await ctx.SaveChangesAsync();
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                () => auth.IssueTokensForCompanyAsync(user.Id, foreignCompany.Id, "127.0.0.1"));
+        }
+
         // ---- database-level guards (AppendOnlyDatabaseGuards migration) ---------------------------------------------------
 
         [PostgresFact]
