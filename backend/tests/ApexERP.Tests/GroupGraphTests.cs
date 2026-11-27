@@ -48,6 +48,20 @@ namespace ApexERP.Tests
         }
 
         [Fact]
+        public void Ancestors_stop_at_a_parent_outside_the_tenant_scoped_map()
+        {
+            var outsideTenantParent = Guid.NewGuid();
+            var scopedMap = new Dictionary<Guid, Guid?>
+            {
+                [A] = outsideTenantParent,
+                [B] = null
+            };
+
+            Assert.Empty(GroupGraph.Ancestors(scopedMap, A));
+            Assert.Equal(new[] { A }, GroupGraph.Visible(scopedMap, A));
+        }
+
+        [Fact]
         public void Cycle_detection()
         {
             Assert.True(GroupGraph.WouldCreateCycle(Map(), A, C));   // making A a child of its own grandchild
