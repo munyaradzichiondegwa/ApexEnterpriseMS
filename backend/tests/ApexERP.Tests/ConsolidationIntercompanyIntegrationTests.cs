@@ -183,7 +183,7 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         Assert.Equal(0m, intercompanyLine.ConsolidatedAmount);
         var pnlLine = Assert.Single(result.Lines, x => x.Code == "IC-REV");
         Assert.Equal(0m, pnlLine.ConsolidatedAmount);
-        Assert.Equal(100m, pnlLine.EliminatedAmount + 100m); // both sides removed; signed elimination net is zero
+        Assert.Equal(0m, pnlLine.EliminatedAmount); // reciprocal debit/credit elimination entries net to zero
         var buyerRateEvidence = Assert.Single(result.RateEvidence, x =>
             x.CompanyId == group.CompanyBId && x.EffectiveDate == new DateTime(2026, 1, 31));
         Assert.Equal("EUR", buyerRateEvidence.FromCurrency);
