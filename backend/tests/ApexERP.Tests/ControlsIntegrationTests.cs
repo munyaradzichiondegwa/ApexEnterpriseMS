@@ -152,8 +152,8 @@ namespace ApexERP.Tests
             var tenantId = await context.Companies.IgnoreQueryFilters()
                 .Where(x => x.Id == user.CompanyId).Select(x => x.TenantId).SingleAsync();
             var company = new Company { TenantId = tenantId, Name = "Membership Subsidiary", BaseCurrency = "USD", FunctionalCurrency = "USD" };
-            var role = new Role { CompanyId = company.Id, Name = "Subsidiary User", PermissionsJson = "[\\"reports.financial.read\\"]" };
-            var replacementRole = new Role { CompanyId = company.Id, Name = "Replacement User", PermissionsJson = "[\\"reports.financial.read\\"]" };
+            var role = new Role { CompanyId = company.Id, Name = "Subsidiary User", PermissionsJson = "[\"reports.financial.read\"]" };
+            var replacementRole = new Role { CompanyId = company.Id, Name = "Replacement User", PermissionsJson = "[\"reports.financial.read\"]" };
             context.Companies.Add(company);
             context.Roles.AddRange(role, replacementRole);
             var membership = new CompanyMembership { CompanyId = company.Id, UserId = user.Id, MembershipRole = role.Name, RoleId = role.Id, IsActive = true, ValidFrom = DateTime.UtcNow };
