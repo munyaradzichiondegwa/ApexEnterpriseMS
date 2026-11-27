@@ -232,6 +232,7 @@ namespace ApexERP.Application.Services
             var sameCurrency = string.Equals(functionalCurrency, targetCurrency, StringComparison.OrdinalIgnoreCase);
             var rates = new List<ExchangeRate>();
             var inverseRates = false;
+            Func<DateTime, decimal> rateAt = _ => 1m;
             if (!sameCurrency)
             {
                 rates = await _db.ExchangeRates.IgnoreQueryFilters()
@@ -249,13 +250,13 @@ namespace ApexERP.Application.Services
                 if (rates.Count == 0)
                     throw new InvalidOperationException($"Missing exchange rates to translate subsidiary {company.Name} from {functionalCurrency} to group currency {targetCurrency}.");
 
-                decimal RateAt(DateTime date)
+                rateAt = date =>
                 {
                     var rate = rates.LastOrDefault(r => r.RateDate.Date <= date.Date);
                     if (rate == null)
                         throw new InvalidOperationException($"No {functionalCurrency}/{targetCurrency} exchange rate is available on or before {date:yyyy-MM-dd} for subsidiary {company.Name}.");
                     return inverseRates ? 1m / rate.Rate : rate.Rate;
-                }
+                };
             }
 
             var accountBalances = new Dictionary<Guid, decimal>();
@@ -273,13 +274,13 @@ namespace ApexERP.Application.Services
                 else if (account.Type is GlAccountType.Asset or GlAccountType.Liability)
                 {
                     var localBalance = accountMovements.Sum(m => m.BaseDebit - m.BaseCredit);
-                    translatedBalance = localBalance * RateAt(asOfDate);
+                    translatedBalance = localBalance * rateAt(asOfDate);
                 }
                 else
                 {
                     // IAS 21 transaction-date rates for equity and profit-or-loss movements.
                     translatedBalance = accountMovements.Sum(m =>
-                        (m.BaseDebit - m.BaseCredit) * RateAt(m.EntryDate));
+                        (m.BaseDebit - m.BaseCredit) * rateAt(m.EntryDate));
                 }
                 accountBalances[account.Id] = translatedBalance;
             }
