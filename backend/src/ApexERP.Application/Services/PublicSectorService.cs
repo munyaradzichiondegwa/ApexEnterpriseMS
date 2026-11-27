@@ -7,6 +7,12 @@ namespace ApexERP.Application.Services
 {
     public record BudgetUtilization(Guid FundCentreId, string Code, string Name, decimal Appropriation,
         decimal Commitments, decimal Actuals, decimal Available, decimal PercentUtilised, bool OverNinetyPercent);
+    public record PublicSectorExpenditureLine(Guid FundCentreId, string Code, string Name,
+        FundCentreLevel Level, Guid? ParentId, string? ParentCode, string? ParentName,
+        decimal Appropriation, decimal CarriedForward, decimal TotalBudget,
+        decimal CommittedToDate, decimal RealisedAgainstCommitments, decimal OutstandingCommitments,
+        decimal PostedActuals, decimal AvailableBudget, decimal PercentUtilised, decimal LapsedAmount,
+        bool IsClosed);
     public record YearEndCloseResult(Guid FundCentreId, decimal UnexpendedBalance, decimal CarriedForward, decimal Lapsed, Guid? NewFundCentreId);
 
     /// <summary>
@@ -225,6 +231,77 @@ namespace ApexERP.Application.Services
             var pctUtilised = totalAppropriation == 0 ? 0 : Math.Round((commitments + actuals) / totalAppropriation * 100, 2);
 
             return new BudgetUtilization(fc.Id, fc.Code, fc.Name, totalAppropriation, commitments, actuals, available, pctUtilised, pctUtilised > 90);
+        }
+
+        /// <summary>
+        /// Vote/program/sub-program expenditure schedule. Encumbrances are shown separately from
+        /// realised commitments, while actual expenditure is sourced only from posted GL journals.
+        /// This prevents AP headers or commitment realisations from being double-counted as actuals.
+        /// </summary>
+        public async Task<List<PublicSectorExpenditureLine>> GetExpenditureReportAsync(
+            Guid companyId, int financialYear, CancellationToken ct = default)
+        {
+            if (financialYear < 2000 || financialYear > 2200)
+                throw new InvalidOperationException("A valid financial year is required.");
+
+            var fundCentres = await _db.FundCentres
+                .Where(f => f.CompanyId == companyId && f.FinancialYear == financialYear)
+                .OrderBy(f => f.Level).ThenBy(f => f.Code)
+                .ToListAsync(ct);
+            if (fundCentres.Count == 0) return new List<PublicSectorExpenditureLine>();
+
+            var fundCentreIds = fundCentres.Select(f => f.Id).ToList();
+            var commitmentTotals = await _db.Commitments
+                .Where(c => c.CompanyId == companyId && fundCentreIds.Contains(c.FundCentreId) &&
+                    c.Status != CommitmentStatus.Cancelled)
+                .GroupBy(c => c.FundCentreId)
+                .Select(g => new
+                {
+                    FundCentreId = g.Key,
+                    Committed = g.Sum(c => c.Amount),
+                    Realised = g.Sum(c => c.RealisedAmount),
+                    Outstanding = g.Where(c => c.Status == CommitmentStatus.Active)
+                        .Sum(c => c.Amount - c.RealisedAmount)
+                })
+                .ToDictionaryAsync(x => x.FundCentreId, ct);
+
+            var fiscalStartMonth = await _db.Companies.Where(c => c.Id == companyId)
+                .Select(c => c.FiscalYearStartMonth).FirstOrDefaultAsync(ct);
+            var periodStart = FiscalCalendar.FiscalYearStart(new DateTime(financialYear, 12, 31), fiscalStartMonth);
+            var periodEnd = periodStart.AddYears(1);
+            var actualTotals = await _db.JournalLines
+                .Where(l => l.FundCentreId.HasValue && fundCentreIds.Contains(l.FundCentreId.Value) &&
+                    l.JournalEntry!.CompanyId == companyId &&
+                    l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate < periodEnd &&
+                    (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
+                .GroupBy(l => l.FundCentreId!.Value)
+                .Select(g => new { FundCentreId = g.Key, Actuals = g.Sum(l => l.BaseDebit - l.BaseCredit) })
+                .ToDictionaryAsync(x => x.FundCentreId, x => x.Actuals, ct);
+
+            var byId = fundCentres.ToDictionary(f => f.Id);
+            var report = new List<PublicSectorExpenditureLine>(fundCentres.Count);
+            foreach (var fundCentre in fundCentres)
+            {
+                commitmentTotals.TryGetValue(fundCentre.Id, out var commitments);
+                actualTotals.TryGetValue(fundCentre.Id, out var actuals);
+                byId.TryGetValue(fundCentre.ParentId ?? Guid.Empty, out var parent);
+                var appropriation = fundCentre.AppropriationAmount;
+                var carriedForward = fundCentre.CarriedForwardAmount;
+                var totalBudget = appropriation + carriedForward;
+                var committed = commitments?.Committed ?? 0m;
+                var realised = commitments?.Realised ?? 0m;
+                var outstanding = commitments?.Outstanding ?? 0m;
+                var available = totalBudget - outstanding - actuals;
+                var utilised = totalBudget == 0m ? 0m :
+                    Math.Round((outstanding + actuals) / totalBudget * 100m, 2);
+
+                report.Add(new PublicSectorExpenditureLine(
+                    fundCentre.Id, fundCentre.Code, fundCentre.Name, fundCentre.Level,
+                    fundCentre.ParentId, parent?.Code, parent?.Name,
+                    appropriation, carriedForward, totalBudget, committed, realised, outstanding,
+                    actuals, available, utilised, fundCentre.LapsedAmount, fundCentre.IsClosed));
+            }
+            return report;
         }
 
         public async Task<List<BudgetUtilization>> GetAllBudgetUtilizationAsync(Guid companyId, int financialYear, CancellationToken ct = default)
