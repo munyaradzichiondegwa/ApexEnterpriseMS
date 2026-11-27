@@ -69,6 +69,7 @@ public sealed class JurisdictionProfile : BaseEntity
 public sealed class TenantJurisdiction : BaseEntity
 {
     public Guid TenantId { get; set; }
+    public Guid? CompanyId { get; set; }
     public string CountryCode { get; set; } = "";
     public string FunctionalCurrency { get; set; } = "USD";
     public int FiscalYearStartMonth { get; set; } = 1;
