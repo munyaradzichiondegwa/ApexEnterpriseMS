@@ -151,6 +151,7 @@ namespace ApexERP.Application.Services
                 if (realisedAmount > remaining + 0.000001m)
                     throw new InvalidOperationException($"The invoice exceeds the remaining commitment ({remaining:N2}).");
 
+                var previousRealisedAmount = commitment.RealisedAmount;
                 commitment.RealisedAmount = Math.Min(commitment.Amount, commitment.RealisedAmount + realisedAmount);
                 if (commitment.Amount - commitment.RealisedAmount <= 0.000001m)
                 {
@@ -160,49 +161,94 @@ namespace ApexERP.Application.Services
                 }
                 _audit.Record(companyId, _db.CurrentUserId, "BudgetCommitment.Realised", "PublicSector",
                     nameof(Commitment), commitment.Id,
-                    new { previousRealisedAmount = commitment.RealisedAmount - realisedAmount },
+                    new { previousRealisedAmount },
                     new { invoiceRealisedAmount = realisedAmount, cumulativeRealisedAmount = commitment.RealisedAmount,
                         remainingCommitmentAmount = commitment.Amount - commitment.RealisedAmount });
+                if (commitment.Status == CommitmentStatus.Released)
+                    _audit.Record(companyId, _db.CurrentUserId, "BudgetCommitment.Released", "PublicSector",
+                        nameof(Commitment), commitment.Id,
+                        new { status = CommitmentStatus.Active, realisedAmount = previousRealisedAmount },
+                        new { status = commitment.Status, realisedAmount = commitment.RealisedAmount,
+                            releasedDate = commitment.ReleasedDate, reason = "Fully realised by posted AP invoices" });
                 await _db.SaveChangesAsync(token);
                 return true;
             }, ct);
         }
 
-        /// <summary>Releases a commitment when the GRN/invoice posts (the actual expenditure replaces
-        /// the estimate). Call this from SupplyChainService/ApService when a PO with a FundCentreId is fulfilled.</summary>
-        public async Task ReleaseCommitmentForPoAsync(Guid companyId, Guid purchaseOrderId, CancellationToken ct = default)
-        {
-            var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
-                c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId &&
-                c.Status == CommitmentStatus.Active, ct);
-            if (commitment == null) return; // no active commitment for this PO -- idempotent for untracked/already released POs
-            await ReleaseCommitmentAsync(companyId, commitment.Id, ct);
-        }
+        /// <summary>Idempotently releases a PO encumbrance. Repeated release attempts are retained in the audit log.</summary>
+        public Task ReleaseCommitmentForPoAsync(Guid companyId, Guid purchaseOrderId, CancellationToken ct = default) =>
+            _db.InTransactionAsync(async token =>
+            {
+                await _db.AcquireTransactionLockAsync($"public-sector-po-commitment:{companyId:N}:{purchaseOrderId:N}", token);
+                var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
+                    c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId, token);
+                if (commitment == null) return false;
+                return await ReleaseCommitmentLockedAsync(commitment, "Purchase order release request", token);
+            }, ct);
 
-        /// <summary>Releases a specific encumbrance when its linked AP invoice is posted.
-        /// This is keyed by Commitment.Id, not PurchaseOrderId.</summary>
-        public async Task ReleaseCommitmentAsync(Guid companyId, Guid commitmentId, CancellationToken ct = default)
-        {
-            var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
-                c.CompanyId == companyId && c.Id == commitmentId, ct);
-            if (commitment == null)
-                throw new InvalidOperationException("Commitment not found in this company.");
-            if (commitment.Status != CommitmentStatus.Active) return;
+        /// <summary>Releases a specific encumbrance when explicitly requested, keyed by Commitment.Id.</summary>
+        public Task ReleaseCommitmentAsync(Guid companyId, Guid commitmentId, CancellationToken ct = default) =>
+            _db.InTransactionAsync(async token =>
+            {
+                await _db.AcquireTransactionLockAsync($"public-sector-commitment:{companyId:N}:{commitmentId:N}", token);
+                var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
+                    c.CompanyId == companyId && c.Id == commitmentId, token)
+                    ?? throw new InvalidOperationException("Commitment not found in this company.");
+                return await ReleaseCommitmentLockedAsync(commitment, "Explicit commitment release request", token);
+            }, ct);
 
+        private async Task<bool> ReleaseCommitmentLockedAsync(Commitment commitment, string reason, CancellationToken ct)
+        {
+            if (commitment.Status != CommitmentStatus.Active)
+            {
+                _audit.Record(commitment.CompanyId, _db.CurrentUserId, "BudgetCommitment.ReleaseNoOp", "PublicSector",
+                    nameof(Commitment), commitment.Id,
+                    new { status = commitment.Status, releasedDate = commitment.ReleasedDate },
+                    new { reason, outcome = "No change; commitment is not active" });
+                await _db.SaveChangesAsync(ct);
+                return false;
+            }
+
+            var previousStatus = commitment.Status;
+            var previousRealisedAmount = commitment.RealisedAmount;
             commitment.Status = CommitmentStatus.Released;
             commitment.ReleasedDate = DateTime.UtcNow;
+            _audit.Record(commitment.CompanyId, _db.CurrentUserId, "BudgetCommitment.Released", "PublicSector",
+                nameof(Commitment), commitment.Id,
+                new { status = previousStatus, realisedAmount = previousRealisedAmount },
+                new { status = commitment.Status, releasedDate = commitment.ReleasedDate, reason });
             await _db.SaveChangesAsync(ct);
+            return true;
         }
 
-        /// <summary>Fully reverses a commitment on PO cancellation.</summary>
-        public async Task CancelCommitmentForPoAsync(Guid companyId, Guid purchaseOrderId, CancellationToken ct = default)
-        {
-            var commitment = await _db.Commitments.FirstOrDefaultAsync(c => c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId && c.Status == CommitmentStatus.Active, ct);
-            if (commitment == null) return;
-            commitment.Status = CommitmentStatus.Cancelled;
-            commitment.ReleasedDate = DateTime.UtcNow;
-            await _db.SaveChangesAsync(ct);
-        }
+        /// <summary>Fully reverses a commitment on PO cancellation; duplicate cancellation is audited as a no-op.</summary>
+        public Task CancelCommitmentForPoAsync(Guid companyId, Guid purchaseOrderId, CancellationToken ct = default) =>
+            _db.InTransactionAsync(async token =>
+            {
+                await _db.AcquireTransactionLockAsync($"public-sector-po-commitment:{companyId:N}:{purchaseOrderId:N}", token);
+                var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
+                    c.CompanyId == companyId && c.PurchaseOrderId == purchaseOrderId, token);
+                if (commitment == null) return false;
+                if (commitment.Status != CommitmentStatus.Active)
+                {
+                    _audit.Record(companyId, _db.CurrentUserId, "BudgetCommitment.CancelNoOp", "PublicSector",
+                        nameof(Commitment), commitment.Id,
+                        new { status = commitment.Status, releasedDate = commitment.ReleasedDate },
+                        new { reason = "Purchase order cancellation request; commitment is not active" });
+                    await _db.SaveChangesAsync(token);
+                    return false;
+                }
+
+                var previousStatus = commitment.Status;
+                commitment.Status = CommitmentStatus.Cancelled;
+                commitment.ReleasedDate = DateTime.UtcNow;
+                _audit.Record(companyId, _db.CurrentUserId, "BudgetCommitment.Cancelled", "PublicSector",
+                    nameof(Commitment), commitment.Id,
+                    new { status = previousStatus, realisedAmount = commitment.RealisedAmount },
+                    new { status = commitment.Status, releasedDate = commitment.ReleasedDate });
+                await _db.SaveChangesAsync(token);
+                return true;
+            }, ct);
 
         public async Task<BudgetUtilization> GetBudgetUtilizationAsync(Guid companyId, Guid fundCentreId, CancellationToken ct = default)
         {
