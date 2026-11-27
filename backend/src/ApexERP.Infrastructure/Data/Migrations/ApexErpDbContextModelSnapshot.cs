@@ -1664,6 +1664,44 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("Commitments");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.CustomerOrganisation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LegalName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RegistrationNumber")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RegistrationNumber");
+
+                    b.ToTable("CustomerOrganisations");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.Company", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1721,6 +1759,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<string>("Sector")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Timezone")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1735,6 +1776,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("Companies");
                 });
@@ -6301,6 +6344,16 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.Company", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.CustomerOrganisation", "Tenant")
+                        .WithMany("Companies")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.User", b =>
                 {
                     b.HasOne("ApexERP.Domain.Entities.Company", null)
@@ -6369,7 +6422,14 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("ApexERP.Domain.Entities.Company", b =>
                 {
+                    b.Navigation("Tenant");
+
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.CustomerOrganisation", b =>
+                {
+                    b.Navigation("Companies");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.GoodsReceipt", b =>
