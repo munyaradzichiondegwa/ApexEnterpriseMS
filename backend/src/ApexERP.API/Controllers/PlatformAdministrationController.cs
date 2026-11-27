@@ -198,6 +198,14 @@ public sealed class PlatformAdministrationController : ControllerBase
             !string.Equals(invitation.Email, request.Email.Trim(), StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { error = "Invitation is invalid, expired or already used." });
 
+        var subscription = await _db.TenantSubscriptions.Where(x => x.TenantId == invitation.TenantId).OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+        if (subscription is null || subscription.Status is not ("Active" or "Trial") ||
+            (subscription.TrialEndsAt.HasValue && subscription.TrialEndsAt.Value <= DateTime.UtcNow) ||
+            (subscription.CurrentPeriodEndsAt.HasValue && subscription.CurrentPeriodEndsAt.Value <= DateTime.UtcNow))
+            return StatusCode(402, new { error = "The tenant subscription is inactive or expired." });
+        var plan = await _db.SubscriptionPlans.SingleAsync(x => x.Id == subscription.PlanId, ct);
+        var seatLimit = subscription.SeatOverride > 0 ? subscription.SeatOverride : plan.MaxSeats;
+        if (seatLimit < 1) return StatusCode(402, new { error = "The subscription has no administrator seat available." });
         if (await _db.Users.IgnoreQueryFilters().AnyAsync(x => x.Email == invitation.Email, ct))
             return Conflict(new { error = "An account with this email already exists. Ask the platform administrator to issue a user invitation." });
 
