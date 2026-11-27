@@ -124,9 +124,25 @@ public sealed class StatutoryPackIntegrationTests
         var service = new StatutoryPackService(ctx, new AuditService(ctx));
         var sources = new List<StatutoryPackSource>
         {
-            new("Test Revenue Authority", "Income Tax Act", "https://example.gov/legislation/income-tax", null, new DateTime(2026, 1, 1))
+            new("ZIMRA", "Verified Zimbabwe tax schedules", "https://example.gov/zimra/tax", null, new DateTime(2026, 1, 1)),
+            new("NSSA", "Verified social security contribution schedules", "https://example.gov/nssa/contributions", null, new DateTime(2026, 1, 1))
         };
-        const string rules = "{ \"coverage\": \"complete\", \"withholding\": { \"status\": \"reviewed\" } }";
+        const string rules = """
+        {
+          "coverage": "complete",
+          "paye": {
+            "USD": { "monthly": [ { "from": 0, "to": null, "rate": 0.20, "deduction": 0 } ] },
+            "ZWG": { "monthly": [ { "from": 0, "to": null, "rate": 0.10, "deduction": 0 } ] }
+          },
+          "nssa": {
+            "USD": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 700 },
+            "ZWG": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 7000 }
+          },
+          "corporateIncomeTax": { "standardCompanyOrTrustRate": 0.25 },
+          "vat": { "standardRate": 0.155, "zeroRatedSupplies": [], "exemptSupplies": [] },
+          "withholding": { "status": "reviewed" }
+        }
+        """;
 
         var invalidSources = new List<StatutoryPackSource>
         {
