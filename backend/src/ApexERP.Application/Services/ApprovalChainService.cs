@@ -80,6 +80,8 @@ namespace ApexERP.Application.Services
                 ReferenceId = referenceId,
                 ReferenceTable = referenceTable,
                 SubmittedBy = submittedBy,
+                Amount = amount,
+                FundCentreId = fundCentreId,
                 Status = WorkflowStatus.Pending,
                 ApprovalChainId = chain.Id,
                 Notes = notes,
