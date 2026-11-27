@@ -63,7 +63,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("CompanyId", "Code")
                         .IsUnique();
 
-                    b.ToTable("OrganisationalBranchs");
+                    b.ToTable("OrganisationalBranches");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.CompanyMembership", b =>
