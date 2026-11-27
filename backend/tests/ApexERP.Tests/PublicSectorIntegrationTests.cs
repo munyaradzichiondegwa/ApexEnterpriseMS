@@ -339,7 +339,7 @@ namespace ApexERP.Tests
             }
 
             await using var ctx = db.NewContext(companyId);
-            var tenderService = new TenderService(ctx);
+            var tenderService = new TenderService(ctx, new ApprovalChainService(ctx));
             var tender = await tenderService.CreateTenderAsync(companyId, "Office supplies",
                 "Stationery and office consumables", DateTime.UtcNow.AddMinutes(-1));
             var bid = await tenderService.SubmitBidAsync(companyId, tender.Id, vendorId, 500m);
