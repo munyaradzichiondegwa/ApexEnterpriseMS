@@ -319,6 +319,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("CompanyId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("CountryCode")
                         .IsRequired()
                         .HasColumnType("text");
@@ -359,7 +362,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "CountryCode")
+                    b.HasIndex("TenantId", "CompanyId", "CountryCode")
                         .IsUnique();
 
                     b.ToTable("TenantJurisdictions");
