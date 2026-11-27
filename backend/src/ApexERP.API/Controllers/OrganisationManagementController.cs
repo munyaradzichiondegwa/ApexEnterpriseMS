@@ -60,11 +60,14 @@ public sealed class OrganisationManagementController : ApiControllerBase
         var count = await _db.Companies.IgnoreQueryFilters().CountAsync(x => x.TenantId == TenantId && x.IsActive, ct);
         if (count >= limit) return Conflict(new { error = "The subscription company limit has been reached.", limit });
 
+        if (request.OwnershipPercentage.HasValue && (request.OwnershipPercentage < 0 || request.OwnershipPercentage > 100))
+            return BadRequest(new { error = "Ownership percentage must be between 0 and 100." });
         if (request.ParentCompanyId.HasValue &&
             !await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == request.ParentCompanyId && x.TenantId == TenantId && x.IsActive, ct))
             return BadRequest(new { error = "The parent company must be an active legal entity in this tenant." });
 
         var sourceRoles = await _db.Roles.IgnoreQueryFilters().Where(x => x.CompanyId == CompanyId).AsNoTracking().ToListAsync(ct);
+        if (sourceRoles.Count == 0) sourceRoles.Add(new Role { CompanyId = CompanyId, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\\"*\\"]" });
         var company = new Company
         {
             TenantId = TenantId, Name = request.Name.Trim(), RegistrationNo = request.RegistrationNo,
@@ -146,7 +149,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
         if (userTenant != TenantId) return BadRequest(new { error = "Membership cannot cross tenant boundaries." });
         var role = await _db.Roles.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.RoleId && x.CompanyId == companyId, ct);
         if (role is null) return BadRequest(new { error = "Role must belong to the target company." });
-        if (await _db.CompanyMemberships.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.UserId == user.Id && x.IsActive, ct))
+        var existingMembership = await _db.CompanyMemberships.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.CompanyId == companyId && x.UserId == user.Id, ct);
+        if (existingMembership?.IsActive == true)
             return Conflict(new { error = "User is already an active member of this company." });
 
         var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId).OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
@@ -159,8 +163,11 @@ public sealed class OrganisationManagementController : ApiControllerBase
         if (seats >= seatLimit && !await _db.CompanyMemberships.IgnoreQueryFilters().AnyAsync(x => x.UserId == user.Id && x.IsActive, ct))
             return Conflict(new { error = "The subscription seat limit has been reached.", seatLimit });
 
-        _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = companyId, UserId = user.Id,
-            MembershipRole = role.Name, RoleId = role.Id, IsActive = true, IsDefault = false, ValidFrom = DateTime.UtcNow });
+        if (existingMembership is null)
+            _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = companyId, UserId = user.Id,
+                MembershipRole = role.Name, RoleId = role.Id, IsActive = true, IsDefault = false, ValidFrom = DateTime.UtcNow });
+        else { existingMembership.MembershipRole = role.Name; existingMembership.RoleId = role.Id;
+            existingMembership.IsActive = true; existingMembership.ValidTo = null; existingMembership.ValidFrom = DateTime.UtcNow; }
         await _db.SaveChangesAsync(ct);
         return Ok(new { added = true, userId = user.Id, companyId, role = role.Name });
     }
@@ -211,6 +218,11 @@ public sealed class OrganisationManagementController : ApiControllerBase
         var membership = await _db.CompanyMemberships.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == membershipId, ct);
         if (membership is null || !await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == membership.CompanyId && x.TenantId == TenantId, ct)) return NotFound();
         if (membership.UserId == UserId) return BadRequest(new { error = "Administrators cannot remove their own membership through this endpoint." });
+        if (string.Equals(membership.MembershipRole, "Administrator", StringComparison.OrdinalIgnoreCase))
+        {
+            var otherAdmins = await _db.CompanyMemberships.IgnoreQueryFilters().CountAsync(x => x.CompanyId == membership.CompanyId && x.IsActive && x.Id != membership.Id && x.MembershipRole == "Administrator", ct);
+            if (otherAdmins == 0) return Conflict(new { error = "The last active company administrator cannot be removed." });
+        }
         membership.IsActive = false; membership.ValidTo = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return Ok(new { deactivated = true });
