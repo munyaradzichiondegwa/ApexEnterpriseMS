@@ -382,7 +382,7 @@ namespace ApexERP.Tests
             // report the hash mismatch rather than silently treating the bytes as verified.
             await using (var corrupt = db.NewContext(null))
             {
-                var stored = await corrupt.AuditEvidenceReferences.SingleAsync(x => x.Id == attached.Id);
+                var stored = await corrupt.AuditEvidenceReferences.IgnoreQueryFilters().SingleAsync(x => x.Id == attached.Id);
                 stored.Content = Encoding.UTF8.GetBytes("tampered evidence");
                 await corrupt.SaveChangesAsync();
             }
