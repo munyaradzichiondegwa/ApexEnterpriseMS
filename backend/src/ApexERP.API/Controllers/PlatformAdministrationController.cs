@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ApexERP.API.Authorization;
 using ApexERP.API.Services;
+using System.Globalization;
 
 namespace ApexERP.API.Controllers;
 
@@ -24,7 +25,8 @@ public sealed class PlatformAdministrationController : ControllerBase
     private readonly ApexErpDbContext _db;
     private readonly AuthService _auth;
     private readonly IEmailDeliveryService _email;
-    public PlatformAdministrationController(ApexErpDbContext db, AuthService auth, IEmailDeliveryService email) { _db = db; _auth = auth; _email = email; }
+    private readonly IConfiguration _configuration;
+    public PlatformAdministrationController(ApexErpDbContext db, AuthService auth, IEmailDeliveryService email, IConfiguration configuration) { _db = db; _auth = auth; _email = email; _configuration = configuration; }
 
     [HttpGet("plans")]
     public async Task<IActionResult> Plans(CancellationToken ct)
@@ -348,8 +350,9 @@ public sealed class PlatformAdministrationController : ControllerBase
             return BadRequest(new { error = "A supported job type and requester are required." });
         using var scope = _db.SystemAccessScope("platform admin: queue tenant lifecycle operation");
         if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
+        var providerReady = !string.IsNullOrWhiteSpace(_configuration["Operations:WorkerUrl"]) && !string.IsNullOrWhiteSpace(_configuration["Operations:WorkerSecret"]);
         var job = new TenantLifecycleJob { TenantId = tenantId, JobType = request.JobType,
-            RequestedBy = request.RequestedBy.Trim(), Status = "Queued" };
+            RequestedBy = request.RequestedBy.Trim(), Status = providerReady ? "Queued" : "AwaitingProvider" };
         _db.TenantLifecycleJobs.Add(job);
         await _db.SaveChangesAsync(ct);
         await AuditAsync("tenant.lifecycle-job.queued", "TenantLifecycleJob", job.Id.ToString(), new { job.JobType }, ct);
@@ -407,10 +410,52 @@ public sealed class PlatformAdministrationController : ControllerBase
             .OrderByDescending(x => x.CreatedAt).Take(100).ToListAsync(ct));
     }
 
+
+    [HttpPost("lifecycle-jobs/{jobId:guid}/callback")]
+    [AllowAnonymous]
+    public async Task<IActionResult> LifecycleJobCallback(Guid jobId, CancellationToken ct)
+    {
+        var secret = _configuration["Operations:WorkerSecret"];
+        if (string.IsNullOrWhiteSpace(secret)) return StatusCode(503, new { error = "Operations callback authentication is not configured." });
+        var timestamp = Request.Headers["X-Apex-Timestamp"].ToString();
+        var signature = Request.Headers["X-Apex-Signature"].ToString();
+        if (!long.TryParse(timestamp, NumberStyles.None, CultureInfo.InvariantCulture, out var epoch) ||
+            Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - epoch) > 300 || string.IsNullOrWhiteSpace(signature))
+            return Unauthorized();
+        using var reader = new StreamReader(Request.Body, Encoding.UTF8, leaveOpen: true);
+        var body = await reader.ReadToEndAsync(ct);
+        var expected = TenantLifecycleDispatcher.Sign(secret, timestamp + "\n" + body);
+        byte[] suppliedBytes;
+        try { suppliedBytes = Convert.FromHexString(signature); } catch { return Unauthorized(); }
+        var expectedBytes = Convert.FromHexString(expected);
+        if (suppliedBytes.Length != expectedBytes.Length || !CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes))
+            return Unauthorized();
+        JsonDocument payload;
+        try { payload = JsonDocument.Parse(body); } catch { return BadRequest(new { error = "Callback body must be valid JSON." }); }
+        using (payload)
+        {
+            var root = payload.RootElement;
+            var status = root.TryGetProperty("status", out var s) ? s.GetString() : null;
+            if (status is not ("Running" or "Succeeded" or "Failed")) return BadRequest(new { error = "Callback status must be Running, Succeeded or Failed." });
+            using var scope = _db.SystemAccessScope("operations worker: authenticated lifecycle callback");
+            var job = await _db.TenantLifecycleJobs.SingleOrDefaultAsync(x => x.Id == jobId, ct);
+            if (job is null) return NotFound();
+            if (job.Status is "Succeeded" or "Failed" or "Cancelled") return Conflict(new { error = "Lifecycle job is already terminal." });
+            job.Status = status;
+            if (status == "Running") job.StartedAt ??= DateTime.UtcNow;
+            if (status is "Succeeded" or "Failed") job.CompletedAt = DateTime.UtcNow;
+            if (root.TryGetProperty("externalJobReference", out var reference)) job.ExternalJobReference = reference.GetString();
+            if (root.TryGetProperty("resultSummary", out var summary)) job.ResultSummary = summary.GetString();
+            await _db.SaveChangesAsync(ct);
+            await AuditAsync("tenant.lifecycle-job.worker-callback", "TenantLifecycleJob", job.Id.ToString(), new { status }, ct);
+            return Ok(new { job.Id, job.Status, job.CompletedAt });
+        }
+    }
+
     [HttpPut("lifecycle-jobs/{jobId:guid}")]
     public async Task<IActionResult> UpdateLifecycleJob(Guid jobId, [FromBody] LifecycleJobStatusRequest request, CancellationToken ct)
     {
-        var transitions = new[] { "Running", "Succeeded", "Failed", "Cancelled" };
+        var transitions = new[] { "Dispatched", "Running", "Succeeded", "Failed", "Cancelled" };
         if (!transitions.Contains(request.Status)) return BadRequest(new { error = "Unsupported lifecycle job status." });
         using var scope = _db.SystemAccessScope("platform admin: update tenant lifecycle job");
         var job = await _db.TenantLifecycleJobs.SingleOrDefaultAsync(x => x.Id == jobId, ct);
