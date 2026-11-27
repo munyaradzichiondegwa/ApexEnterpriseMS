@@ -123,6 +123,13 @@ VALUES
  (gen_random_uuid(),'CA','Canada','CAD','America/Toronto','ASPE/IFRS',true,now())
 ON CONFLICT ("CountryCode") DO NOTHING;
 
+-- Public self-registration is a controlled trial, never an unlicensed tenant.
+INSERT INTO "SubscriptionPlans"
+ ("Id","Code","Name","Description","MaxSeats","MaxCompanies","ModuleCodesJson","MonthlyPrice","Currency","IsPubliclyAvailable","IsActive","CreatedAt")
+VALUES
+ (gen_random_uuid(),'TRIAL','ApexERP Trial','Default 30-day evaluation plan',5,1,'["*"]'::jsonb,NULL,'USD',true,true,now())
+ON CONFLICT ("Code") DO NOTHING;
+
 -- Sector templates are starting configurations, not separate product editions or legal/statutory packs.
 INSERT INTO "DeploymentProfiles"
  ("Id","Code","Name","Sector","ConfigurationJson","IsActive","CreatedAt")
