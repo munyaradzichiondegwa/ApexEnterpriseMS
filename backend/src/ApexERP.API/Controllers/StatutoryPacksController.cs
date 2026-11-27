@@ -8,6 +8,7 @@ namespace ApexERP.API.Controllers;
 
 public sealed record CreateStatutoryPackRequest(string JurisdictionCode, string JurisdictionName, int Version,
     DateTime EffectiveFrom, DateTime? EffectiveTo, string RulesJson, List<StatutoryPackSource> Sources);
+public sealed record UpdateStatutoryPackDraftRequest(string RulesJson, List<StatutoryPackSource> Sources);
 
 [Route("api/v1/statutory-packs")]
 public sealed class StatutoryPacksController : ApiControllerBase
@@ -47,6 +48,14 @@ public sealed class StatutoryPacksController : ApiControllerBase
                 request.Version, request.EffectiveFrom, request.EffectiveTo, request.RulesJson, request.Sources, UserId);
             return Ok(pack);
         }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    [HttpPut("{jurisdictionCode}/{version:int}")]
+    [HasPermission(Permissions.ControlsGovernanceManage)]
+    public async Task<IActionResult> UpdateDraft(string jurisdictionCode, int version, [FromBody] UpdateStatutoryPackDraftRequest request)
+    {
+        try { return Ok(await _packs.UpdateDraftAsync(CompanyId, jurisdictionCode, version, request.RulesJson, request.Sources, UserId)); }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
     }
 
