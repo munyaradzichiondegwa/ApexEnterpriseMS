@@ -78,6 +78,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("RoleId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("MembershipRole")
                         .IsRequired()
                         .HasColumnType("text");
