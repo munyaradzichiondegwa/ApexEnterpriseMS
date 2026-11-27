@@ -189,6 +189,7 @@ namespace ApexERP.Application.Services
             var approvedWorkflow = await _db.WorkflowRequests.Include(w => w.Approvals)
                 .FirstOrDefaultAsync(w => w.CompanyId == companyId && w.RequestType == "TenderAward" &&
                     w.ReferenceTable == "TenderBid" && w.ReferenceId == winningBid.Id &&
+                    w.Amount == winningBid.PriceAmount && w.FundCentreId == null &&
                     w.Status == WorkflowStatus.Approved && w.ApprovalChainId != null, ct);
             if (approvedWorkflow == null || approvedWorkflow.Approvals.Count == 0 ||
                 approvedWorkflow.Approvals.Any(a => !a.Approved))
