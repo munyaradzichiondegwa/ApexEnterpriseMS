@@ -46,8 +46,8 @@ namespace ApexERP.Application.Services
             return Math.Max(0m, Math.Round(paye, 6));
         }
 
-        // Statutory rates are effective-dated configuration (StatutoryRate rows). The constants above are only the
-        // fallback when a company has not configured a code yet, so existing tenants keep working (spec 25.2).
+        // Statutory rates are effective-dated, approved configuration (StatutoryRate rows).
+        // Payroll execution fails closed when the required currency-specific rate is not configured.
         private static StatutoryRate? Pick(IReadOnlyList<StatutoryRate>? rates, string code, string currency) =>
             rates?.Where(r => r.Code == code && string.Equals(r.Currency, currency, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(r => r.EffectiveFrom).FirstOrDefault();
