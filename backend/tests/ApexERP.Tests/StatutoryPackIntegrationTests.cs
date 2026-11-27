@@ -30,7 +30,7 @@ public sealed class StatutoryPackIntegrationTests
         Assert.Equal(1, draft.Version);
         Assert.Equal("Draft", draft.Status);
         Assert.Equal(new DateTime(2026, 1, 1), draft.EffectiveFrom);
-        Assert.Equal(5, draft.Sources.Count);
+        Assert.Equal(7, draft.Sources.Count);
         using var rules = JsonDocument.Parse(draft.RulesJson);
         Assert.Equal(0.155m, rules.RootElement.GetProperty("vat").GetProperty("standardRate").GetDecimal());
         Assert.Equal(0.03m, rules.RootElement.GetProperty("paye").GetProperty("aidsLevyRate").GetDecimal());
@@ -65,6 +65,10 @@ public sealed class StatutoryPackIntegrationTests
             "aidsLevyRate": 0.03,
             "USD": { "monthly": [ { "from": 0, "to": null, "rate": 0.20, "deduction": 0 } ] },
             "ZWG": { "monthly": [ { "from": 0, "to": null, "rate": 0.10, "deduction": 0 } ] }
+          },
+          "nssa": {
+            "USD": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 700 },
+            "ZWG": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 7000 }
           }
         }
         """;
