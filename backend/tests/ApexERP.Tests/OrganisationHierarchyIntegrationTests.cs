@@ -6,6 +6,7 @@ using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace ApexERP.Tests;
@@ -48,6 +49,47 @@ public sealed class OrganisationHierarchyIntegrationTests
         ctx.Companies.Add(company);
         await ctx.SaveChangesAsync();
         return (tenant.Id, company);
+    }
+
+    [PostgresFact]
+    public async Task Scheduled_jobs_execute_with_the_company_and_tenant_context_of_each_job()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var tenantA = new CustomerOrganisation { Name = "Scheduler tenant A" };
+        var tenantB = new CustomerOrganisation { Name = "Scheduler tenant B" };
+        var companyA = new Company { TenantId = tenantA.Id, Name = "Scheduler A", BaseCurrency = "USD", FunctionalCurrency = "USD" };
+        var companyB = new Company { TenantId = tenantB.Id, Name = "Scheduler B", BaseCurrency = "USD", FunctionalCurrency = "USD" };
+        await using (var seed = db.NewContext(null))
+        {
+            seed.CustomerOrganisations.AddRange(tenantA, tenantB);
+            seed.Companies.AddRange(companyA, companyB);
+            await seed.SaveChangesAsync();
+        }
+
+        var observed = new List<(Guid? CompanyId, Guid? TenantId)>();
+        var services = new ServiceCollection();
+        services.AddScoped<ApexErpDbContext>(_ => db.NewContext(null));
+        using var provider = services.BuildServiceProvider();
+        var job = new JobDefinition("tenant-context.probe", "Tenant context probe", _ => "same-run",
+            (sp, _, _) =>
+            {
+                var context = sp.GetRequiredService<ApexErpDbContext>();
+                observed.Add((context.CurrentCompanyId, context.CurrentTenantId));
+                return Task.FromResult("context observed");
+            });
+
+        Assert.Equal(1, await ScheduledJobs.RunDueForCompanyAsync(provider, companyA.Id,
+            new DateTime(2026, 11, 27, 12, 0, 0, DateTimeKind.Utc), new[] { job }));
+        Assert.Equal(1, await ScheduledJobs.RunDueForCompanyAsync(provider, companyB.Id,
+            new DateTime(2026, 11, 27, 12, 0, 0, DateTimeKind.Utc), new[] { job }));
+
+        Assert.Equal(new[] { (companyA.Id, (Guid?)tenantA.Id), (companyB.Id, (Guid?)tenantB.Id) }, observed);
+        await using var verify = db.NewContext(null);
+        var executions = await verify.JobExecutions.IgnoreQueryFilters().Where(x => x.JobCode == job.Code).ToListAsync();
+        Assert.Equal(2, executions.Count);
+        Assert.All(executions, x => Assert.Equal("Succeeded", x.Status));
+        Assert.Equal(new[] { companyA.Id, companyB.Id }.OrderBy(x => x),
+            executions.Select(x => x.CompanyId).OrderBy(x => x));
     }
 
     [PostgresFact]
