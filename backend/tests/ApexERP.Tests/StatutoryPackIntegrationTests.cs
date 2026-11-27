@@ -38,6 +38,58 @@ public sealed class StatutoryPackIntegrationTests
     }
 
     [PostgresFact]
+    public async Task Published_statutory_pack_activates_currency_specific_PAYE_bands_and_levy_rates()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var companyId = Guid.NewGuid();
+        await using (var seed = db.NewContext(companyId))
+        {
+            seed.Companies.Add(new Company
+            {
+                Id = companyId, Name = "Payroll Statutory Integration",
+                BaseCurrency = "USD", FunctionalCurrency = "USD"
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var ctx = db.NewContext(companyId);
+        var packs = new StatutoryPackService(ctx, new AuditService(ctx));
+        var source = new List<StatutoryPackSource>
+        {
+            new("Test Revenue Authority", "Verified PAYE tables", "https://example.gov/paye", null, new DateTime(2026, 1, 1))
+        };
+        const string rules = """
+        {
+          "coverage": "complete",
+          "paye": {
+            "aidsLevyRate": 0.03,
+            "USD": { "monthly": [ { "from": 0, "to": null, "rate": 0.20, "deduction": 0 } ] },
+            "ZWG": { "monthly": [ { "from": 0, "to": null, "rate": 0.10, "deduction": 0 } ] }
+          }
+        }
+        """;
+
+        var preparer = Guid.NewGuid();
+        var reviewer = Guid.NewGuid();
+        var approver = Guid.NewGuid();
+        var publisher = Guid.NewGuid();
+        await packs.CreateDraftAsync(companyId, "ZW", "Zimbabwe", 2, new DateTime(2026, 1, 1),
+            new DateTime(2026, 12, 31), rules, source, preparer);
+        await packs.ReviewAsync(companyId, "ZW", 2, reviewer);
+        await packs.ApproveAsync(companyId, "ZW", 2, approver);
+        await packs.PublishAsync(companyId, "ZW", 2, publisher);
+
+        var payroll = new PayrollService(ctx, null!);
+        Assert.Equal(200m, await payroll.CalculatePayeAsync(companyId, 1000m, new DateTime(2026, 6, 1), "USD"));
+        Assert.Equal(100m, await payroll.CalculatePayeAsync(companyId, 1000m, new DateTime(2026, 6, 1), "ZWG"));
+        var levyRates = await ctx.StatutoryRates.Where(r => r.CompanyId == companyId && r.Code == "AIDS_LEVY").ToListAsync();
+        Assert.Equal(2, levyRates.Count);
+        Assert.All(levyRates, rate => Assert.Equal(3m, rate.RatePct));
+        Assert.Contains(levyRates, rate => rate.Currency == "USD" && rate.ApprovedBy == approver);
+        Assert.Contains(levyRates, rate => rate.Currency == "ZWG" && rate.ApprovedBy == approver);
+    }
+
+    [PostgresFact]
     public async Task Statutory_pack_requires_independent_review_approval_and_publication()
     {
         await using var db = await TestDb.CreateAsync();
