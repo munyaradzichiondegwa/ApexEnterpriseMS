@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using ApexERP.Application.Security;
 using ApexERP.API.Authorization;
+using ApexERP.API.Services;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +18,8 @@ namespace ApexERP.API.Controllers;
 public sealed class OrganisationManagementController : ApiControllerBase
 {
     private readonly ApexErpDbContext _db;
-    public OrganisationManagementController(ApexErpDbContext db) => _db = db;
+    private readonly IEmailDeliveryService _email;
+    public OrganisationManagementController(ApexErpDbContext db, IEmailDeliveryService email) { _db = db; _email = email; }
 
     private Guid TenantId => Guid.TryParse(User.FindFirst("tenant_id")?.Value, out var id)
         ? id : throw new UnauthorizedAccessException("Missing tenant context.");
@@ -206,8 +208,15 @@ public sealed class OrganisationManagementController : ApiControllerBase
             Email = email, TokenHash = tokenHash, ExpiresAt = DateTime.UtcNow.AddHours(48), InvitedBy = UserId };
         _db.CompanyUserInvitations.Add(invitation);
         await _db.SaveChangesAsync(ct);
-        return Accepted(new { invitationId = invitation.Id, invitationToken = rawToken, invitation.ExpiresAt,
-            delivery = "Send the one-time token to the invited address using the configured email provider." });
+        var emailSent = false;
+        try
+        {
+            emailSent = await _email.SendAsync(email, "ApexERP company access invitation",
+                $"You have been invited to join {company.Name}.\\n\\nInvitation token: {rawToken}\\n\\nAccept it through the ApexERP onboarding page within 48 hours.");
+        }
+        catch { emailSent = false; }
+        return Accepted(new { invitationId = invitation.Id, invitationToken = emailSent ? null : rawToken,
+            invitationEmailSent = emailSent, invitation.ExpiresAt });
     }
 
     [HttpPut("members/{membershipId:guid}/deactivate")]
