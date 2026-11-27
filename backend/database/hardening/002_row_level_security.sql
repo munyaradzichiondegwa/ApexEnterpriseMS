@@ -76,6 +76,7 @@ BEGIN
         WHERE c.column_name = 'CompanyId'
           AND c.table_schema = current_schema()
           AND c.data_type = 'uuid'
+          AND c.table_name <> 'Users'
     LOOP
         EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY', t.table_schema, t.table_name);
         EXECUTE format('ALTER TABLE %I.%I FORCE ROW LEVEL SECURITY', t.table_schema, t.table_name);
@@ -131,6 +132,9 @@ END $$;
 -- A user identity remains anchored to its home company, but may be read in another
 -- company only when the signed-in user has an active membership there. The app.user_id
 -- value is stamped from the validated JWT by TenantSession; it is never accepted from a request.
+ALTER TABLE "Users" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "Users" FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS apex_tenant_isolation ON "Users";
 DROP POLICY IF EXISTS apex_user_membership_access ON "Users";
 CREATE POLICY apex_user_membership_access ON "Users"
     USING (
