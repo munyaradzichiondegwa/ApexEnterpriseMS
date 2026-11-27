@@ -310,7 +310,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
     public async Task<IActionResult> CreateDepartment(Guid companyId, [FromBody] CreateDepartmentRequest request, CancellationToken ct)
     {
         if (DenyManagement() is { } denied) return denied;
-        if (string.IsNullOrWhiteSpace(request.Name)) return BadRequest(new { error = "Department name is required." });
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Department name is required and must not exceed 200 characters." });
         using var scope = _db.SystemAccessScope("tenant administration: create department");
         if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
         var name = request.Name.Trim();
@@ -319,9 +320,13 @@ public sealed class OrganisationManagementController : ApiControllerBase
         if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters()
             .AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
             return BadRequest(new { error = "Branch must be active and belong to the same company." });
-        if (request.CostCentreId.HasValue && !await _db.CostCentres.IgnoreQueryFilters()
-            .AnyAsync(x => x.Id == request.CostCentreId && x.CompanyId == companyId && x.IsActive, ct))
-            return BadRequest(new { error = "Cost centre must be active and belong to the same company." });
+        if (request.CostCentreId.HasValue)
+        {
+            var cc = await _db.CostCentres.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.CostCentreId && x.CompanyId == companyId && x.IsActive, ct);
+            if (cc is null) return BadRequest(new { error = "Cost centre must be active and belong to the same company." });
+            if (cc.BranchId.HasValue && cc.BranchId != request.BranchId)
+                return BadRequest(new { error = "The department branch must match the selected cost centre branch." });
+        }
         if (request.ManagerId.HasValue && !await _db.Employees.IgnoreQueryFilters()
             .AnyAsync(x => x.Id == request.ManagerId && x.CompanyId == companyId && x.IsActive, ct))
             return BadRequest(new { error = "Department manager must be an active employee of the same company." });
@@ -400,16 +405,22 @@ public sealed class OrganisationManagementController : ApiControllerBase
     public async Task<IActionResult> CreateCostCentre(Guid companyId, [FromBody] CreateCostCentreRequest request, CancellationToken ct)
     {
         if (DenyManagement() is { } denied) return denied;
-        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name))
-            return BadRequest(new { error = "Cost-centre code and name are required." });
+        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) ||
+            request.Code.Trim().Length > 40 || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Cost-centre code (maximum 40 characters) and name (maximum 200 characters) are required." });
         using var scope = _db.SystemAccessScope("tenant administration: create cost centre");
         if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
         var code = request.Code.Trim().ToUpperInvariant();
         if (await _db.CostCentres.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Code == code, ct))
             return Conflict(new { error = "A cost centre with this code already exists in the company." });
-        if (request.ParentId.HasValue && !await _db.CostCentres.IgnoreQueryFilters()
-            .AnyAsync(x => x.Id == request.ParentId && x.CompanyId == companyId && x.IsActive, ct))
-            return BadRequest(new { error = "Parent cost centre must be active and belong to the same company." });
+        if (request.ParentId.HasValue)
+        {
+            var parent = await _db.CostCentres.IgnoreQueryFilters()
+                .SingleOrDefaultAsync(x => x.Id == request.ParentId && x.CompanyId == companyId && x.IsActive, ct);
+            if (parent is null) return BadRequest(new { error = "Parent cost centre must be active and belong to the same company." });
+            if (parent.BranchId.HasValue && parent.BranchId != request.BranchId)
+                return BadRequest(new { error = "A child cost centre must use the same branch as its parent." });
+        }
         if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters()
             .AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
             return BadRequest(new { error = "Branch must be active and belong to the same company." });
