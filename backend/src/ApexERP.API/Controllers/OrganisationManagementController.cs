@@ -105,7 +105,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
         var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId)
             .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
         if (sub is null || sub.Status is not ("Active" or "Trial") ||
-            (sub.TrialEndsAt.HasValue && sub.TrialEndsAt.Value <= DateTime.UtcNow))
+            (sub.TrialEndsAt.HasValue && sub.TrialEndsAt.Value <= DateTime.UtcNow) ||
+            (sub.CurrentPeriodEndsAt.HasValue && sub.CurrentPeriodEndsAt.Value <= DateTime.UtcNow))
             return StatusCode(402, new { error = "The tenant subscription is not active." });
         var plan = await _db.SubscriptionPlans.SingleAsync(x => x.Id == sub.PlanId, ct);
         var limit = sub.CompanyOverride > 0 ? sub.CompanyOverride : plan.MaxCompanies;
@@ -225,7 +226,9 @@ public sealed class OrganisationManagementController : ApiControllerBase
             return Conflict(new { error = "User is already an active member of this company." });
 
         var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId).OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
-        if (sub is null || sub.Status is not ("Active" or "Trial")) return StatusCode(402, new { error = "Subscription is not active." });
+        if (sub is null || sub.Status is not ("Active" or "Trial") ||
+            (sub.TrialEndsAt.HasValue && sub.TrialEndsAt.Value <= DateTime.UtcNow) ||
+            (sub.CurrentPeriodEndsAt.HasValue && sub.CurrentPeriodEndsAt.Value <= DateTime.UtcNow)) return StatusCode(402, new { error = "Subscription is not active." });
         var plan = await _db.SubscriptionPlans.SingleAsync(x => x.Id == sub.PlanId, ct);
         var seatLimit = sub.SeatOverride > 0 ? sub.SeatOverride : plan.MaxSeats;
         var seats = await _db.CompanyMemberships.IgnoreQueryFilters().Where(x => x.IsActive)
@@ -261,7 +264,9 @@ public sealed class OrganisationManagementController : ApiControllerBase
             return Conflict(new { error = "A pending invitation already exists for this email in the tenant." });
 
         var subscription = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId).OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
-        if (subscription is null || subscription.Status is not ("Active" or "Trial"))
+        if (subscription is null || subscription.Status is not ("Active" or "Trial") ||
+            (subscription.TrialEndsAt.HasValue && subscription.TrialEndsAt.Value <= DateTime.UtcNow) ||
+            (subscription.CurrentPeriodEndsAt.HasValue && subscription.CurrentPeriodEndsAt.Value <= DateTime.UtcNow))
             return StatusCode(402, new { error = "The tenant subscription is inactive." });
         var plan = await _db.SubscriptionPlans.SingleAsync(x => x.Id == subscription.PlanId, ct);
         var seatLimit = subscription.SeatOverride > 0 ? subscription.SeatOverride : plan.MaxSeats;
