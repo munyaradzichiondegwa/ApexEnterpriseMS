@@ -8,6 +8,7 @@ namespace ApexERP.Application.Services;
 public sealed record FxRevaluationLine(
     Guid GlAccountId, string AccountCode, string AccountName, string Currency,
     decimal ForeignCurrencyBalance, decimal CurrentFunctionalBalance, decimal ClosingRate,
+    DateTime RateDate, bool IsManualOverride, bool IsInverseRate,
     decimal RevaluedFunctionalBalance, decimal Adjustment);
 
 public sealed record FxRevaluationPreview(
@@ -66,6 +67,8 @@ public sealed class FxRevaluationService
                 r.ToCurrency.ToUpper() == functionalCurrency && r.RateDate < asOfExclusive &&
                 r.RateDate >= asOfDate.Date.AddDays(-7) && r.Rate > 0)
             .OrderByDescending(r => r.RateDate)
+            .ThenByDescending(r => r.IsManualOverride)
+            .ThenBy(r => r.Id)
             .ToListAsync(ct);
         var inverseRates = await _db.ExchangeRates
             .Where(r => r.CompanyId == companyId && currencies.Contains(r.ToCurrency.ToUpper()) &&
@@ -102,7 +105,8 @@ public sealed class FxRevaluationService
             if (adjustment == 0m) continue;
 
             lines.Add(new FxRevaluationLine(account.Id, account.Code, account.Name, balance.Currency.ToUpperInvariant(),
-                balance.ForeignBalance, balance.FunctionalBalance, closingRate, revalued, adjustment));
+                balance.ForeignBalance, balance.FunctionalBalance, closingRate, rate.RateDate.Date,
+                rate.IsManualOverride, inverse, revalued, adjustment));
         }
 
         return new FxRevaluationPreview(companyId, functionalCurrency, asOfDate.Date,
@@ -148,13 +152,13 @@ public sealed class FxRevaluationService
                 if (line.Adjustment > 0)
                 {
                     journalLines.Add(new GlLineRequest(line.GlAccountId, amount, 0m, preview.FunctionalCurrency, 1m,
-                        Narrative: $"IAS 21 closing-rate revaluation {line.Currency}"));
+                        Narrative: BuildRateEvidenceNarrative(line)));
                     totalGains += amount;
                 }
                 else
                 {
                     journalLines.Add(new GlLineRequest(line.GlAccountId, 0m, amount, preview.FunctionalCurrency, 1m,
-                        Narrative: $"IAS 21 closing-rate revaluation {line.Currency}"));
+                        Narrative: BuildRateEvidenceNarrative(line)));
                     totalLosses += amount;
                 }
             }
@@ -169,6 +173,14 @@ public sealed class FxRevaluationService
             return await _gl.PostAsync(companyId, asOfDate.Date, JournalSource.FxRevaluation,
                 "IAS 21 foreign-currency monetary-item revaluation", reference, journalLines, token, postedBy);
         }, ct);
+    }
+
+    private static string BuildRateEvidenceNarrative(FxRevaluationLine line)
+    {
+        var source = line.IsManualOverride ? "manual override" : "recorded rate";
+        var direction = line.IsInverseRate ? "inverse" : "direct";
+        return $"IAS 21 {line.Currency} closing-rate revaluation; rate {line.ClosingRate}; " +
+            $"{direction} {source} dated {line.RateDate:yyyy-MM-dd}";
     }
 
     public static decimal CalculateAdjustment(decimal foreignCurrencyBalance, decimal currentFunctionalBalance, decimal closingRate)
