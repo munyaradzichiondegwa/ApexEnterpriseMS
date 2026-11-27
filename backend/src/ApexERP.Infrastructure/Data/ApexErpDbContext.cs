@@ -532,6 +532,7 @@ namespace ApexERP.Infrastructure.Data
             // ---- Controls & automation: relationships and integrity indexes ----
             // Existing rows must keep working after the migration: accounts stay postable, existing invoices need no match.
             // (EF Core 8 sends an explicit false even when the column default is true.)
+            modelBuilder.Entity<GlAccount>().Property(a => a.IsMonetary).HasDefaultValue(false);
             modelBuilder.Entity<GlAccount>().Property(a => a.IsPostable).HasDefaultValue(true);
             modelBuilder.Entity<ApInvoice>().Property(i => i.MatchStatus).HasDefaultValue("NotRequired");
             modelBuilder.Entity<IdempotencyRecord>().HasIndex(r => new { r.CompanyId, r.Scope, r.Key }).IsUnique();
