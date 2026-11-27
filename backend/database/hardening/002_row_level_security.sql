@@ -136,21 +136,17 @@ CREATE POLICY apex_user_membership_access ON "Users"
     USING (
         coalesce(current_setting('app.rls_bypass', true), '') = 'on'
         OR apex_rls_allowed("CompanyId")
-        OR (
-            "Id" = nullif(current_setting('app.user_id', true), '')::uuid
-            AND EXISTS (
-                SELECT 1 FROM "CompanyMemberships" m
-                WHERE m."UserId" = "Users"."Id"
-                  AND m."CompanyId" = nullif(current_setting('app.company_id', true), '')::uuid
-                  AND m."IsActive" = true
-                  AND (m."ValidFrom" IS NULL OR m."ValidFrom" <= now())
-                  AND (m."ValidTo" IS NULL OR m."ValidTo" > now())
-            )
+        OR EXISTS (
+            SELECT 1 FROM "CompanyMemberships" m
+            WHERE m."UserId" = "Users"."Id"
+              AND m."CompanyId" = nullif(current_setting('app.company_id', true), '')::uuid
+              AND m."IsActive" = true
+              AND (m."ValidFrom" IS NULL OR m."ValidFrom" <= now())
+              AND (m."ValidTo" IS NULL OR m."ValidTo" > now())
         )
     )
     WITH CHECK (
         coalesce(current_setting('app.rls_bypass', true), '') = 'on'
         OR apex_rls_allowed("CompanyId")
     );
-
 COMMIT;
