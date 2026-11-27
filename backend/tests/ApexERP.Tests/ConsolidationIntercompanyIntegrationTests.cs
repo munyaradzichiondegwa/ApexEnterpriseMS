@@ -65,13 +65,13 @@ public sealed class ConsolidationIntercompanyIntegrationTests
             new GlAccount
             {
                 Id = payableAccountId, CompanyId = companyBId, Code = "IC-100",
-                Name = "Due to group company", Type = GlAccountType.Liability, Currency = "USD",
+                Name = "Due to group company", Type = GlAccountType.Liability, Currency = buyerCurrency,
                 IsIntercompanyAccount = true, IntercompanyCounterpartyCompanyId = companyAId
             },
             new GlAccount
             {
                 Id = expenseAccountId, CompanyId = companyBId, Code = "5000",
-                Name = "Intercompany expense", Type = GlAccountType.Expense, Currency = "USD"
+                Name = "Intercompany expense", Type = GlAccountType.Expense, Currency = buyerCurrency
             });
         seed.AccountingPeriods.AddRange(
             new AccountingPeriod
