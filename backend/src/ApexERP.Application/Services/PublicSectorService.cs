@@ -110,6 +110,42 @@ namespace ApexERP.Application.Services
             }, ct);
         }
 
+        /// <summary>
+        /// Applies a posted AP invoice's base-currency expense amount against its PO encumbrance.
+        /// Partial invoices reduce the remaining commitment; the encumbrance closes only when fully realised.
+        /// This operation shares the posting transaction so GL actuals and budget commitments cannot diverge.
+        /// </summary>
+        public Task RealiseCommitmentAsync(Guid companyId, Guid commitmentId, decimal realisedAmount, CancellationToken ct = default)
+        {
+            if (realisedAmount <= 0m) throw new InvalidOperationException("A realised commitment amount must be greater than zero.");
+            return _db.InTransactionAsync(async token =>
+            {
+                await _db.AcquireTransactionLockAsync($"public-sector-commitment:{companyId:N}:{commitmentId:N}", token);
+                var commitment = await _db.Commitments.FirstOrDefaultAsync(c =>
+                    c.CompanyId == companyId && c.Id == commitmentId, token)
+                    ?? throw new InvalidOperationException("Commitment not found in this company.");
+                if (commitment.Status != CommitmentStatus.Active)
+                    throw new InvalidOperationException("Only an active commitment can be realised.");
+                var remaining = commitment.Amount - commitment.RealisedAmount;
+                if (realisedAmount > remaining + 0.000001m)
+                    throw new InvalidOperationException($"The invoice exceeds the remaining commitment ({remaining:N2}).");
+
+                commitment.RealisedAmount = Math.Min(commitment.Amount, commitment.RealisedAmount + realisedAmount);
+                if (commitment.Amount - commitment.RealisedAmount <= 0.000001m)
+                {
+                    commitment.RealisedAmount = commitment.Amount;
+                    commitment.Status = CommitmentStatus.Released;
+                    commitment.ReleasedDate = DateTime.UtcNow;
+                }
+                _audit.Record(companyId, _db.CurrentUserId, "BudgetCommitment.Realised", "PublicSector",
+                    nameof(Commitment), commitment.Id,
+                    new { previousRealised = commitment.RealisedAmount - realisedAmount },
+                    new { realisedAmount, commitment.RealisedAmount, remaining = commitment.Amount - commitment.RealisedAmount });
+                await _db.SaveChangesAsync(token);
+                return true;
+            }, ct);
+        }
+
         /// <summary>Releases a commitment when the GRN/invoice posts (the actual expenditure replaces
         /// the estimate). Call this from SupplyChainService/ApService when a PO with a FundCentreId is fulfilled.</summary>
         public async Task ReleaseCommitmentForPoAsync(Guid companyId, Guid purchaseOrderId, CancellationToken ct = default)
@@ -154,7 +190,7 @@ namespace ApexERP.Application.Services
             var totalAppropriation = fc.AppropriationAmount + fc.CarriedForwardAmount;
             var commitments = await _db.Commitments
                 .Where(c => c.CompanyId == companyId && c.FundCentreId == fundCentreId && c.Status == CommitmentStatus.Active)
-                .SumAsync(c => c.Amount, ct);
+                 .SumAsync(c => c.Amount - c.RealisedAmount, ct);
 
             // The posted GL is the authoritative actuals ledger. AP invoice expense lines and payroll
             // postings are tagged with FundCentreId and stored in base currency; counting AP headers as
