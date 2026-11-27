@@ -392,5 +392,52 @@ namespace ApexERP.Tests
             ctx2.IdempotencyRecords.Add(new IdempotencyRecord { CompanyId = company, Scope = "post /api/v1/ap/payments", Key = "key-12345678", RequestHash = "h", ResponseStatus = 200 });
             await Assert.ThrowsAsync<DbUpdateException>(() => ctx2.SaveChangesAsync());
         }
+        [PostgresFact]
+        public async Task Concurrent_retry_workers_claim_a_due_payment_webhook_only_once()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var messageId = Guid.NewGuid();
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Webhook Retry Co",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.IntegrationEndpoints.Add(new IntegrationEndpoint
+                {
+                    CompanyId = companyId, Provider = "EcoCash", Name = "EcoCash test",
+                    SecretName = "APEX_TEST_ECOCASH_SECRET", IsActive = true
+                });
+                seed.IntegrationMessages.Add(new IntegrationMessage
+                {
+                    Id = messageId, CompanyId = companyId, Provider = "EcoCash",
+                    Direction = "Inbound", ExternalRef = "retry-race-001",
+                    PayloadJson = """{"externalRef":"retry-race-001","status":"Paid","amount":10.00,"currency":"USD","reference":"MISSING-INVOICE"}""",
+                    SignatureValid = true, Status = "Failed", Attempts = 0,
+                    NextAttemptAt = DateTime.UtcNow.AddMinutes(-1)
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            async Task<int> RunWorkerAsync()
+            {
+                await using var ctx = db.NewContext(companyId);
+                var service = new IntegrationService(ctx, new ArService(ctx, Gl(ctx)),
+                    new SettingsService(ctx), new AuditService(ctx));
+                return await service.RetryDueAsync(companyId);
+            }
+
+            var results = await Task.WhenAll(RunWorkerAsync(), RunWorkerAsync());
+            Assert.Equal(1, results.Sum());
+
+            await using var verify = db.NewContext(companyId);
+            var message = await verify.IntegrationMessages.SingleAsync(x => x.Id == messageId);
+            Assert.Equal(1, message.Attempts);
+            Assert.Equal("Failed", message.Status);
+            Assert.NotNull(message.NextAttemptAt);
+        }
+
     }
 }
