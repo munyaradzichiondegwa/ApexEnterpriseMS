@@ -154,7 +154,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <div>
                 <BrandMark compact />
                 <div className="text-xs text-brand-300 truncate">{user.email}</div>
-          {companySelector}
                 {companySelector}
               </div>
               <button onClick={() => setDrawerOpen(false)} aria-label="Close navigation menu" className="p-1 rounded hover:bg-brand-800">
@@ -178,6 +177,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="px-5 py-5 border-b border-brand-800">
           <BrandMark />
           <div className="text-xs text-brand-300 truncate">{user.email}</div>
+          {companySelector}
         </div>
         <nav className="flex-1 overflow-y-auto py-3">
           <NavLinks pathname={pathname} items={visibleNav} />
