@@ -82,6 +82,57 @@ namespace ApexERP.Infrastructure.Data
             var (company, tenant, bypass) = ValuesFor(db);
             db.Database.ExecuteSqlRaw(Sql.Replace("@c", "{0}").Replace("@t", "{1}").Replace("@b", "{2}"), company, tenant, bypass);
         }
+
+        /// <summary>
+        /// Verifies that an RLS-enabled API is running with a least-privilege database identity.
+        /// The runtime role must not be superuser, have BYPASSRLS, own protected tables, or run
+        /// against a schema where the tenant-level RLS policies are missing.
+        /// </summary>
+        public static async Task ValidateRuntimeRoleAsync(ApexErpDbContext db, CancellationToken ct = default)
+        {
+            await db.Database.OpenConnectionAsync(ct);
+            try
+            {
+                await using var command = db.Database.GetDbConnection().CreateCommand();
+                command.CommandText = @"
+                    SELECT r.rolsuper,
+                           r.rolbypassrls,
+                           EXISTS (
+                               SELECT 1
+                               FROM pg_class c
+                               JOIN pg_namespace n ON n.oid = c.relnamespace
+                               WHERE n.nspname = current_schema()
+                                 AND c.relrowsecurity
+                                 AND c.relowner = r.oid
+                           ) AS owns_rls_table,
+                           (
+                               SELECT COUNT(*)
+                               FROM pg_class c
+                               JOIN pg_namespace n ON n.oid = c.relnamespace
+                               WHERE n.nspname = current_schema()
+                                 AND c.relname IN ('Companies', 'CustomerOrganisations', 'GlAccounts')
+                                 AND c.relrowsecurity
+                                 AND c.relforcerowsecurity
+                           ) AS protected_table_count
+                    FROM pg_roles r
+                    WHERE r.rolname = current_user";
+                await using var reader = await command.ExecuteReaderAsync(ct);
+                if (!await reader.ReadAsync(ct))
+                    throw new InvalidOperationException("Unable to identify the PostgreSQL runtime role.");
+
+                if (reader.GetBoolean(0) || reader.GetBoolean(1) || reader.GetBoolean(2))
+                    throw new InvalidOperationException(
+                        "Row-level security requires a non-superuser runtime role that has no BYPASSRLS privilege and does not own protected tables.");
+
+                if (reader.GetInt64(3) != 3)
+                    throw new InvalidOperationException(
+                        "Row-level security is enabled in configuration, but Companies, CustomerOrganisations, and GlAccounts are not all protected with FORCE ROW LEVEL SECURITY.");
+            }
+            finally
+            {
+                await db.Database.CloseConnectionAsync();
+            }
+        }
     }
 
     /// <summary>Runs on every connection open and stamps the tenant settings before any query.</summary>
