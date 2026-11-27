@@ -543,6 +543,11 @@ namespace ApexERP.Tests
             var closed = await ctx.FundCentres.SingleAsync(x => x.Id == voteId);
             Assert.True(closed.IsClosed);
             Assert.Equal(100m, closed.LapsedAmount);
+            Assert.Equal(0m, (await service.GetBudgetUtilizationAsync(companyId, voteId)).Available);
+            var closedSchedule = Assert.Single(await service.GetExpenditureReportAsync(companyId, 2026),
+                x => x.FundCentreId == voteId);
+            Assert.Equal(100m, closedSchedule.LapsedAmount);
+            Assert.Equal(0m, closedSchedule.AvailableBudget);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.CloseYearEndAsync(companyId, voteId, carryForward: false));
         }
