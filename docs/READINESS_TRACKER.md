@@ -97,7 +97,7 @@ The following evidence supersedes older historical statements in this tracker wh
 |---|---|---|
 | 22.3 | Correlation ids and structured request logging; API versioned (`/api/v1`) | 🟢 |
 | 23.2 | Database constraints, append-only triggers, optional RLS | ✔ SQL |
-| 23.3 | New entities (35 tables) | 🟢 + migration to generate |
+| 23.3 | New entities and schema migrations | ✔ EF model snapshot, migration drift check and clean PostgreSQL install pass in CI; current FX provenance and lifecycle dispatch-attempt migrations are committed |
 | 23.4 | Migration policy | 🟢 CI: drift check, clean install, hardening scripts twice, boot, backup round-trip. Stale `schema.sql` removed; `export-schema.sh` generates it |
 | 26 | Background jobs | 🟢 `ScheduledJobs` (once per company per run key; retry ×3) |
 | 27 | Pagination | 🟢 journals, AP and AR invoices (`page`/`pageSize`, old behaviour without them) |
