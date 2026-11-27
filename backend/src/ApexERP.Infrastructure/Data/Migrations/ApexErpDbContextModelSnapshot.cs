@@ -7237,6 +7237,57 @@ namespace ApexERP.Infrastructure.Data.Migrations
                 });
             modelBuilder.Entity("ApexERP.Domain.Entities.OrganisationalBranch", b =>
                 {
+                    b.HasIndex("ParentBranchId");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.CompanyMembership", b =>
+                {
+                    b.HasIndex("RoleId");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.TenantSubscription", b =>
+                {
+                    b.HasIndex("PlanId");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.TenantJurisdiction", b =>
+                {
+                    b.HasIndex("CompanyId");
+                    b.HasIndex("CountryCode");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.TenantOnboarding", b =>
+                {
+                    b.HasIndex("DeploymentProfileId");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.TenantAdministratorInvitation", b =>
+                {
+                    b.HasIndex("AcceptedUserId");
+                    b.HasIndex("CompanyId");
+                    b.HasIndex("TenantId");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.CompanyUserInvitation", b =>
+                {
+                    b.HasIndex("AcceptedUserId");
+                    b.HasIndex("CompanyId");
+                    b.HasIndex("InvitedBy");
+                    b.HasIndex("RoleId");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.Department", b =>
+                {
+                    b.HasIndex("BranchId");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.CostCentre", b =>
+                {
+                    b.HasIndex("BranchId");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.OrganisationalBranch", b =>
+                {
                     b.HasOne("ApexERP.Domain.Entities.Company", null)
                         .WithMany()
                         .HasForeignKey("CompanyId")
