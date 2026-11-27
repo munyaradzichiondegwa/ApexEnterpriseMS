@@ -239,28 +239,9 @@ namespace ApexERP.Application.Services
                 // NCI in a lower-tier subsidiary includes both the immediate minority interests
                 // and the indirect minority interests held through intermediate subsidiaries.
                 // Multiply ownership along the complete path from the consolidation parent.
-                decimal effectiveGroupOwnership = 1m;
-                var ownershipNode = sub;
-                var ownershipPathValid = true;
-                var visitedOwnershipNodes = new HashSet<Guid>();
-                while (ownershipNode.Id != parentCompanyId)
-                {
-                    if (!visitedOwnershipNodes.Add(ownershipNode.Id) ||
-                        !ownershipNode.OwnershipPercentage.HasValue ||
-                        ownershipNode.OwnershipPercentage.Value < 0m ||
-                        ownershipNode.OwnershipPercentage.Value > 100m ||
-                        !ownershipNode.ParentCompanyId.HasValue ||
-                        !companiesByIdForOwnership.TryGetValue(ownershipNode.ParentCompanyId.Value, out var ownershipParent))
-                    {
-                        ownershipPathValid = false;
-                        break;
-                    }
-
-                    effectiveGroupOwnership *= ownershipNode.OwnershipPercentage.Value / 100m;
-                    ownershipNode = ownershipParent;
-                }
-
-                if (!ownershipPathValid || effectiveGroupOwnership >= 1m)
+                var effectiveGroupOwnership = CalculateEffectiveGroupOwnershipPercentage(
+                    group, parentCompanyId, sub.Id);
+                if (!effectiveGroupOwnership.HasValue || effectiveGroupOwnership.Value >= 1m)
                     continue;
 
                 var subTrialBalance = translatedTrialBalancesByCompany[sub.Id];
@@ -282,7 +263,7 @@ namespace ApexERP.Application.Services
                                 : 0m;
                     });
                 subEquity += subsidiaryEliminationAdjustment;
-                var nciShare = subEquity * (1 - effectiveGroupOwnership);
+                var nciShare = subEquity * (1 - effectiveGroupOwnership.Value);
                 totalNci += nciShare;
                 totalGroupEquityAdj -= nciShare; // remove NCI's share from the raw aggregated equity total
             }
@@ -397,6 +378,41 @@ namespace ApexERP.Application.Services
                     (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed) &&
                     l.JournalEntry.EntryDate < asOfExclusive)
                 .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
+        }
+
+        /// <summary>
+        /// Calculates the consolidation parent's effective ownership in a subsidiary by
+        /// multiplying ownership percentages along the complete parent chain. Returns null
+        /// when the subsidiary is outside the supplied group, the chain is cyclic/incomplete,
+        /// or any required ownership percentage is unspecified or invalid.
+        /// </summary>
+        public static decimal? CalculateEffectiveGroupOwnershipPercentage(
+            IEnumerable<Company> group, Guid parentCompanyId, Guid subsidiaryCompanyId)
+        {
+            var companies = group.ToDictionary(c => c.Id);
+            if (!companies.ContainsKey(parentCompanyId) || !companies.ContainsKey(subsidiaryCompanyId))
+                return null;
+            if (parentCompanyId == subsidiaryCompanyId)
+                return 1m;
+
+            decimal effectiveOwnership = 1m;
+            var current = companies[subsidiaryCompanyId];
+            var visited = new HashSet<Guid>();
+            while (current.Id != parentCompanyId)
+            {
+                if (!visited.Add(current.Id) ||
+                    !current.OwnershipPercentage.HasValue ||
+                    current.OwnershipPercentage.Value < 0m ||
+                    current.OwnershipPercentage.Value > 100m ||
+                    !current.ParentCompanyId.HasValue ||
+                    !companies.TryGetValue(current.ParentCompanyId.Value, out var parent))
+                    return null;
+
+                effectiveOwnership *= current.OwnershipPercentage.Value / 100m;
+                current = parent;
+            }
+
+            return effectiveOwnership;
         }
 
         /// <summary>Only exact reciprocal balances (within one cent) are eligible for elimination.</summary>
