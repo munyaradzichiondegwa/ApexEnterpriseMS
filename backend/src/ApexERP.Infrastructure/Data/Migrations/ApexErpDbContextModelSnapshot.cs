@@ -3352,6 +3352,10 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<bool>("IsManualOverride")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("RateSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<decimal>("Rate")
                         .HasColumnType("numeric(20,6)");
 
@@ -3360,6 +3364,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<string>("ToCurrency")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SourceReference")
                         .HasColumnType("text");
 
                     b.Property<DateTime?>("UpdatedAt")
