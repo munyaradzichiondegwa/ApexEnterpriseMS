@@ -1,6 +1,6 @@
 # Legacy Company-to-Tenant Assignment and Backfill Plan
 
-**Status:** Design approved for implementation planning; not an execution authorisation  
+**Status:** Proposed design for review; not an execution authorisation  
 **Applies to:** Existing ApexERP databases created before the customer-organisation tenant foundation  
 **Target branch:** `feature/legacy-tenant-assignment`
 
@@ -58,7 +58,7 @@ Registration numbers and existing company metadata are useful for cross-checking
 
 ## 5. Mapping register
 
-Prepare a controlled CSV mapping register. Use one row per existing company. Companies belonging to the same tenant must repeat the same TenantId and tenant metadata.
+Prepare a controlled CSV mapping register using [the supplied template](templates/legacy-tenant-mapping.csv). Use one row per existing company. Companies belonging to the same tenant must repeat the same TenantId and tenant metadata.
 
 Required columns:
 
@@ -97,10 +97,11 @@ The tool must produce a dry-run report first. Dry-run is the default and must no
 ### Phase A — Inventory (read-only)
 
 1. Confirm the database environment and exact migration level.
-2. Enumerate all companies using a privileged read-only connection.
-3. Export company IDs, names, registration numbers, active status, parent-company IDs, and creation timestamps.
-4. Report the number of companies already assigned, unassigned, and referencing missing/inactive tenant records.
-5. Do not export financial, payroll, employee, user credential, or transaction data for the purpose of tenant mapping.
+2. Run the [read-only inventory diagnostic](../backend/database/diagnostics/legacy_tenant_inventory.sql) using an authorised read-only identity that can see all company and tenant rows.
+3. Enumerate all companies using a privileged read-only connection.
+4. Export company IDs, names, registration numbers, active status, parent-company IDs, and creation timestamps.
+5. Report the number of companies already assigned, unassigned, and referencing missing/inactive tenant records.
+6. Do not export financial, payroll, employee, user credential, or transaction data for the purpose of tenant mapping.
 
 ### Phase B — Customer confirmation
 
