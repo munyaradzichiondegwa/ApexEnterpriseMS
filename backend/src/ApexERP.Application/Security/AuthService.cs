@@ -55,6 +55,7 @@ namespace ApexERP.Application.Security
         // ---------------------------------------------------------------------------------------------
         public async Task<LoginResult> LoginAsync(string email, string password, string? totpCode = null, string? ip = null, CancellationToken ct = default)
         {
+            using var systemAccess = _db.SystemAccessScope("authentication: credential lookup and token issuance");
             var normalised = (email ?? string.Empty).Trim().ToLowerInvariant();
             var now = DateTime.UtcNow;
 
@@ -131,6 +132,7 @@ namespace ApexERP.Application.Security
         // ---------------------------------------------------------------------------------------------
         public async Task<LoginResult> IssueTokensAsync(User user, string? ip, Guid? familyId, CancellationToken ct = default)
         {
+            using var systemAccess = _db.SystemAccessScope("authentication: tenant validation and token issuance");
             if (user.Role == null)
                 user = await _db.Users.IgnoreQueryFilters().Include(u => u.Role).FirstAsync(u => u.Id == user.Id, ct);
 
@@ -171,6 +173,7 @@ namespace ApexERP.Application.Security
         /// <summary>Exchanges a refresh token for a new access token and a new refresh token (rotation).</summary>
         public async Task<LoginResult> RefreshAsync(string refreshToken, string? ip, CancellationToken ct = default)
         {
+            using var systemAccess = _db.SystemAccessScope("authentication: refresh-token rotation");
             if (string.IsNullOrWhiteSpace(refreshToken)) throw new UnauthorizedAccessException("Session expired.");
             var hash = Sha256(refreshToken);
             var stored = await _db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
@@ -201,6 +204,7 @@ namespace ApexERP.Application.Security
 
         public async Task LogoutAsync(string? refreshToken, CancellationToken ct = default)
         {
+            using var systemAccess = _db.SystemAccessScope("authentication: refresh-token logout");
             if (string.IsNullOrWhiteSpace(refreshToken)) return;
             var hash = Sha256(refreshToken);
             var stored = await _db.RefreshTokens.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
@@ -286,7 +290,9 @@ namespace ApexERP.Application.Security
 
         public async Task<User> RegisterCompanyAndAdminAsync(string companyName, string email, string password, string firstName, string lastName, CancellationToken ct = default)
         {
-            if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == email.ToLowerInvariant(), ct))
+            using var systemAccess = _db.SystemAccessScope("registration: global email uniqueness and tenant provisioning");
+            var normalisedEmail = (email ?? string.Empty).Trim().ToLowerInvariant();
+            if (await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == normalisedEmail, ct))
                 throw new InvalidOperationException("A user with this email already exists.");
 
             var tenant = new CustomerOrganisation { Name = companyName, LegalName = companyName };
@@ -304,7 +310,7 @@ namespace ApexERP.Application.Security
             _db.Roles.Add(adminRole);
             var user = new User
             {
-                CompanyId = company.Id, Email = email.ToLowerInvariant(), PasswordHash = HashPassword(password), RoleId = adminRole.Id,
+                CompanyId = company.Id, Email = normalisedEmail, PasswordHash = HashPassword(password), RoleId = adminRole.Id,
                 FirstName = firstName, LastName = lastName, IsActive = true
             };
             _db.Users.Add(user);
