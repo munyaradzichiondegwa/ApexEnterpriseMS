@@ -27,7 +27,7 @@ var connectionString = builder.Configuration.GetConnectionString("Default");
 var frontendOrigins = builder.Configuration["Frontend:Origin"];
 var platformIssuer = builder.Configuration["PlatformJwt:Issuer"] ?? "ApexERP.Platform";
 var platformAudience = builder.Configuration["PlatformJwt:Audience"] ?? "ApexERP.Platform.Api";
-var platformPublicKeyPem = builder.Configuration["PlatformJwt:PublicKeyPem"];
+var platformPublicKeyPem = builder.Configuration["PlatformJwt:PublicKeyPem"]?.Replace("\\n", "\n");
 Microsoft.IdentityModel.Tokens.SecurityKey platformSigningKey;
 if (!string.IsNullOrWhiteSpace(platformPublicKeyPem))
 {
