@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using ApexERP.API.Authorization;
 using ApexERP.API.Extensions;
 using ApexERP.API.Filters;
+using ApexERP.API.Services;
 using ApexERP.Application.Security;
 using ApexERP.Application.Services;
 using ApexERP.Infrastructure.Data;
@@ -80,6 +81,7 @@ builder.Services.AddScoped<SupplyChainService>();
 builder.Services.AddScoped<CrmService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<AuditService>();
+builder.Services.AddScoped<IEmailDeliveryService, SmtpEmailDeliveryService>();
 
 // Full IFRS statement suite (Necessary Financial Reports 3, 4, 5)
 builder.Services.AddScoped<StatementOfChangesInEquityService>();
