@@ -233,8 +233,36 @@ namespace ApexERP.Application.Services
 
             // ---- Non-controlling interest: for each <100%-owned subsidiary, split its net equity ----
             decimal totalNci = 0, totalGroupEquityAdj = 0;
-            foreach (var sub in subsidiaries.Where(s => s.OwnershipPercentage.HasValue && s.OwnershipPercentage < 100))
+            var companiesByIdForOwnership = group.ToDictionary(c => c.Id);
+            foreach (var sub in subsidiaries)
             {
+                // NCI in a lower-tier subsidiary includes both the immediate minority interests
+                // and the indirect minority interests held through intermediate subsidiaries.
+                // Multiply ownership along the complete path from the consolidation parent.
+                decimal effectiveGroupOwnership = 1m;
+                var ownershipNode = sub;
+                var ownershipPathValid = true;
+                var visitedOwnershipNodes = new HashSet<Guid>();
+                while (ownershipNode.Id != parentCompanyId)
+                {
+                    if (!visitedOwnershipNodes.Add(ownershipNode.Id) ||
+                        !ownershipNode.OwnershipPercentage.HasValue ||
+                        ownershipNode.OwnershipPercentage.Value < 0m ||
+                        ownershipNode.OwnershipPercentage.Value > 100m ||
+                        !ownershipNode.ParentCompanyId.HasValue ||
+                        !companiesByIdForOwnership.TryGetValue(ownershipNode.ParentCompanyId.Value, out var ownershipParent))
+                    {
+                        ownershipPathValid = false;
+                        break;
+                    }
+
+                    effectiveGroupOwnership *= ownershipNode.OwnershipPercentage.Value / 100m;
+                    ownershipNode = ownershipParent;
+                }
+
+                if (!ownershipPathValid || effectiveGroupOwnership >= 1m)
+                    continue;
+
                 var subTrialBalance = translatedTrialBalancesByCompany[sub.Id];
                 // Net assets includes current-period earnings and the subsidiary's translated
                 // equity reserve, even where the local year-end close has not yet transferred P&L.
@@ -254,8 +282,7 @@ namespace ApexERP.Application.Services
                                 : 0m;
                     });
                 subEquity += subsidiaryEliminationAdjustment;
-                var ownership = sub.OwnershipPercentage!.Value / 100m;
-                var nciShare = subEquity * (1 - ownership);
+                var nciShare = subEquity * (1 - effectiveGroupOwnership);
                 totalNci += nciShare;
                 totalGroupEquityAdj -= nciShare; // remove NCI's share from the raw aggregated equity total
             }
