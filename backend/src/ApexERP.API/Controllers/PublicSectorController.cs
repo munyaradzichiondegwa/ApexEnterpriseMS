@@ -69,6 +69,15 @@ namespace ApexERP.API.Controllers
         [HttpGet("fund-centres/utilization")]
         public async Task<IActionResult> GetAllUtilization([FromQuery] int year) => Ok(await _publicSector.GetAllBudgetUtilizationAsync(CompanyId, year));
 
+        /// <summary>Vote/program/sub-program expenditure reconciled to posted general-ledger actuals.</summary>
+        [HttpGet("fund-centres/expenditure-report")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetExpenditureReport([FromQuery] int year)
+        {
+            try { return Ok(await _publicSector.GetExpenditureReportAsync(CompanyId, year)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
         [HttpPost("commitments/override/submit-for-approval")]
         [HasPermission(Permissions.PublicSectorBudgetOverride)]
         public async Task<IActionResult> SubmitBudgetOverrideForApproval(SubmitBudgetOverrideApprovalRequest req)
