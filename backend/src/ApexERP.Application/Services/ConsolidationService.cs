@@ -16,7 +16,7 @@ namespace ApexERP.Application.Services
     public record ConsolidationPeriodEvidence(
         Guid CompanyId, string CompanyName, int? Year, int? PeriodNo,
         DateTime? PeriodStart, DateTime? PeriodEnd, string Status,
-        bool IsPeriodEndAligned, bool HasOverlappingPeriods);
+        bool IsPeriodEndAligned, bool HasOverlappingPeriods, bool IsGroupPeriodAligned);
 
     public record ConsolidationResult(
         Guid ParentCompanyId, List<Guid> SubsidiaryCompanyIds, DateTime AsOfDate,
@@ -99,18 +99,36 @@ namespace ApexERP.Application.Services
                     .OrderBy(p => p.Year).ThenBy(p => p.PeriodNo).ToList();
                 if (matches.Count == 0)
                     return new ConsolidationPeriodEvidence(company.Id, company.Name, null, null,
-                        null, null, "No accounting period covers the reporting date", false, false);
+                        null, null, "No accounting period covers the reporting date", false, false, false);
                 if (matches.Count > 1)
                     return new ConsolidationPeriodEvidence(company.Id, company.Name, null, null,
-                        null, null, "Multiple accounting periods overlap the reporting date", false, true);
+                        null, null, "Multiple accounting periods overlap the reporting date", false, true, false);
 
                 var period = matches[0];
                 var aligned = period.EndDate.Date == asOfDate.Date;
                 return new ConsolidationPeriodEvidence(company.Id, company.Name, period.Year, period.PeriodNo,
                     period.StartDate.Date, period.EndDate.Date,
                     aligned ? "Period end aligned" : "Reporting date falls before the period end",
-                    aligned, false);
+                    aligned, false, false);
             }).OrderBy(x => x.CompanyName).ToList();
+
+            // A company can individually cover the report date while still using a different
+            // reporting window from the parent. Surface both period-end and group-window alignment.
+            var parentPeriod = periodEvidence.FirstOrDefault(x => x.CompanyId == parentCompanyId);
+            periodEvidence = periodEvidence.Select(evidence =>
+            {
+                var alignedToParent = parentPeriod?.PeriodStart != null && parentPeriod.PeriodEnd != null &&
+                    parentPeriod.IsPeriodEndAligned && !parentPeriod.HasOverlappingPeriods &&
+                    evidence.PeriodStart == parentPeriod.PeriodStart &&
+                    evidence.PeriodEnd == parentPeriod.PeriodEnd &&
+                    evidence.IsPeriodEndAligned && !evidence.HasOverlappingPeriods;
+                var status = evidence.Status;
+                if (evidence.IsPeriodEndAligned && !alignedToParent)
+                    status = parentPeriod?.PeriodStart == null
+                        ? "Period end aligned; parent period unavailable"
+                        : "Period end aligned; reporting window differs from parent";
+                return evidence with { Status = status, IsGroupPeriodAligned = alignedToParent };
+            }).ToList();
 
             // Financial rows are read across legal companies only after the tenant-scoped group
             // allow-list has been established. Every query below retains an explicit CompanyId predicate.
