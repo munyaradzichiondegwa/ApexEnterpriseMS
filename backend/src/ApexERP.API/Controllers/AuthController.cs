@@ -1,4 +1,7 @@
 using ApexERP.Application.Security;
+using ApexERP.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+using ApexERP.API.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -11,6 +14,7 @@ namespace ApexERP.API.Controllers
     public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
     public record ConfirmMfaRequest(string Code);
     public record DisableMfaRequest(string Password, string Code);
+    public record SwitchCompanyRequest(Guid CompanyId);
 
     [ApiController]
     [Route("api/v1/auth")]
@@ -20,8 +24,9 @@ namespace ApexERP.API.Controllers
         private readonly AuthService _auth;
         private readonly IConfiguration _config;
         private readonly IWebHostEnvironment _env;
+        private readonly ApexErpDbContext _db;
 
-        public AuthController(AuthService auth, IConfiguration config, IWebHostEnvironment env) { _auth = auth; _config = config; _env = env; }
+        public AuthController(AuthService auth, IConfiguration config, IWebHostEnvironment env, ApexErpDbContext db) { _auth = auth; _config = config; _env = env; _db = db; }
 
         // By default the refresh token lives only in an HttpOnly cookie (JavaScript can never read it) and is not returned in the body.
         private bool CookieOnly => _config.GetValue("Auth:RefreshTokenCookieOnly", true);
@@ -105,6 +110,42 @@ namespace ApexERP.API.Controllers
                 role = (User.FindFirst("role") ?? User.FindFirst(System.Security.Claims.ClaimTypes.Role))?.Value,
                 permissions
             });
+        }
+
+
+        [HttpGet("companies")]
+        [Authorize]
+        [AuthenticatedOnly]
+        public async Task<IActionResult> MyCompanies(CancellationToken ct)
+        {
+            var userId = CurrentUserId;
+            var homeCompanyId = Guid.Parse(User.FindFirst("company_id")!.Value);
+            var tenantId = Guid.Parse(User.FindFirst("tenant_id")!.Value);
+            using var scope = _db.SystemAccessScope("authentication: list companies available to signed-in user");
+            var rows = await _db.Companies.IgnoreQueryFilters().AsNoTracking()
+                .Where(c => c.TenantId == tenantId &&
+                    (c.Id == homeCompanyId || _db.CompanyMemberships.IgnoreQueryFilters().Any(m =>
+                        m.CompanyId == c.Id && m.UserId == userId && m.IsActive &&
+                        (!m.ValidFrom.HasValue || m.ValidFrom <= DateTime.UtcNow) &&
+                        (!m.ValidTo.HasValue || m.ValidTo > DateTime.UtcNow))))
+                .OrderBy(c => c.Name)
+                .Select(c => new { c.Id, c.Name, c.FunctionalCurrency, c.IsActive, IsCurrent = c.Id == homeCompanyId })
+                .ToListAsync(ct);
+            return Ok(rows);
+        }
+
+        [HttpPost("switch-company")]
+        [Authorize]
+        [AuthenticatedOnly]
+        [EnableRateLimiting("auth")]
+        public async Task<IActionResult> SwitchCompany(SwitchCompanyRequest request, CancellationToken ct)
+        {
+            try
+            {
+                var result = await _auth.IssueTokensForCompanyAsync(CurrentUserId, request.CompanyId, Ip, null, ct);
+                return Ok(Deliver(result));
+            }
+            catch (UnauthorizedAccessException ex) { return Forbid(); }
         }
 
         private Guid CurrentUserId => Guid.Parse((User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))!.Value);
