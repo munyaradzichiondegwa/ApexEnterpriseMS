@@ -8,8 +8,8 @@ namespace ApexERP.Application.Services;
 public sealed record FxRevaluationLine(
     Guid GlAccountId, string AccountCode, string AccountName, string Currency,
     decimal ForeignCurrencyBalance, decimal CurrentFunctionalBalance, decimal ClosingRate,
-    DateTime RateDate, bool IsManualOverride, bool IsInverseRate,
-    decimal RevaluedFunctionalBalance, decimal Adjustment);
+    DateTime RateDate, bool IsManualOverride, string RateSource, string? SourceReference,
+    bool IsInverseRate, decimal RevaluedFunctionalBalance, decimal Adjustment);
 
 public sealed record FxRevaluationPreview(
     Guid CompanyId, string FunctionalCurrency, DateTime AsOfDate,
@@ -109,7 +109,7 @@ public sealed class FxRevaluationService
 
             lines.Add(new FxRevaluationLine(account.Id, account.Code, account.Name, balance.Currency.ToUpperInvariant(),
                 balance.ForeignBalance, balance.FunctionalBalance, closingRate, rate.RateDate.Date,
-                rate.IsManualOverride, inverse, revalued, adjustment));
+                rate.IsManualOverride, rate.RateSource, rate.SourceReference, inverse, revalued, adjustment));
         }
 
         return new FxRevaluationPreview(companyId, functionalCurrency, asOfDate.Date,
@@ -180,10 +180,11 @@ public sealed class FxRevaluationService
 
     private static string BuildRateEvidenceNarrative(FxRevaluationLine line)
     {
-        var source = line.IsManualOverride ? "manual override" : "recorded rate";
+        var overrideLabel = line.IsManualOverride ? "manual override" : "recorded rate";
         var direction = line.IsInverseRate ? "inverse" : "direct";
+        var reference = string.IsNullOrWhiteSpace(line.SourceReference) ? "no source reference supplied" : $"reference {line.SourceReference}";
         return $"IAS 21 {line.Currency} closing-rate revaluation; rate {line.ClosingRate}; " +
-            $"{direction} {source} dated {line.RateDate:yyyy-MM-dd}";
+            $"{direction} {line.RateSource} ({overrideLabel}), {reference}, dated {line.RateDate:yyyy-MM-dd}";
     }
 
     public static decimal CalculateAdjustment(decimal foreignCurrencyBalance, decimal currentFunctionalBalance, decimal closingRate)
