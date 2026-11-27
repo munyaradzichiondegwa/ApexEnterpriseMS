@@ -19,7 +19,7 @@ public static class ExchangeRateResolver
             .Concat(inverseRates.Select(rate => new SelectedExchangeRate(rate, true)))
             .Where(candidate => candidate.Rate.Rate > 0m &&
                 candidate.Rate.RateDate.Date <= effectiveOn.Date)
-            .OrderByDescending(candidate => candidate.Rate.RateDate)
+            .OrderByDescending(candidate => candidate.Rate.RateDate.Date)
             .ThenByDescending(candidate => candidate.Rate.IsManualOverride)
             .ThenBy(candidate => candidate.IsInverse)
             .ThenBy(candidate => candidate.Rate.Id)
