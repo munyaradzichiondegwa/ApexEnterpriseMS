@@ -421,7 +421,7 @@ Each integration is isolated behind a service boundary, so a production credenti
 |---|---|
 | ZIMRA FDMS fiscal signing | Crypto and offline queue implemented. A production device certificate requires ZIMRA registration. |
 | ZIMRA e-filing (VAT/PAYE portal submission) | Calculations complete. The portal submission call is a placeholder. |
-| EcoCash / OneMoney / PayNow | Payment methods modelled. Confirmation webhook not yet wired. |
+| EcoCash / OneMoney / PayNow / ZimSwitch / bank APIs | Provider-neutral HMAC-signed webhook intake, replay protection, duplicate-delivery protection, atomic AR receipt + GL posting, retry/dead-letter handling and reconciliation implemented. Provider-specific protocols, credentials and live sandbox certification remain pending. |
 | ZimSwitch direct debit | Not implemented. Bank statement CSV import with auto-matching is available instead. |
 | SMS OTP / TOTP two-factor auth | Fields exist on the user model. Verification flow not yet wired into login. |
 | Redis-backed refresh tokens | Currently issued as signed JWTs. Redis-backed rotation planned. |
