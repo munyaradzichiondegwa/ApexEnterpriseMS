@@ -159,3 +159,17 @@ public sealed class TenantLifecycleJob : BaseEntity
     public DateTime? CompletedAt { get; set; }
     public string? ResultSummary { get; set; }
 }
+
+/// <summary>Expiring invitation for a tenant user to join a specific legal company and role.</summary>
+public sealed class CompanyUserInvitation : BaseEntity
+{
+    public Guid TenantId { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid RoleId { get; set; }
+    public string Email { get; set; } = "";
+    public string TokenHash { get; set; } = "";
+    public DateTime ExpiresAt { get; set; }
+    public Guid InvitedBy { get; set; }
+    public DateTime? AcceptedAt { get; set; }
+    public Guid? AcceptedUserId { get; set; }
+}
