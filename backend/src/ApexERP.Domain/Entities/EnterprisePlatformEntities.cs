@@ -174,3 +174,34 @@ public sealed class CompanyUserInvitation : BaseEntity
     public DateTime? AcceptedAt { get; set; }
     public Guid? AcceptedUserId { get; set; }
 }
+
+/// <summary>Contracted service-level objectives for a tenant, measured from operational probes and incidents.</summary>
+public sealed class TenantSlaPolicy : BaseEntity
+{
+    public Guid TenantId { get; set; }
+    public string SupportTier { get; set; } = "Standard";
+    public decimal AvailabilityTargetPercent { get; set; } = 99.5m;
+    public int ResponseTargetMinutes { get; set; } = 240;
+    public int ResolutionTargetMinutes { get; set; } = 2880;
+    public int MonitoringWindowDays { get; set; } = 30;
+    public string BusinessTimeZone { get; set; } = "UTC";
+    public string BusinessHoursJson { get; set; } = "{}";
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>Support incident with response and resolution timestamps for SLA measurement.</summary>
+public sealed class TenantSlaIncident : BaseEntity
+{
+    public Guid TenantId { get; set; }
+    public string IncidentNumber { get; set; } = "";
+    public string Severity { get; set; } = "Medium";
+    public string Status { get; set; } = "Open";
+    public string Summary { get; set; } = "";
+    public DateTime OpenedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? FirstResponseAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+    public int ResponseTargetMinutes { get; set; }
+    public int ResolutionTargetMinutes { get; set; }
+    public Guid? AssignedTo { get; set; }
+    public string? ResolutionNotes { get; set; }
+}
