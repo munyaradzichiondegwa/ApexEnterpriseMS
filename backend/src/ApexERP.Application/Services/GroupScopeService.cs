@@ -143,17 +143,15 @@ namespace ApexERP.Application.Services
                     if (!seen.Add(current))
                         return "The parent company hierarchy contains a circular structure.";
 
-                    var parent = await _db.Companies.IgnoreQueryFilters()
+                    var parentCompany = await _db.Companies.IgnoreQueryFilters()
                         .Where(c => c.Id == current && c.IsActive && c.Tenant != null && c.Tenant.IsActive)
-                        .Select(c => c.ParentCompanyId)
+                        .Select(c => new { c.Id, c.ParentCompanyId })
                         .SingleOrDefaultAsync(ct);
-                    if (parent == null && !await _db.Companies.IgnoreQueryFilters()
-                            .AnyAsync(c => c.Id == current && c.IsActive && c.Tenant != null && c.Tenant.IsActive, ct))
-                        return "The parent company was not found.";
+                    if (parentCompany == null) return "The parent company was not found.";
 
-                    map[current] = parent;
-                    if (!parent.HasValue) break;
-                    current = parent.Value;
+                    map[parentCompany.Id] = parentCompany.ParentCompanyId;
+                    if (!parentCompany.ParentCompanyId.HasValue) break;
+                    current = parentCompany.ParentCompanyId.Value;
                 }
             }
 
