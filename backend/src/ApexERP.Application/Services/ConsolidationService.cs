@@ -83,6 +83,10 @@ namespace ApexERP.Application.Services
             var group = await GetGroupStructureAsync(parentCompanyId, ct);
             if (group.Count == 0)
                 throw new InvalidOperationException("The requested group is empty.");
+
+            // The group allow-list is established before opening cross-company reads. Keep every
+            // subsequent query constrained to these verified legal entities.
+            using var crossTenant = _db.CrossTenantScope();
             var subsidiaries = group.Where(c => c.Id != parentCompanyId).ToList();
             var groupCompanyIds = group.Select(c => c.Id).ToList();
             var periodsCoveringReportDate = await _db.AccountingPeriods.IgnoreQueryFilters()
@@ -110,7 +114,6 @@ namespace ApexERP.Application.Services
 
             // Financial rows are read across legal companies only after the tenant-scoped group
             // allow-list has been established. Every query below retains an explicit CompanyId predicate.
-            using var crossTenant = _db.CrossTenantScope();
 
             // Aggregate each entity's trial balance line-by-line (by account code, since a well-run
             // group typically shares a common CoA structure across entities; accounts unique to one
