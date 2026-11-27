@@ -80,6 +80,8 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("Purchase order not found in this company.");
                 if (purchaseOrder.Status != PurchaseOrderStatus.Approved || purchaseOrder.FundCentreId != fundCentreId)
                     throw new InvalidOperationException("A commitment requires an approved purchase order assigned to the same fund centre.");
+                if (purchaseOrder.Total != amount)
+                    throw new InvalidOperationException("The commitment amount must equal the approved purchase order total.");
                 if (allowOverride)
                 {
                     var overrideApproval = await _db.WorkflowRequests.Include(w => w.Approvals)
