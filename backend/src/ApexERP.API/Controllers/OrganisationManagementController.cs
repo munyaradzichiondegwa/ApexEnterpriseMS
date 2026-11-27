@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using ApexERP.Application.Security;
 using ApexERP.API.Authorization;
 using ApexERP.Domain.Entities;
@@ -163,6 +165,44 @@ public sealed class OrganisationManagementController : ApiControllerBase
         return Ok(new { added = true, userId = user.Id, companyId, role = role.Name });
     }
 
+
+    [HttpPost("companies/{companyId:guid}/invitations")]
+    public async Task<IActionResult> InviteCompanyUser(Guid companyId, [FromBody] InviteCompanyUserRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(request.Email)) return BadRequest(new { error = "Email is required." });
+        using var scope = _db.SystemAccessScope("tenant administration: invite company user");
+        var company = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct);
+        if (company is null) return NotFound();
+        var email = request.Email.Trim().ToLowerInvariant();
+        if (await _db.Users.IgnoreQueryFilters().AnyAsync(x => x.Email == email, ct))
+            return Conflict(new { error = "This email already has an ApexERP account. Add the existing user through company membership." });
+        var role = await _db.Roles.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.RoleId && x.CompanyId == companyId, ct);
+        if (role is null) return BadRequest(new { error = "Role must belong to the target company." });
+        if (await _db.CompanyUserInvitations.AnyAsync(x => x.TenantId == TenantId && x.Email == email && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct))
+            return Conflict(new { error = "A pending invitation already exists for this email in the tenant." });
+
+        var subscription = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId).OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+        if (subscription is null || subscription.Status is not ("Active" or "Trial"))
+            return StatusCode(402, new { error = "The tenant subscription is inactive." });
+        var plan = await _db.SubscriptionPlans.SingleAsync(x => x.Id == subscription.PlanId, ct);
+        var seatLimit = subscription.SeatOverride > 0 ? subscription.SeatOverride : plan.MaxSeats;
+        var activeSeats = await _db.CompanyMemberships.IgnoreQueryFilters()
+            .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
+            .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
+        var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        if (activeSeats + pendingSeats >= seatLimit) return Conflict(new { error = "The subscription seat limit has been reached.", seatLimit });
+
+        var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken)));
+        var invitation = new CompanyUserInvitation { TenantId = TenantId, CompanyId = companyId, RoleId = role.Id,
+            Email = email, TokenHash = tokenHash, ExpiresAt = DateTime.UtcNow.AddHours(48), InvitedBy = UserId };
+        _db.CompanyUserInvitations.Add(invitation);
+        await _db.SaveChangesAsync(ct);
+        return Accepted(new { invitationId = invitation.Id, invitationToken = rawToken, invitation.ExpiresAt,
+            delivery = "Send the one-time token to the invited address using the configured email provider." });
+    }
+
     [HttpPut("members/{membershipId:guid}/deactivate")]
     public async Task<IActionResult> DeactivateMember(Guid membershipId, CancellationToken ct)
     {
@@ -241,6 +281,7 @@ public sealed record CreateLegalCompanyRequest(string Name, string? Registration
     string? Sector = null, Guid? ParentCompanyId = null, decimal? OwnershipPercentage = null, bool IsPublicSectorEntity = false);
 public sealed record CreateBranchRequest(string Code, string Name, Guid? ParentBranchId = null);
 public sealed record AddCompanyMemberRequest(Guid UserId, Guid RoleId);
+public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
     string ReportingFramework, bool IsPrimary = false);
 public sealed record UpdateOnboardingRequest(string[] CompletedSteps, Guid? DeploymentProfileId = null, bool Completed = false);
