@@ -15,7 +15,8 @@ public sealed class SubscriptionEntitlementMiddleware
         if (context.User.Identity?.IsAuthenticated != true ||
             context.User.FindFirst("platform_admin")?.Value == "true" ||
             context.Request.Path.StartsWithSegments("/health") ||
-            context.Request.Path.StartsWithSegments("/api/v1/auth"))
+            context.Request.Path.StartsWithSegments("/api/v1/auth") ||
+            context.Request.Path.StartsWithSegments("/api/v1/organisation/subscription"))
         {
             await _next(context);
             return;
