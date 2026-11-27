@@ -105,7 +105,7 @@ Definitions and invariants:
 
 - Standardise tenant provisioning, implementation playbooks, diagnostics, export, backup, restore and offboarding.
 - Treat backup payloads and infrastructure credentials as operations-worker/provider responsibilities, not application metadata.
-- Authenticate operations-worker dispatch and callbacks, enforce replay protection/idempotency, and retain job outcomes.
+- Authenticate operations-worker dispatch and callbacks, enforce replay protection/idempotency, and retain job outcomes. Dispatch attempts are capped at eight; only transient HTTP failures retry, exhausted jobs fail closed, and the HMAC signature/retry policy has automated tests. External worker deployment and callback acceptance remain unverified.
 - Provide SLA policies, incident tracking, monitoring evidence and operational reporting.
 - Verify restore procedures, RPO/RTO targets, encryption, retention and tenant-specific recovery boundaries with real deployment infrastructure.
 
@@ -161,7 +161,7 @@ The product-owner's 27 November specification makes public-sector and multinatio
 
 **Known product boundaries:** the tender service currently documents that a distinct public vendor self-registration portal is not included; bid submission is through the authenticated application. Barcode/RFID hardware integration is not included; the workflow accepts scanner-produced tag values. These boundaries must remain visible in product and deployment claims.
 
-**Consolidation PostgreSQL evidence added:** `ConsolidationFxIntegrationTests.cs` verifies effective-dated direct/inverse rate provenance, CTA translation reserve and the consolidated accounting equation, plus indirect NCI across a parent → subsidiary → lower-tier subsidiary ownership chain. The 80% × 70% chain produces 56% effective group ownership and 44% NCI; the test verifies group equity plus NCI reconciles to consolidated net assets. Workflow [#46054641671](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46054641671) passed all 303 backend tests, frontend checks/build and migration/RLS/backup-restore gates. PostgreSQL reciprocal/unmatched intercompany elimination and repeated commitment-release audit scenarios pass; reporting-period adjustment and broader elimination acceptance remain open.
+**Consolidation PostgreSQL evidence added:** `ConsolidationFxIntegrationTests.cs` verifies effective-dated direct/inverse rate provenance, CTA translation reserve and the consolidated accounting equation, plus indirect NCI across a parent → subsidiary → lower-tier subsidiary ownership chain. The 80% × 70% chain produces 56% effective group ownership and 44% NCI; the test verifies group equity plus NCI reconciles to consolidated net assets. Workflow [#46055215858](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46055215858) passed all 316 backend tests, frontend checks/build and migration/RLS/backup-restore gates. PostgreSQL reciprocal/unmatched intercompany elimination and repeated commitment-release audit scenarios pass; reporting-period adjustment and broader elimination acceptance remain open.
 
 ## 7. Existing foundation to preserve
 
