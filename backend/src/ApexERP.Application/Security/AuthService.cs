@@ -130,14 +130,20 @@ namespace ApexERP.Application.Security
         // ---------------------------------------------------------------------------------------------
         // Tokens
         // ---------------------------------------------------------------------------------------------
-        public async Task<LoginResult> IssueTokensAsync(User user, string? ip, Guid? familyId, CancellationToken ct = default)
+        public async Task<LoginResult> IssueTokensAsync(User user, string? ip, Guid? familyId, CancellationToken ct = default, Guid? targetCompanyId = null, Guid? targetRoleId = null)
         {
             using var systemAccess = _db.SystemAccessScope("authentication: tenant validation and token issuance");
             if (user.Role == null)
                 user = await _db.Users.IgnoreQueryFilters().Include(u => u.Role).FirstAsync(u => u.Id == user.Id, ct);
 
+            var effectiveCompanyId = targetCompanyId ?? user.CompanyId;
+            var effectiveRole = targetRoleId.HasValue
+                ? await _db.Roles.IgnoreQueryFilters().SingleOrDefaultAsync(r => r.Id == targetRoleId.Value && r.CompanyId == effectiveCompanyId, ct)
+                : user.Role;
+            if (effectiveRole == null) throw new UnauthorizedAccessException("The selected company role is unavailable.");
+
             var tenantId = await _db.Companies.IgnoreQueryFilters()
-                .Where(c => c.Id == user.CompanyId && c.IsActive)
+                .Where(c => c.Id == effectiveCompanyId && c.IsActive)
                 .Select(c => c.TenantId)
                 .SingleOrDefaultAsync(ct);
             if (!tenantId.HasValue || !await _db.CustomerOrganisations.IgnoreQueryFilters()
@@ -149,10 +155,11 @@ namespace ApexERP.Application.Security
             {
                 new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
                 new("tenant_id", tenantId.Value.ToString()),
-                new("company_id", user.CompanyId.ToString()),
+                new("company_id", effectiveCompanyId.ToString()),
                 new("email", user.Email),
-                new(ClaimTypes.Role, user.Role?.Name ?? "User"),
-                new("permissions", user.Role?.PermissionsJson ?? "[]")
+                new(ClaimTypes.Role, effectiveRole.Name),
+                new("role_id", effectiveRole.Id.ToString()),
+                new("permissions", effectiveRole.PermissionsJson ?? "[]")
             };
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSecret));
             var token = new JwtSecurityToken(_issuer, _issuer, claims, expires: expiresAt, signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
@@ -161,13 +168,46 @@ namespace ApexERP.Application.Security
             var opaque = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
             _db.RefreshTokens.Add(new RefreshToken
             {
-                CompanyId = user.CompanyId, UserId = user.Id, FamilyId = familyId ?? Guid.NewGuid(), TokenHash = Sha256(opaque),
+                CompanyId = effectiveCompanyId, UserId = user.Id, FamilyId = familyId ?? Guid.NewGuid(), TokenHash = Sha256(opaque),
                 ExpiresAt = DateTime.UtcNow.Add(RefreshLifetime), CreatedByIp = ip
             });
             await _db.SaveChangesAsync(ct);
 
-            var permissions = PermissionEvaluator.Parse(user.Role?.PermissionsJson).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
-            return new LoginResult(accessToken, opaque, expiresAt, user.Id, user.CompanyId, user.Role?.Name ?? "User", permissions);
+            var permissions = PermissionEvaluator.Parse(effectiveRole.PermissionsJson).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
+            return new LoginResult(accessToken, opaque, expiresAt, user.Id, effectiveCompanyId, effectiveRole.Name, permissions);
+        }
+
+
+        /// <summary>Issues a company-scoped session only for the user's primary company or an active tenant membership.</summary>
+        public async Task<LoginResult> IssueTokensForCompanyAsync(Guid userId, Guid companyId, string? ip,
+            Guid? familyId = null, CancellationToken ct = default)
+        {
+            using var systemAccess = _db.SystemAccessScope("authentication: validate company membership and switch context");
+            var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == userId && x.IsActive, ct);
+            if (user is null) throw new UnauthorizedAccessException("User is inactive or unavailable.");
+            Guid? roleId = null;
+            if (user.CompanyId != companyId)
+            {
+                var membership = await _db.CompanyMemberships.IgnoreQueryFilters().SingleOrDefaultAsync(x =>
+                    x.UserId == userId && x.CompanyId == companyId && x.IsActive &&
+                    (!x.ValidFrom.HasValue || x.ValidFrom <= DateTime.UtcNow) &&
+                    (!x.ValidTo.HasValue || x.ValidTo > DateTime.UtcNow), ct);
+                if (membership is null || !membership.RoleId.HasValue)
+                    throw new UnauthorizedAccessException("You do not have active access to this company.");
+                roleId = membership.RoleId;
+            }
+            else roleId = user.RoleId;
+
+            var targetTenant = await _db.Companies.IgnoreQueryFilters()
+                .Where(x => x.Id == companyId && x.IsActive).Select(x => x.TenantId).SingleOrDefaultAsync(ct);
+            var homeTenant = await _db.Companies.IgnoreQueryFilters()
+                .Where(x => x.Id == user.CompanyId).Select(x => x.TenantId).SingleOrDefaultAsync(ct);
+            if (!targetTenant.HasValue || targetTenant != homeTenant ||
+                !await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == targetTenant.Value && x.IsActive, ct))
+                throw new UnauthorizedAccessException("Company access must remain within the user's active tenant.");
+
+            user.Role = null;
+            return await IssueTokensAsync(user, ip, familyId, ct, companyId, roleId);
         }
 
         /// <summary>Exchanges a refresh token for a new access token and a new refresh token (rotation).</summary>
@@ -196,7 +236,7 @@ namespace ApexERP.Application.Security
             if (user.PasswordChangedAt != null && user.PasswordChangedAt > stored.CreatedAt)
             { await RevokeFamilyAsync(stored.FamilyId, "password changed", ct); throw new UnauthorizedAccessException("Session expired."); }
 
-            var result = await IssueTokensAsync(user, ip, stored.FamilyId, ct);
+            var result = await IssueTokensForCompanyAsync(user.Id, stored.CompanyId, ip, stored.FamilyId, ct);
             stored.RevokedAt = now; stored.RevokedReason = "rotated"; stored.ReplacedByTokenHash = Sha256(result.RefreshToken);
             await _db.SaveChangesAsync(ct);
             return result;
@@ -314,6 +354,7 @@ namespace ApexERP.Application.Security
                 FirstName = firstName, LastName = lastName, IsActive = true
             };
             _db.Users.Add(user);
+            _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id, MembershipRole = "Administrator", RoleId = adminRole.Id, IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow });
             await _db.SaveChangesAsync(ct);
             return user;
         }
