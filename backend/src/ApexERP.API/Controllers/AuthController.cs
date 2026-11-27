@@ -139,7 +139,7 @@ namespace ApexERP.API.Controllers
                     m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
                 .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
             var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == tenant.Id && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
-            if (activeSeats + pendingSeats >= seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been reached.", seatLimit });
+            if (activeSeats + pendingSeats > seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been exceeded by current reservations.", seatLimit });
 
             var claimedAt = DateTime.UtcNow;
             var claimed = await _db.CompanyUserInvitations
