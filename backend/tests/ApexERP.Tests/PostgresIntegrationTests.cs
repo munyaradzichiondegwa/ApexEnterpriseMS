@@ -10,7 +10,7 @@ namespace ApexERP.Tests
 {
     /// <summary>
     /// Integration tests against a REAL PostgreSQL database. They run only when APEX_TEST_DB is set to a connection string
-    /// whose user may create databases (for example "Host=localhost;Username=postgres;Password=...;Database=postgres");
+    /// whose user may create databases and roles (CREATEDB and CREATEROLE, or a superuser; for example "Host=localhost;Username=postgres;Password=...;Database=postgres");
     /// otherwise they are skipped. Each test creates a throw-away database, applies the repository's real EF migrations to it
     /// (so these tests also prove the migrations apply), and drops it afterwards.
     /// </summary>
@@ -29,6 +29,7 @@ namespace ApexERP.Tests
     {
         private readonly string _serverConnection;
         private readonly string _name;
+        private string? _rlsRole;
         public string ConnectionString { get; }
 
         private TestDb(string serverConnection, string name)
@@ -45,9 +46,17 @@ namespace ApexERP.Tests
             await Execute(server, $"CREATE DATABASE \"{name}\"");
 
             var db = new TestDb(server, name);
-            await using var ctx = db.NewContext(null);
-            await ctx.Database.MigrateAsync();      // the real migrations, exactly as production applies them
-            return db;
+            try
+            {
+                await using var ctx = db.NewContext(null);
+                await ctx.Database.MigrateAsync();  // the real migrations, exactly as production applies them
+                return db;
+            }
+            catch
+            {
+                await db.DisposeAsync();            // do not leave an orphaned database when migration fails
+                throw;
+            }
         }
 
         /// <summary>A context scoped to one company (null = no tenant, which must see nothing).</summary>
@@ -62,10 +71,22 @@ namespace ApexERP.Tests
             };
         }
 
+        public async Task ExecuteDatabaseAsync(string sql) => await Execute(ConnectionString, sql);
+
+        public async Task CreateReadOnlyRlsRoleAsync(string role)
+        {
+            _rlsRole = role;
+            await Execute(_serverConnection, $"CREATE ROLE \"{role}\" NOLOGIN NOBYPASSRLS");
+            await Execute(_serverConnection, $"GRANT CONNECT ON DATABASE \"{_name}\" TO \"{role}\"");
+            await Execute(ConnectionString, $"GRANT USAGE ON SCHEMA public TO \"{role}\"");
+            await Execute(ConnectionString, $"GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{role}\"");
+        }
+
         public async ValueTask DisposeAsync()
         {
             NpgsqlConnection.ClearAllPools();
             await Execute(_serverConnection, $"DROP DATABASE IF EXISTS \"{_name}\" WITH (FORCE)");
+            if (_rlsRole != null) await Execute(_serverConnection, $"DROP ROLE IF EXISTS \"{_rlsRole}\"");
         }
 
         private static async Task Execute(string connectionString, string sql)
@@ -153,6 +174,199 @@ namespace ApexERP.Tests
                 Assert.Single(await otherTenant.Companies.ToListAsync());
                 Assert.Equal(tenantB, (await otherTenant.Companies.SingleAsync()).TenantId);
             }
+        }
+
+        [PostgresFact]
+        public async Task External_group_parent_requires_recorded_consent_without_expanding_visible_company_graph()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var tenantA = Guid.NewGuid();
+            var tenantB = Guid.NewGuid();
+            var caller = Guid.NewGuid();
+            var tenantAChild = Guid.NewGuid();
+            var childWithExternalParent = Guid.NewGuid();
+            var consentingParent = Guid.NewGuid();
+            var unlinkedParent = Guid.NewGuid();
+            var cyclicParent = Guid.NewGuid();
+            var foreignChild = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(null))
+            {
+                seed.CustomerOrganisations.AddRange(
+                    new CustomerOrganisation { Id = tenantA, Name = "Group tenant A" },
+                    new CustomerOrganisation { Id = tenantB, Name = "Group tenant B" });
+                seed.Companies.AddRange(
+                    new Company { Id = caller, TenantId = tenantA, Name = "Independent customer" },
+                    new Company { Id = tenantAChild, TenantId = tenantA, Name = "Tenant A subsidiary", ParentCompanyId = caller },
+                    new Company { Id = childWithExternalParent, TenantId = tenantA, Name = "Tenant child with external parent", ParentCompanyId = consentingParent },
+                    new Company { Id = consentingParent, TenantId = tenantB, Name = "Consenting parent" },
+                    new Company { Id = unlinkedParent, TenantId = tenantB, Name = "Unlinked parent" },
+                    new Company { Id = cyclicParent, TenantId = tenantB, Name = "Cyclic parent", ParentCompanyId = caller },
+                    new Company { Id = foreignChild, TenantId = tenantB, Name = "Foreign child", ParentCompanyId = caller });
+                seed.Customers.Add(new Customer
+                {
+                    CompanyId = consentingParent,
+                    Code = "LINK-CALLER",
+                    Name = "Caller company",
+                    LinkedCompanyId = caller
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var context = db.NewContext(caller, tenantId: tenantA);
+            var scope = new GroupScopeService(context);
+
+            var visible = await scope.GetVisibleCompanyIdsAsync(caller);
+            Assert.Equal(new[] { caller, tenantAChild }.OrderBy(x => x).ToArray(), visible.OrderBy(x => x).ToArray());
+            Assert.DoesNotContain(consentingParent, visible);
+            Assert.DoesNotContain(foreignChild, visible);
+
+            var consolidation = new ConsolidationService(context, new ReportingService(context), scope);
+            var consolidatedGroup = await consolidation.GetGroupStructureAsync(caller);
+            Assert.Equal(new[] { caller, tenantAChild }.OrderBy(x => x).ToArray(), consolidatedGroup.Select(x => x.Id).OrderBy(x => x).ToArray());
+
+            await using var childContext = db.NewContext(childWithExternalParent, tenantId: tenantA);
+            var childScope = new GroupScopeService(childContext);
+            var childVisible = await childScope.GetVisibleCompanyIdsAsync(childWithExternalParent);
+            Assert.Equal(new[] { childWithExternalParent }, childVisible.OrderBy(x => x).ToArray());
+            Assert.DoesNotContain(consentingParent, childVisible);
+
+            Assert.Null(await scope.ValidateStructureChangeAsync(caller, caller, consentingParent));
+
+            var consentError = await scope.ValidateStructureChangeAsync(caller, caller, unlinkedParent);
+            Assert.NotNull(consentError);
+            Assert.Contains("has not registered", consentError);
+
+            var cycleError = await scope.ValidateStructureChangeAsync(caller, caller, cyclicParent);
+            Assert.NotNull(cycleError);
+            Assert.Contains("circular", cycleError);
+        }
+
+        // ---- PostgreSQL RLS: exercise policies as a non-owner, non-BYPASSRLS role -------------------------------
+
+        [PostgresFact]
+        public async Task Row_level_security_fails_closed_and_enforces_tenant_and_company_boundaries()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var tenantA = Guid.NewGuid();
+            var tenantB = Guid.NewGuid();
+            var companyA1 = Guid.NewGuid();
+            var companyA2 = Guid.NewGuid();
+            var companyB1 = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(null))
+            {
+                seed.CustomerOrganisations.AddRange(
+                    new CustomerOrganisation { Id = tenantA, Name = "RLS Tenant A" },
+                    new CustomerOrganisation { Id = tenantB, Name = "RLS Tenant B" });
+                seed.Companies.AddRange(
+                    new Company { Id = companyA1, TenantId = tenantA, Name = "RLS A1" },
+                    new Company { Id = companyA2, TenantId = tenantA, Name = "RLS A2" },
+                    new Company { Id = companyB1, TenantId = tenantB, Name = "RLS B1" });
+                seed.GlAccounts.AddRange(
+                    new GlAccount { CompanyId = companyA1, Code = "RLS1000", Name = "A1 Cash", Type = GlAccountType.Asset },
+                    new GlAccount { CompanyId = companyA2, Code = "RLS1000", Name = "A2 Cash", Type = GlAccountType.Asset },
+                    new GlAccount { CompanyId = companyB1, Code = "RLS1000", Name = "B1 Cash", Type = GlAccountType.Asset });
+                await seed.SaveChangesAsync();
+            }
+
+            var rlsSql = ReadRepositoryFile("backend/database/hardening/002_row_level_security.sql");
+            await db.ExecuteDatabaseAsync(rlsSql);
+
+            var role = "apex_rls_" + Guid.NewGuid().ToString("N");
+            await db.CreateReadOnlyRlsRoleAsync(role);
+
+            await using var connection = new NpgsqlConnection(db.ConnectionString);
+            await connection.OpenAsync();
+            try
+            {
+                await using (var setRole = connection.CreateCommand())
+                {
+                    setRole.CommandText = $"SET ROLE \"{role}\"";
+                    await setRole.ExecuteNonQueryAsync();
+                }
+
+                async Task<long> CountAsync(string table)
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = $"SELECT COUNT(*) FROM \"{table}\"";
+                    return (long)(await command.ExecuteScalarAsync())!;
+                }
+
+                async Task SetContextAsync(Guid? tenant, Guid? company, bool bypass = false)
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = "SELECT set_config('app.tenant_id', @tenant, false), set_config('app.company_id', @company, false), set_config('app.rls_bypass', @bypass, false)";
+                    command.Parameters.AddWithValue("@tenant", tenant?.ToString() ?? string.Empty);
+                    command.Parameters.AddWithValue("@company", company?.ToString() ?? string.Empty);
+                    command.Parameters.AddWithValue("@bypass", bypass ? "on" : "off");
+                    await command.ExecuteNonQueryAsync();
+                }
+
+                // A normal application role is not the table owner, is not a superuser and cannot bypass RLS.
+                await using (var roleCheck = connection.CreateCommand())
+                {
+                    roleCheck.CommandText = "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user";
+                    await using var reader = await roleCheck.ExecuteReaderAsync();
+                    Assert.True(await reader.ReadAsync());
+                    Assert.False(reader.GetBoolean(0));
+                    Assert.False(reader.GetBoolean(1));
+                }
+
+                Assert.Equal(0L, await CountAsync("Companies"));
+                Assert.Equal(0L, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(0L, await CountAsync("GlAccounts"));
+
+                await SetContextAsync(tenantA, companyA1);
+                Assert.Equal(2L, await CountAsync("Companies"));                 // all legal entities in this tenant
+                Assert.Equal(1L, await CountAsync("CustomerOrganisations"));    // only this tenant
+                Assert.Equal(1L, await CountAsync("GlAccounts"));                // only the selected company
+
+                await SetContextAsync(tenantA, companyA2);
+                Assert.Equal(2L, await CountAsync("Companies"));
+                Assert.Equal(1L, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(1L, await CountAsync("GlAccounts"));                // company A2 only
+
+                await SetContextAsync(tenantB, companyA1);
+                Assert.Equal(1L, await CountAsync("Companies"));                 // tenant B only
+                Assert.Equal(1L, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(0L, await CountAsync("GlAccounts"));                // A1 does not belong to tenant B
+
+                await SetContextAsync(null, null, bypass: true);
+                Assert.Equal(3L, await CountAsync("Companies"));
+                Assert.Equal(2L, await CountAsync("CustomerOrganisations"));
+                Assert.Equal(3L, await CountAsync("GlAccounts"));
+
+                await using var flags = connection.CreateCommand();
+                flags.CommandText = @"SELECT COUNT(*), bool_and(relrowsecurity), bool_and(relforcerowsecurity)
+                    FROM pg_class
+                    WHERE relname IN ('Companies', 'CustomerOrganisations', 'GlAccounts')";
+                await using var flagReader = await flags.ExecuteReaderAsync();
+                Assert.True(await flagReader.ReadAsync());
+                Assert.Equal(3L, flagReader.GetInt64(0));
+                Assert.True(flagReader.GetBoolean(1));
+                Assert.True(flagReader.GetBoolean(2));
+            }
+            finally
+            {
+                await using var reset = connection.CreateCommand();
+                reset.CommandText = "RESET ROLE";
+                await reset.ExecuteNonQueryAsync();
+                NpgsqlConnection.ClearPool(connection);
+            }
+        }
+
+        private static string ReadRepositoryFile(string relativePath)
+        {
+            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            while (directory != null)
+            {
+                var candidate = Path.Combine(directory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(candidate)) return File.ReadAllText(candidate);
+                directory = directory.Parent;
+            }
+
+            throw new FileNotFoundException($"Could not locate repository file '{relativePath}'.");
         }
 
         // ---- audit finding 9: tenant isolation fails closed ------------------------------------------------------------

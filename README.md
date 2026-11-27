@@ -251,7 +251,7 @@ cd ApexEnterpriseMS
 docker compose up --build
 ```
 
-The EF Core migrations are committed to the repository and applied automatically when the API starts, so there is nothing to generate for a first run. This compose file is a **local development stack** (it runs the API in the `Development` environment). See [Configuration and Secrets](#configuration-and-secrets) before deploying anywhere real.
+The EF Core migrations are committed to the repository. The local Development configuration applies pending migrations on startup for convenience. This compose file is a **local development stack** (it runs the API in the `Development` environment and uses a development database owner). Production deployments must apply migrations separately with a deployment identity, then run the API with a least-privilege runtime role. See [Database migrations](#database-migrations) and [Configuration and Secrets](#configuration-and-secrets).
 
 | Service | URL |
 |---|---|
@@ -287,7 +287,7 @@ npm run dev
 
 ### Database migrations
 
-ApexERP uses real, versioned EF Core migrations (never `EnsureCreated()` or hand-run SQL). The migrations are committed under `backend/src/ApexERP.Infrastructure/Data/Migrations`, and `Program.cs` applies any pending ones on startup, so every environment gets the same schema.
+ApexERP uses real, versioned EF Core migrations (never `EnsureCreated()` or hand-run SQL). The migrations are committed under `backend/src/ApexERP.Infrastructure/Data/Migrations`. Automatic migration is enabled only in the local Development configuration. Outside Development, `Database__ApplyMigrationsOnStartup` defaults to `false` and the API refuses to start if automatic migration is requested. Apply migrations as a separate deployment step using a dedicated schema-migration identity; start the API afterwards with a runtime identity that has no DDL privileges, is not a table owner, and has no `BYPASSRLS` privilege.
 
 When you change an entity class under `ApexERP.Domain/Entities` (or the model configuration in `ApexErpDbContext`), generate a new migration and commit it:
 
@@ -299,7 +299,7 @@ When you change an entity class under `ApexERP.Domain/Entities` (or the model co
 ./scripts/generate-migrations.sh AddCustomerLoyaltyPoints                      # macOS/Linux
 ```
 
-The `AuditHardeningPhase1And2` migration adds the exception queue and the unique and check constraints that protect the ledger. It is documented in [docs/AUDIT_REMEDIATION.md](docs/AUDIT_REMEDIATION.md). **Before applying it to a database that already holds data**, run the four pre-check queries in that migration's header comment. Any rows they return must be fixed first.
+The `AuditHardeningPhase1And2` migration adds the exception queue and the unique and check constraints that protect the ledger. It is documented in [docs/AUDIT_REMEDIATION.md](docs/AUDIT_REMEDIATION.md). **Before applying any migration to a database that already holds data**, review its preconditions and prepare any required data backfill. The tenant-foundation migration deliberately leaves `Companies.TenantId` nullable and does not assign existing companies to tenants.
 
 ---
 
@@ -311,7 +311,9 @@ The API checks its security-critical configuration when it starts and **refuses 
 |---|---|---|---|
 | JWT signing key | `Jwt__Secret` | Always | At least 32 characters. Outside Development it is also rejected if it looks like a placeholder or has too little variety. Generate one with `openssl rand -base64 48`. |
 | Token issuer | `Jwt__Issuer` | Always | `ApexERP` by default (`appsettings.json`). |
-| Database | `ConnectionStrings__Default` | Always | Production must not use the development password. |
+| Database | `ConnectionStrings__Default` | Always | Use a least-privilege runtime identity. Production must not use the development password or a schema-owner account. |
+| Startup migrations | `Database__ApplyMigrationsOnStartup` | Optional | `false` outside Development. Production schema changes must run as a separate deployment step. |
+| PostgreSQL RLS | `Security__RowLevelSecurity__Enabled` | Optional | `false` by default. When `true`, startup verifies that tenant tables have `FORCE ROW LEVEL SECURITY` and the runtime role is neither superuser, `BYPASSRLS`, nor owner of protected tables. |
 | Web app origin(s) | `Frontend__Origin` | Outside Development | Comma-separated real `http(s)` origins, never `localhost`. |
 | Journal self-approval | `Controls__JournalApproval__AllowSelfApproval` | Optional | `false` by default (segregation of duties). Set to `true` only for single-user development. |
 | Swagger UI | `Swagger__Enabled` | Optional | On in Development; elsewhere only when set to `true`. |
@@ -327,7 +329,7 @@ Development-only values live in `appsettings.Development.json`. In production, s
 - JWT authentication. Access tokens last 15 minutes. Refresh tokens use a different audience, so they can never be used as access tokens.
 - BCrypt password hashing, with a minimum password policy (10+ characters).
 - **Deny-by-default RBAC.** Every endpoint requires a permission (see [Roles and Permissions](#roles-and-permissions)), and a test fails if any endpoint is left open.
-- **Tenant isolation fails closed.** EF Core query filters return nothing when there is no tenant context, and requests without a valid `company_id` are refused. Code that must work across tenants (sign-in, inter-company posting, consolidation) opts in explicitly.
+- **Tenant isolation fails closed.** Tenant and company query filters return nothing when their identity is missing, and authenticated requests without valid `tenant_id` and `company_id` claims are refused. PostgreSQL RLS is an additional boundary; `IgnoreQueryFilters()` does not bypass it. Cross-company operations use narrowly scoped `CrossTenantScope`, while platform operations use a named `SystemAccessScope`. A missing company identity never grants bypass.
 - Group, consolidation and inter-company features are scoped to the caller's *own* group. A company can only be attached under another company when both sides have agreed.
 - Immutable, append-only audit log. A ledger cannot be edited once posted; corrections are made by reversal.
 - One database transaction per mutating request, so multi-step postings are all-or-nothing.
@@ -380,7 +382,7 @@ A role's permissions are a JSON array of keys, for example `["gl.journals.create
 # Backend unit tests (no database needed)
 dotnet test backend/tests/ApexERP.Tests
 
-# Backend integration tests against a real PostgreSQL (the user must be allowed to create databases)
+# Backend integration tests against a disposable PostgreSQL server (the user must be allowed to create databases and roles)
 APEX_TEST_DB="Host=localhost;Username=postgres;Password=postgres;Database=postgres" dotnet test backend/tests/ApexERP.Tests
 
 # Frontend
@@ -390,7 +392,7 @@ cd frontend && npm test && npm run typecheck
 ./scripts/smoke-test.sh
 ```
 
-The integration tests create a throw-away database per test, apply the real migrations to it, and cover tenant isolation, concurrent numbering, atomic and single reversal, reports, the approval workflow, period locking and ledger immutability. They are skipped when `APEX_TEST_DB` is not set. GitHub Actions runs the unit tests, the integration tests (against a PostgreSQL service) and the frontend checks on every push.
+The integration tests create a throw-away database per test, apply the real migrations to it, and cover tenant isolation, PostgreSQL RLS under a non-owner/non-`BYPASSRLS` role, concurrent numbering, atomic and single reversal, reports, the approval workflow, period locking and ledger immutability. They are skipped when `APEX_TEST_DB` is not set. The connection user must be allowed to create databases and roles (`CREATEDB` and `CREATEROLE`, or a superuser). GitHub Actions runs these tests against an isolated PostgreSQL service.
 
 ---
 
