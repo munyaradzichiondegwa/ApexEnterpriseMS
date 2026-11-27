@@ -81,14 +81,14 @@ namespace ApexERP.Application.Services
         public async Task<RunPayrollResult> RunAsync(Guid companyId, int month, int year,
             Dictionary<Guid, decimal>? allowancesByEmployee = null, string currency = "USD", CancellationToken ct = default)
         {
+            currency = (currency ?? string.Empty).Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(currency)) throw new InvalidOperationException("A payroll currency is required.");
             var already = await _db.PayrollRuns.AnyAsync(
                 p => p.CompanyId == companyId && p.PeriodMonth == month && p.PeriodYear == year && p.Currency == currency, ct);
             if (already)
                 throw new InvalidOperationException($"A payroll run for {month}/{year} already exists.");
 
-            currency = currency.Trim().ToUpperInvariant();
-            if (string.IsNullOrWhiteSpace(currency)) throw new InvalidOperationException("A payroll currency is required.");
-            var employees = await _db.Employees.Where(e => e.CompanyId == companyId && e.IsActive && e.Currency == currency).ToListAsync(ct);
+            var employees = await _db.Employees.Where(e => e.CompanyId == companyId && e.IsActive && e.Currency.ToUpper() == currency).ToListAsync(ct);
             if (employees.Count == 0)
                 throw new InvalidOperationException($"No active employees are configured for payroll currency {currency}.");
             var asOf = new DateTime(year, month, DateTime.DaysInMonth(year, month));
@@ -187,7 +187,7 @@ namespace ApexERP.Application.Services
             };
 
             var je = await _gl.PostAsync(companyId, entryDate, JournalSource.Payroll,
-                $"Payroll {run.PeriodMonth}/{run.PeriodYear}", $"PAYROLL-{run.PeriodYear}{run.PeriodMonth:D2}", glLines, ct);
+                $"Payroll {run.PeriodMonth}/{run.PeriodYear} {run.Currency}", $"PAYROLL-{run.PeriodYear}{run.PeriodMonth:D2}-{run.Currency}", glLines, ct);
 
             run.JournalEntryId = je.Id;
             run.Status = PayrollRunStatus.Posted;
