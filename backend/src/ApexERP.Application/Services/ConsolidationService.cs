@@ -233,7 +233,6 @@ namespace ApexERP.Application.Services
 
             // ---- Non-controlling interest: for each <100%-owned subsidiary, split its net equity ----
             decimal totalNci = 0, totalGroupEquityAdj = 0;
-            var companiesByIdForOwnership = group.ToDictionary(c => c.Id);
             foreach (var sub in subsidiaries)
             {
                 // NCI in a lower-tier subsidiary includes both the immediate minority interests
