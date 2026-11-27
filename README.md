@@ -63,6 +63,7 @@ ApexERP runs real, working business logic across all 16 core ERP modules, not UI
 - [Financial Reporting](#financial-reporting)
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
+- [Product architecture and consolidation acceptance register](docs/PRODUCT_ARCHITECTURE_ROADMAP.md)
 - [Getting Started](#getting-started)
 - [Configuration and Secrets](#configuration-and-secrets)
 - [Security and Multi-Tenancy](#security-and-multi-tenancy)

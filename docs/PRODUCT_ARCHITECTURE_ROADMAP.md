@@ -1,0 +1,211 @@
+# ApexERP product architecture and consolidation acceptance register
+
+**Controlling product specification:** Product Architecture & Roadmap Specification — *ApexERP: Multi-Tenant Enterprise Architecture & Product Expansion* supplied by the product owner on 27 November 2026.
+
+**Implementation branch:** `feature/apexerp-consolidated-enterprise`  
+**Base:** verified `main` lineage; production/main are not modified by this work.  
+**Status:** requirements adopted; implementation and release verification remain in progress. This document is not a declaration that every capability is complete or production-ready.
+
+## 1. Product position and customer segments
+
+ApexERP is one configurable product core. It must support:
+
+- Private companies and SMEs.
+- Government ministries, departments and agencies (MDAs).
+- State-owned enterprises (SOEs).
+- NGOs and development organisations.
+- Multinationals and corporate groups.
+- Multi-entity and multi-jurisdiction organisations.
+
+Sector/deployment profiles are configuration presets, not separate code forks. A profile must not silently invent statutory rates, legal obligations, accounting policy, or country-specific compliance content. Such content requires an approved, effective-dated jurisdiction pack and a named review authority.
+
+## 2. Non-negotiable domain hierarchy
+
+```text
+ApexERP platform
+├── Platform control plane (separate identity and authorisation boundary)
+└── Customer organisation / Tenant (customer data-isolation boundary)
+    ├── Legal entity / Company
+    │   ├── Branches
+    │   ├── Departments
+    │   ├── Cost centres
+    │   └── Users, memberships and company-specific roles
+    └── Other legal entities / subsidiaries / international operations
+```
+
+Definitions and invariants:
+
+1. **Tenant** is the independent customer organisation and the principal customer data-isolation boundary.
+2. **Company** is a legal entity owned by exactly one tenant. A tenant may own multiple companies.
+3. **Branch, department and cost centre** are subordinate operating structures; none creates a tenant.
+4. **Membership** grants a user access to a particular company within a tenant and carries the applicable company-specific role and validity state.
+5. **Platform administration** is a separate control plane. A tenant administrator, company administrator, or tenant `SUPER_ADMIN` must never gain platform authority by role-name equivalence.
+6. A government MDA may be a tenant in its own right or a company/entity within a larger government tenant, according to the actual customer and legal operating model.
+7. Tenant isolation and company/group consolidation are different boundaries. Group links, shared users, similar names, common domains, or commercial relationships must not be used to infer common tenant ownership.
+
+## 3. Nine architectural pillars and acceptance criteria
+
+| Pillar | Required acceptance evidence |
+|---|---|
+| Multi-tenancy | Tenant ID is enforced in API authorization, EF query filters, database constraints/RLS, background jobs, exports/files and cache keys. Missing tenant context fails closed. Automated cross-tenant read/write tests prove isolation. |
+| Multi-company | One tenant can own multiple legal companies. Company-specific membership and roles are enforced on every request and on company switching. Cross-company access is not inferred from tenant membership alone. |
+| Multi-branch | Branches support parent/child hierarchy within a company. Departments and cost centres can be assigned to the correct company/branch and cannot be referenced across tenants or companies improperly. |
+| Multi-currency | Local and foreign currency transactions, functional currency, rate source/effective date, revaluation, realised/unrealised FX and reporting treatment are explicit and tested. |
+| Multi-country | Jurisdiction is configurable per legal entity. Tax/statutory packs are versioned, effective-dated, approved and independently testable; defaults are not legal advice or a substitute for an approved pack. |
+| Consolidation | Group reporting supports controlled entity inclusion, reporting periods, currency translation, intercompany matching/elimination, audit traceability and prevention of duplicate or unsupported eliminations. |
+| Access control | Deny-by-default RBAC with tenant/company scope, role-specific permissions, privileged-operation checks, segregation of duties and auditable grants/revocations. |
+| Public sector | MDA/SOE profiles support vote/budget/fund hierarchy, commitment accounting, encumbrance controls, appropriations, approvals and government reporting without breaking commercial accounting. |
+| Compliance | Immutable/auditable event history, evidence retention, multi-level approvals, SoD conflict detection, exception handling and independent review are enforced at service and database boundaries. |
+
+## 4. Six implementation milestones
+
+### Milestone 1 — Tenant identity and data isolation
+
+- Establish tenant identity and immutable tenant/company claims in access tokens.
+- Enforce tenant scope consistently across database entities, API routes, authentication, company switching, background processing, files/exports and operational telemetry.
+- Keep platform control-plane data and tenant business data logically and authoritatively separated.
+- Use PostgreSQL RLS as defence in depth. Runtime roles must not own tables or possess a bypass capability.
+- Test missing tenant context, forged tenant/company claims, cross-tenant IDs, membership revocation, inactive tenants, RLS WITH CHECK, rollback and pooled-connection context reset.
+- Ensure privileged cross-tenant/system scopes are narrow, reason-coded, audited, disposed reliably and unavailable to ordinary tenant request paths.
+
+### Milestone 2 — Organisation registration and onboarding
+
+- Support self-service registration and platform-assisted provisioning.
+- Provision tenant, first legal company, administrator invitation, initial membership, subscription/trial and onboarding state transactionally.
+- Store invitation secrets only as one-way hashes; enforce expiry, one-time use, email binding, replay resistance and seat/subscription checks.
+- Provide an onboarding wizard for company details, fiscal calendar, currency, jurisdiction, sector profile, users/roles and completion validation.
+- Ensure SMTP delivery failure is reported honestly; do not represent an invitation as delivered unless delivery is confirmed.
+
+### Milestone 3 — Multiple legal entities and group management
+
+- Support multiple legal entities and explicit parent/subsidiary relationships within a tenant.
+- Support branches, departments and cost centres with validated hierarchy and ownership.
+- Support company-specific memberships, invitations, role assignment, deactivation, expiry and secure company switching.
+- Ensure a user can only switch to a company with a valid, active membership in the same tenant.
+- Preserve entity-level accounting configuration and support multi-company reporting without weakening tenant boundaries.
+
+### Milestone 4 — Subscription and licensing
+
+- Support configurable plans, module entitlements, seat/company limits, trial, active, suspended, cancelled, renewal and plan-change states.
+- Enforce entitlements server-side on API operations; hiding a menu or route in the UI is not enforcement.
+- Check seat/company limits transactionally during registration, invitation acceptance, membership activation and company creation to prevent race-condition over-allocation.
+- Preserve a controlled remediation path for over-limit/suspended tenants without granting access to restricted business modules.
+- Define billing-provider interfaces, webhook authentication/idempotency and reconciliation. Do not claim payment collection works until a provider is configured and end-to-end tested.
+
+### Milestone 5 — Platform administrator console
+
+- Provide a separate platform identity issuer and platform-only authentication scheme.
+- Manage customers, tenant lifecycle, plans, subscriptions, jurisdiction catalogue, deployment profiles, operational checks and platform health.
+- Record platform audit events for privileged actions, with actor, target, reason, outcome and correlation.
+- Require time-limited, reason-coded, independently approved support grants. Support diagnostics must be scoped, audited, revocable and expire automatically.
+- Tenant administrators must not be able to issue platform tokens, grant platform roles or call platform APIs.
+
+### Milestone 6 — Customer deployment and support
+
+- Standardise tenant provisioning, implementation playbooks, diagnostics, export, backup, restore and offboarding.
+- Treat backup payloads and infrastructure credentials as operations-worker/provider responsibilities, not application metadata.
+- Authenticate operations-worker dispatch and callbacks, enforce replay protection/idempotency, and retain job outcomes.
+- Provide SLA policies, incident tracking, monitoring evidence and operational reporting.
+- Verify restore procedures, RPO/RTO targets, encryption, retention and tenant-specific recovery boundaries with real deployment infrastructure.
+
+## 5. Five-stage productisation roadmap
+
+| Stage | Product outcome | Gate |
+|---|---|---|
+| 1. Multi-tenant architecture and onboarding | Tenant identity, tenant isolation and assisted/self-service onboarding | Cross-tenant security and provisioning tests pass |
+| 2. Subscription, licensing and customer administration | Plans, seats, module entitlements, billing lifecycle and customer governance | Server-side entitlement and concurrency tests pass; billing boundary documented |
+| 3. Enterprise configuration and jurisdiction | Configurable COA, tax rules, currencies, fiscal calendars and statutory packs | Approved jurisdiction content and entity-level configuration tests |
+| 4. Public-sector and multinational profiles | MDA/SOE fund and budget controls; corporate group consolidation and multi-country operations | Profile acceptance tests and consolidated reporting controls pass |
+| 5. Implementation, support and DR | Playbooks, automated tenant operations, SLA monitoring, backup and disaster recovery | Operational worker, monitoring and restore evidence available |
+
+## 6. Required product and security test matrix
+
+The consolidated candidate is not release-ready until CI includes executable tests for all of the following:
+
+- Two or more independent tenants with overlapping company/user names and IDs where feasible; prove no cross-tenant reads, writes, joins, exports or background-job leakage.
+- One tenant with at least two legal companies; prove permitted group membership and prohibited company access without membership.
+- Parent/child branches and department/cost-centre assignments; reject cross-company and cross-tenant references.
+- Tenant and company claims are derived from validated membership, not trusted request payloads.
+- Company switching checks active membership, tenant status, subscription policy and target-company role; revoked or expired membership is rejected.
+- Refresh-token rotation, reuse detection, logout, password change, account deactivation and MFA changes revoke the correct session families without crossing tenant boundaries.
+- Registration and invitation acceptance are atomic, one-time and safe under concurrent requests.
+- Seat/company entitlements cannot be exceeded by concurrent provisioning.
+- Module entitlements are enforced at API/service level for every protected module route.
+- Platform JWTs require the separate issuer, audience, signature and platform-admin claim; tenant tokens cannot access platform routes.
+- Support grant approval requires a different platform operator; expiry/revocation prevents further diagnostic access and all access is audited.
+- Jurisdiction and statutory configuration are company-specific, versioned and review-gated.
+- Multi-currency calculations and group consolidation include exchange-rate provenance, intercompany eliminations and reconciliation evidence.
+- Public-sector fund/budget/commitment controls are tested independently from commercial workflows.
+- RLS enable/disable scripts are repeatable; rollback drops dependent policies before helper functions; non-superuser runtime-role tests verify fail-closed behaviour.
+- Clean database migration, upgrade from supported prior schema, migration drift, backup/restore and migration rollback are verified against real PostgreSQL.
+- Frontend typecheck, unit tests and production build pass; frontend permissions mirror but never replace backend enforcement.
+
+## 7. Existing foundation to preserve
+
+The implementation must extend the existing ApexERP codebase rather than replace it. Preserve the existing accounting engine, 16-module ERP functionality, five-statement financial reporting, IFRS controls, approvals, audit trails, existing company-level query filtering, and prior merged audit-hardening work.
+
+The enterprise platform foundation already present in this branch documents tenant onboarding, company memberships, subscription plans, jurisdiction profiles, deployment profiles, a separate platform bearer scheme, support grants, operational checks, SLA records and lifecycle-job metadata. Those are implementation claims to be verified against executable code, database migrations, tests and deployed integrations; documentation alone is not acceptance evidence.
+
+## 8. Integration and deployment boundaries — honest status
+
+The application must distinguish an implemented workflow/interface from a configured, operational integration.
+
+| Capability | What counts as verified |
+|---|---|
+| Email/SMTP | Provider configured; delivery success/failure observed; invitation lifecycle tested end-to-end |
+| Billing/payment | Provider configured; signed webhook, idempotency, payment reconciliation and lifecycle transition tested |
+| Operations worker | Worker deployed; signed dispatch and callback tested; retries, replay and failure handling verified |
+| Backup/restore | Real backup artifact, encryption/key handling, restore into isolated target, integrity check and measured recovery time |
+| Monitoring/SLA | Live telemetry source, evidence freshness, alert delivery and incident lifecycle verified |
+| Jurisdiction/statutory packs | Approved source, effective date, jurisdiction owner, tests and release/version governance recorded |
+| Country tax engines | Current statutory rules validated by an authorised jurisdiction specialist; no inferred/default rates treated as legally complete |
+
+If a provider, credential, legal approval or deployment environment is absent, mark the integration **not configured / not verified**. Do not mark it complete because an interface, database entity, mock or documentation exists.
+
+## 9. Release and consolidation governance
+
+1. Keep `main` and production databases untouched during consolidation.
+2. Reconcile the merged mainline, PR #13 corrections, unique changes from PR #14 and PR #15, and relevant synchronisation work from PR #16 at file and behaviour level.
+3. Do not merge the candidate branches independently and do not resolve critical conflicts by accepting an entire side.
+4. Preserve the newer RLS rollback ordering and verify it on real PostgreSQL.
+5. Classify every distinct historical CI failure by root cause; repeated runs of the same defect are not separate defects.
+6. A green backend/frontend job is insufficient if PostgreSQL, RLS, migration, security or integration gates fail.
+7. Run the full CI matrix on the single consolidated branch; record commit SHA, workflow run, job result and evidence.
+8. Create/update one draft consolidation PR only when the candidate is coherent enough for review. Do not merge until all mandatory gates pass and remaining provider-dependent items are explicitly accepted as deployment prerequisites.
+9. Keep PR #13–#16 open or otherwise untouched until the consolidated candidate has been reviewed; do not close or merge them as a substitute for reconciliation.
+10. No production migration, legacy tenant backfill, or destructive database operation is authorised by this specification.
+
+## 10. Current evidence ledger
+
+The following is the starting position from the live repository review. It is deliberately conservative.
+
+| Area | Repository evidence | Current disposition |
+|---|---|---|
+| Tenant/company domain model | Tenant, company membership, branch, subscription, jurisdiction and onboarding entities exist | Implemented in candidate; runtime and migration tests required |
+| Tenant query filters | Tenant filters exist in the EF model | Verify every entity, service, background job, file/export and null-context path |
+| PostgreSQL RLS | Enable/disable hardening scripts and test coverage exist; recent correction addresses policy dependency ordering | Fresh CI PostgreSQL verification required on consolidated HEAD |
+| Registration/onboarding | Self-service and platform-assisted provisioning are documented and controller/service code exists | Verify atomicity, invitations, email delivery and concurrency |
+| Company memberships/switching | Membership and switching flows are documented and implemented | Verify role derivation, tenant boundary and revocation under PostgreSQL |
+| Subscription/licensing | Plan, subscription, limits and middleware exist | Verify all routes, concurrency and lifecycle state transitions |
+| Jurisdiction/profiles | Jurisdiction and deployment profile entities/catalogue exist | Statutory content remains approval/provider dependent |
+| Platform control plane | Separate PlatformBearer scheme and platform controller exist | Verify every route, issuer/key configuration, audit and support-grant enforcement |
+| Branches/departments/cost centres | Branch entity and assignments exist | Verify complete hierarchy, company scope and CRUD/UI coverage |
+| Multicurrency/consolidation | Existing ERP functionality and group reporting are present in the broader codebase | Validate multi-entity and cross-jurisdiction acceptance tests; do not infer completeness |
+| Public sector | Existing budget/fund functionality and profiles are documented | Verify end-to-end commitment and reporting controls against MDA/SOE scenarios |
+| Operations/DR | Lifecycle metadata, SLA and worker-dispatch boundary are documented | Worker, monitoring and backup infrastructure require deployment evidence |
+| SMTP/billing/statutory integrations | Interfaces/configuration boundaries are documented | Not verified until provider and approvals are configured |
+
+## 11. Definition of done
+
+The consolidation is complete only when:
+
+- The nine pillars and six implementation milestones have traceable code, migrations, UI/API paths and tests.
+- The existing ERP accounting, reporting and governance functionality remains intact.
+- Tenant and company isolation are proven independently using real PostgreSQL and a least-privilege runtime identity.
+- The separate platform control plane is proven inaccessible to tenant identities.
+- All distinct historical CI failures are either corrected and retested or documented with a justified, explicitly accepted exception.
+- Backend, frontend, migration, RLS, PostgreSQL integration, hardening, backup/restore and clean-install checks pass on the same final commit.
+- Provider-dependent items are clearly labelled as deployment prerequisites, not falsely represented as operational.
+- The final pull request contains the evidence and remains unmerged until review and approval.
+
+**Release status:** Not certified. This register defines the required work and acceptance gates; it does not substitute for passing evidence.
