@@ -255,6 +255,9 @@ public sealed class SupplyChainIntegrationTests
         var poId = Guid.NewGuid();
         var commitmentId = Guid.NewGuid();
         var expenseAccountId = Guid.NewGuid();
+        var apControlAccountId = Guid.NewGuid();
+        var vatInputAccountId = Guid.NewGuid();
+        var whtPayableAccountId = Guid.NewGuid();
 
         await using (var seed = db.NewContext(companyId))
         {
@@ -273,11 +276,27 @@ public sealed class SupplyChainIntegrationTests
                 Id = vendorId, CompanyId = companyId, Code = "VEN-AP-01",
                 Name = "AP commitment vendor"
             });
-            seed.GlAccounts.Add(new GlAccount
-            {
-                Id = expenseAccountId, CompanyId = companyId, Code = "5200",
-                Name = "Programme Expense", Type = GlAccountType.Expense, Currency = "USD"
-            });
+            seed.GlAccounts.AddRange(
+                new GlAccount
+                {
+                    Id = expenseAccountId, CompanyId = companyId, Code = "5200",
+                    Name = "Programme Expense", Type = GlAccountType.Expense, Currency = "USD"
+                },
+                new GlAccount
+                {
+                    Id = apControlAccountId, CompanyId = companyId, Code = "2100",
+                    Name = "Trade payables", Type = GlAccountType.Liability, Currency = "USD"
+                },
+                new GlAccount
+                {
+                    Id = vatInputAccountId, CompanyId = companyId, Code = "1150",
+                    Name = "VAT input", Type = GlAccountType.Asset, Currency = "USD"
+                },
+                new GlAccount
+                {
+                    Id = whtPayableAccountId, CompanyId = companyId, Code = "2200",
+                    Name = "Withholding tax payable", Type = GlAccountType.Liability, Currency = "USD"
+                });
             seed.FundCentres.Add(new FundCentre
             {
                 Id = fundCentreId, CompanyId = companyId, Code = "VOTE-AP",
@@ -314,6 +333,26 @@ public sealed class SupplyChainIntegrationTests
         Assert.Equal(fundCentreId, invoice.FundCentreId);
         Assert.Equal(commitmentId, invoice.CommitmentId);
         Assert.Equal(poId, invoice.PurchaseOrderId);
+
+        await ap.PostInvoiceAsync(companyId, invoice.Id, apControlAccountId,
+            vatInputAccountId, whtPayableAccountId);
+        var partiallyRealised = await ctx.Commitments.SingleAsync(x => x.Id == commitmentId);
+        Assert.Equal(75m, partiallyRealised.RealisedAmount);
+        Assert.Equal(CommitmentStatus.Active, partiallyRealised.Status);
+
+        var finalInvoice = await ap.CreateInvoiceAsync(companyId, supplierId, new DateTime(2026, 3, 11),
+            "USD", 1m,
+            new[] { new ApInvoiceLineRequest("Programme delivery", 1m, 25m, null, expenseAccountId) },
+            purchaseOrderId: poId);
+        await ap.PostInvoiceAsync(companyId, finalInvoice.Id, apControlAccountId,
+            vatInputAccountId, whtPayableAccountId);
+
+        var fullyRealised = await ctx.Commitments.SingleAsync(x => x.Id == commitmentId);
+        Assert.Equal(100m, fullyRealised.RealisedAmount);
+        Assert.Equal(CommitmentStatus.Released, fullyRealised.Status);
+        Assert.NotNull(fullyRealised.ReleasedDate);
+        Assert.Equal(InvoiceStatus.Posted, (await ctx.ApInvoices.SingleAsync(x => x.Id == invoice.Id)).Status);
+        Assert.Equal(InvoiceStatus.Posted, (await ctx.ApInvoices.SingleAsync(x => x.Id == finalInvoice.Id)).Status);
     }
 
 }
