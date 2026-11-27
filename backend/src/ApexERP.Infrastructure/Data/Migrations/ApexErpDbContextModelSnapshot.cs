@@ -3659,7 +3659,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsMonetary")
-                        .HasColumnType("boolean");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsIntercompanyAccount")
                         .HasColumnType("boolean");
