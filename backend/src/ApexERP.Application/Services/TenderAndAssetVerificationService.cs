@@ -55,8 +55,7 @@ namespace ApexERP.Application.Services
                 throw new InvalidOperationException("Bids can only be submitted while the tender is open.");
             var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == vendorId && v.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("Vendor is not registered in this company.");
-            if (!vendor.IsApproved)
-                throw new InvalidOperationException("Only an approved vendor may submit a tender bid.");
+            EnsureVendorEligible(vendor);
 
             var now = DateTime.UtcNow;
             var bid = new TenderBid
@@ -71,6 +70,19 @@ namespace ApexERP.Application.Services
             _db.TenderBids.Add(bid);
             await _db.SaveChangesAsync(ct);
             return bid;
+        }
+
+        private static void EnsureVendorEligible(Vendor vendor)
+        {
+            if (!vendor.IsApproved)
+                throw new InvalidOperationException("Only an approved vendor may participate in a public-sector tender.");
+            if (vendor.IsBlacklisted)
+                throw new InvalidOperationException("A blacklisted vendor is not eligible to bid or receive an award.");
+            var today = DateTime.UtcNow.Date;
+            if (!vendor.TaxClearanceValidTo.HasValue || vendor.TaxClearanceValidTo.Value.Date < today)
+                throw new InvalidOperationException("The vendor must hold a valid tax-clearance certificate through the tender date.");
+            if (!vendor.RegistrationValidTo.HasValue || vendor.RegistrationValidTo.Value.Date < today)
+                throw new InvalidOperationException("The vendor's company registration must be valid through the tender date.");
         }
 
         /// <summary>Moves an expired open tender into evaluation. The server clock is authoritative.</summary>
@@ -167,8 +179,7 @@ namespace ApexERP.Application.Services
                 throw new InvalidOperationException("Only the highest-scoring eligible bid can be submitted for award approval.");
             var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == winningVendorId && v.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("The selected vendor is not registered in this company.");
-            if (!vendor.IsApproved)
-                throw new InvalidOperationException("Only an approved vendor may be proposed for award.");
+            EnsureVendorEligible(vendor);
 
             return await _approvalChains.SubmitForApprovalAsync(companyId, "TenderAward", selected.Id,
                 "TenderBid", submittedBy, selected.PriceAmount, null,
