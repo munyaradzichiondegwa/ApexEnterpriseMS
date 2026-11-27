@@ -39,6 +39,7 @@ namespace ApexERP.Domain.Entities
     {
         public int PeriodMonth { get; set; }
         public int PeriodYear { get; set; }
+        public string Currency { get; set; } = "USD";
         public PayrollRunStatus Status { get; set; } = PayrollRunStatus.Draft;
         public Guid? ApprovedBy { get; set; }
         public DateTime? ApprovedAt { get; set; }
