@@ -58,9 +58,12 @@ namespace ApexERP.Application.Services
                         throw new InvalidOperationException("The supplied commitment does not belong to the linked purchase order.");
                     commitmentId = poCommitment.Id;
                 }
-                else if (commitmentId.HasValue)
+                else
                 {
-                    throw new InvalidOperationException("The supplied budget commitment does not belong to the linked purchase order.");
+                    if (commitmentId.HasValue)
+                        throw new InvalidOperationException("The supplied budget commitment does not belong to the linked purchase order.");
+                    if (purchaseOrder.FundCentreId.HasValue)
+                        throw new InvalidOperationException("A public-sector purchase order must have an active budget commitment before its invoice can be captured.");
                 }
             }
             else if (commitmentId.HasValue)
