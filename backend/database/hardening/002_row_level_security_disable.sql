@@ -3,6 +3,7 @@
 
 BEGIN;
 
+DROP POLICY IF EXISTS apex_user_membership_access ON "Users";
 DROP POLICY IF EXISTS apex_tenant_isolation ON "Companies";
 ALTER TABLE "Companies" NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE "Companies" DISABLE ROW LEVEL SECURITY;
