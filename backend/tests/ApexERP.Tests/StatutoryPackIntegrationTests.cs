@@ -56,7 +56,8 @@ public sealed class StatutoryPackIntegrationTests
         var packs = new StatutoryPackService(ctx, new AuditService(ctx));
         var source = new List<StatutoryPackSource>
         {
-            new("Test Revenue Authority", "Verified PAYE tables", "https://example.gov/paye", null, new DateTime(2026, 1, 1))
+            new("Test Revenue Authority", "Verified PAYE tables", "https://example.gov/paye", null, new DateTime(2026, 1, 1)),
+            new("Test NSSA", "NSSA contribution rates", "https://example.gov/nssa", null, new DateTime(2026, 1, 1))
         };
         const string rules = """
         {
