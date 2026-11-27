@@ -212,7 +212,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         try
         {
             emailSent = await _email.SendAsync(email, "ApexERP company access invitation",
-                $"You have been invited to join {company.Name}.\\n\\nInvitation token: {rawToken}\\n\\nAccept it through the ApexERP onboarding page within 48 hours.");
+                $"You have been invited to join {company.Name}.\n\nInvitation token: {rawToken}\n\nAccept it through the ApexERP onboarding page within 48 hours.");
         }
         catch { emailSent = false; }
         return Accepted(new { invitationId = invitation.Id, invitationToken = emailSent ? null : rawToken,
