@@ -45,8 +45,15 @@ namespace ApexERP.Application.Services
         /// own clock against the tender's deadline -- not a manual review step.</summary>
         public async Task<TenderBid> SubmitBidAsync(Guid companyId, Guid tenderNoticeId, Guid vendorId, decimal priceAmount, CancellationToken ct = default)
         {
+            if (priceAmount <= 0) throw new InvalidOperationException("A bid price must be greater than zero.");
             var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("Tender notice not found.");
+            if (tender.Status != TenderStatus.Open)
+                throw new InvalidOperationException("Bids can only be submitted while the tender is open.");
+            var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == vendorId && v.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Vendor is not registered in this company.");
+            if (!vendor.IsApproved)
+                throw new InvalidOperationException("Only an approved vendor may submit a tender bid.");
 
             var now = DateTime.UtcNow;
             var bid = new TenderBid
@@ -71,6 +78,15 @@ namespace ApexERP.Application.Services
             var bid = await _db.TenderBids.FirstOrDefaultAsync(b => b.Id == bidId && b.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("Bid not found.");
             if (bid.IsLateRejected) throw new InvalidOperationException("This bid was submitted after the deadline and cannot be scored.");
+            var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == bid.TenderNoticeId && t.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Tender notice not found.");
+            if (tender.Status != TenderStatus.Evaluation)
+                throw new InvalidOperationException("A tender must be in evaluation before bids can be scored.");
+            if (priceScore is < 0 or > 100 || technicalScore is < 0 or > 100 || localContentScore is < 0 or > 100)
+                throw new InvalidOperationException("Each evaluation score must be between 0 and 100.");
+            if (priceWeight < 0 || technicalWeight < 0 || localContentWeight < 0 ||
+                Math.Abs(priceWeight + technicalWeight + localContentWeight - 1m) > 0.0001m)
+                throw new InvalidOperationException("Evaluation weights must be non-negative and total exactly 100%.");
 
             bid.PriceScore = priceScore;
             bid.TechnicalScore = technicalScore;
@@ -82,8 +98,17 @@ namespace ApexERP.Application.Services
 
         public async Task<TenderNotice> AwardAsync(Guid companyId, Guid tenderNoticeId, Guid winningVendorId, string justification, CancellationToken ct = default)
         {
+            if (string.IsNullOrWhiteSpace(justification))
+                throw new InvalidOperationException("An award justification is required.");
             var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("Tender notice not found.");
+            if (tender.Status != TenderStatus.Evaluation)
+                throw new InvalidOperationException("Only a tender under evaluation can be awarded.");
+            var winningBid = await _db.TenderBids.FirstOrDefaultAsync(b => b.CompanyId == companyId &&
+                b.TenderNoticeId == tenderNoticeId && b.VendorId == winningVendorId && !b.IsLateRejected, ct)
+                ?? throw new InvalidOperationException("The selected vendor has no eligible bid for this tender.");
+            if (winningBid.TotalScore <= 0)
+                throw new InvalidOperationException("The selected bid must be evaluated before award.");
             tender.Status = TenderStatus.Awarded;
             tender.AwardedVendorId = winningVendorId;
             tender.AwardJustification = justification;
