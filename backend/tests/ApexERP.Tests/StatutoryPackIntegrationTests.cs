@@ -67,6 +67,8 @@ public sealed class StatutoryPackIntegrationTests
             "USD": { "monthly": [ { "from": 0, "to": null, "rate": 0.20, "deduction": 0 } ] },
             "ZWG": { "monthly": [ { "from": 0, "to": null, "rate": 0.10, "deduction": 0 } ] }
           },
+          "vat": { "standardRate": 0.155, "zeroRatedSupplies": [], "exemptSupplies": [] },
+          "corporateIncomeTax": { "standardCompanyOrTrustRate": 0.25 },
           "nssa": {
             "USD": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 700 },
             "ZWG": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 7000 }
