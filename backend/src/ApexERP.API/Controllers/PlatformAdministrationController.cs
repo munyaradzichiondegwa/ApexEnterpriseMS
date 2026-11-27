@@ -417,8 +417,8 @@ public sealed class PlatformAdministrationController : ControllerBase
         if (request.AvailabilityTargetPercent is <= 0 or > 100 || request.ResponseTargetMinutes < 1 ||
             request.ResolutionTargetMinutes < request.ResponseTargetMinutes || request.MonitoringWindowDays is < 1 or > 90)
             return BadRequest(new { error = "SLA targets are outside permitted ranges." });
-        try { using var _ = JsonDocument.Parse(request.BusinessHoursJson ?? "{}"); }
-        catch { return BadRequest(new { error = "BusinessHoursJson must be valid JSON." }); }
+        try { using var _ = JsonDocument.Parse(request.BusinessHoursJson ?? "{}"); _ = TimeZoneInfo.FindSystemTimeZoneById(request.BusinessTimeZone ?? "UTC"); }
+        catch { return BadRequest(new { error = "Business hours JSON or time zone is invalid." }); }
         using var scope = _db.SystemAccessScope("platform admin: configure tenant SLA policy");
         if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
         var policy = await _db.TenantSlaPolicies.SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
@@ -454,10 +454,10 @@ public sealed class PlatformAdministrationController : ControllerBase
         var incidentMetrics = incidents.Select(x => new
         {
             x.Id, x.IncidentNumber, x.Severity, x.Status, x.Summary, x.OpenedAt, x.FirstResponseAt, x.ResolvedAt,
-            responseBreached = x.FirstResponseAt == null && now > x.OpenedAt.AddMinutes(x.ResponseTargetMinutes),
-            resolutionBreached = x.ResolvedAt == null && now > x.OpenedAt.AddMinutes(x.ResolutionTargetMinutes),
-            responseMinutes = x.FirstResponseAt.HasValue ? (double?)(x.FirstResponseAt.Value - x.OpenedAt).TotalMinutes : null,
-            resolutionMinutes = x.ResolvedAt.HasValue ? (double?)(x.ResolvedAt.Value - x.OpenedAt).TotalMinutes : null
+            responseBreached = x.FirstResponseAt == null && BusinessMinutesBetween(x.OpenedAt, now, policy.BusinessTimeZone, policy.BusinessHoursJson) > x.ResponseTargetMinutes,
+            resolutionBreached = x.ResolvedAt == null && BusinessMinutesBetween(x.OpenedAt, now, policy.BusinessTimeZone, policy.BusinessHoursJson) > x.ResolutionTargetMinutes,
+            responseMinutes = x.FirstResponseAt.HasValue ? (double?)BusinessMinutesBetween(x.OpenedAt, x.FirstResponseAt.Value, policy.BusinessTimeZone, policy.BusinessHoursJson) : null,
+            resolutionMinutes = x.ResolvedAt.HasValue ? (double?)BusinessMinutesBetween(x.OpenedAt, x.ResolvedAt.Value, policy.BusinessTimeZone, policy.BusinessHoursJson) : null
         }).ToList();
         return Ok(new { policy, windowStart = since, availabilityPercent = availability,
             availabilityTargetMet = availability.HasValue && availability.Value >= policy.AvailabilityTargetPercent,
@@ -631,6 +631,41 @@ public sealed class PlatformAdministrationController : ControllerBase
             .OrderByDescending(x => x.CreatedAt).Take(50).ToListAsync(ct);
         await AuditAsync("support-grant.diagnostics-accessed", "TenantSupportGrant", grant.Id.ToString(), null, ct);
         return Ok(new { grant.TenantId, grant.ExpiresAt, checks, jobs });
+    }
+
+
+    private static double BusinessMinutesBetween(DateTime startUtc, DateTime endUtc, string timeZoneId, string hoursJson)
+    {
+        if (endUtc <= startUtc) return 0;
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        var startLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(startUtc, DateTimeKind.Utc), zone);
+        var endLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(endUtc, DateTimeKind.Utc), zone);
+        var start = TimeSpan.Zero;
+        var finish = TimeSpan.FromDays(1);
+        var days = new HashSet<int>(Enumerable.Range(0, 7));
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(hoursJson) ? "{}" : hoursJson);
+            if (doc.RootElement.TryGetProperty("start", out var startValue) &&
+                TimeSpan.TryParse(startValue.GetString(), CultureInfo.InvariantCulture, out var parsedStart)) start = parsedStart;
+            if (doc.RootElement.TryGetProperty("end", out var endValue) &&
+                TimeSpan.TryParse(endValue.GetString(), CultureInfo.InvariantCulture, out var parsedEnd)) finish = parsedEnd;
+            if (doc.RootElement.TryGetProperty("days", out var dayValues) && dayValues.ValueKind == JsonValueKind.Array)
+                days = dayValues.EnumerateArray().Where(x => x.TryGetInt32(out _)).Select(x => x.GetInt32()).Where(x => x is >= 0 and <= 6).ToHashSet();
+        }
+        catch { /* Policy writes validate JSON; invalid legacy values fall back to 24/7 measurement. */ }
+        if (finish <= start) return 0;
+        var total = 0d;
+        for (var date = startLocal.Date; date <= endLocal.Date; date = date.AddDays(1))
+        {
+            if (!days.Contains((int)date.DayOfWeek)) continue;
+            var windowStart = date.Add(start);
+            var windowEnd = date.Add(finish);
+            var from = startLocal > windowStart ? startLocal : windowStart;
+            var to = endLocal < windowEnd ? endLocal : windowEnd;
+            if (to > from) total += (to - from).TotalMinutes;
+        }
+        return total;
     }
 
     private Guid CurrentActorId() => Guid.TryParse(User.FindFirst("sub")?.Value, out var id)
