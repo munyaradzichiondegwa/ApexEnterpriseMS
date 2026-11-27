@@ -28,15 +28,17 @@ namespace ApexERP.API.Controllers
         private readonly PeriodCloseService _close;
         private readonly GovernanceService _gov;
         private readonly FxRevaluationService _fxRevaluation;
+        private readonly AuditService _audit;
 
         public GlController(ApexErpDbContext db, GlPostingService gl, PeriodCloseService close,
-            GovernanceService gov, FxRevaluationService fxRevaluation)
+            GovernanceService gov, FxRevaluationService fxRevaluation, AuditService audit)
         {
             _db = db;
             _gl = gl;
             _close = close;
             _gov = gov;
             _fxRevaluation = fxRevaluation;
+            _audit = audit;
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -249,6 +251,62 @@ namespace ApexERP.API.Controllers
             });
 
         public record FxRevaluationPostRequest(DateTime AsOfDate, Guid FxGainAccountId, Guid FxLossAccountId);
+    public record SetExchangeRateRequest(string FromCurrency, string ToCurrency, DateTime RateDate,
+        decimal Rate, bool IsManualOverride = false);
+
+        [HttpGet("fx-rates")]
+        [HasPermission(Permissions.GlAccountsRead)]
+        public async Task<IActionResult> GetExchangeRates([FromQuery] string? fromCurrency = null,
+            [FromQuery] string? toCurrency = null, [FromQuery] DateTime? fromDate = null,
+            [FromQuery] DateTime? toDate = null)
+        {
+            var query = _db.ExchangeRates.Where(r => r.CompanyId == CompanyId);
+            if (!string.IsNullOrWhiteSpace(fromCurrency))
+                query = query.Where(r => r.FromCurrency == fromCurrency.Trim().ToUpperInvariant());
+            if (!string.IsNullOrWhiteSpace(toCurrency))
+                query = query.Where(r => r.ToCurrency == toCurrency.Trim().ToUpperInvariant());
+            if (fromDate.HasValue) query = query.Where(r => r.RateDate >= fromDate.Value.Date);
+            if (toDate.HasValue) query = query.Where(r => r.RateDate < toDate.Value.Date.AddDays(1));
+            return Ok(await query.OrderByDescending(r => r.RateDate)
+                .ThenBy(r => r.FromCurrency).ThenBy(r => r.ToCurrency).ToListAsync());
+        }
+
+        [HttpPost("fx-rates")]
+        [HasPermission(Permissions.GlAccountsManage)]
+        public Task<IActionResult> SetExchangeRate([FromBody] SetExchangeRateRequest request) =>
+            Run(async () =>
+            {
+                var from = request.FromCurrency.Trim().ToUpperInvariant();
+                var to = request.ToCurrency.Trim().ToUpperInvariant();
+                if (from.Length != 3 || to.Length != 3 || from == to || request.Rate <= 0m)
+                    return BadRequest(new { error = "Provide two different three-letter currency codes and a positive exchange rate." });
+                await _db.InTransactionAsync(async token =>
+                {
+                    await _db.AcquireTransactionLockAsync($"fx-rate:{CompanyId:N}:{from}:{to}:{request.RateDate:yyyyMMdd}", token);
+                    var existing = await _db.ExchangeRates.FirstOrDefaultAsync(r => r.CompanyId == CompanyId &&
+                        r.FromCurrency == from && r.ToCurrency == to && r.RateDate == request.RateDate.Date, token);
+                    var before = existing == null ? null : new { existing.FromCurrency, existing.ToCurrency,
+                        existing.RateDate, existing.Rate, existing.IsManualOverride };
+                    if (existing == null)
+                    {
+                        existing = new ExchangeRate { CompanyId = CompanyId, FromCurrency = from,
+                            ToCurrency = to, RateDate = request.RateDate.Date, Rate = request.Rate,
+                            IsManualOverride = request.IsManualOverride };
+                        _db.ExchangeRates.Add(existing);
+                    }
+                    else
+                    {
+                        existing.Rate = request.Rate;
+                        existing.IsManualOverride = request.IsManualOverride;
+                    }
+                    _audit.Record(CompanyId, UserId, "FxRate.Upserted", "GL", nameof(ExchangeRate), existing.Id,
+                        before, new { existing.FromCurrency, existing.ToCurrency, existing.RateDate,
+                            existing.Rate, existing.IsManualOverride });
+                    await _db.SaveChangesAsync(token);
+                });
+                return Ok(await _db.ExchangeRates.FirstAsync(r => r.CompanyId == CompanyId &&
+                    r.FromCurrency == from && r.ToCurrency == to && r.RateDate == request.RateDate.Date));
+            });
 
         [HttpGet("fx-revaluation/preview")]
         [HasPermission(Permissions.GlJournalsCreate)]
