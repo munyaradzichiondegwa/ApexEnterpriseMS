@@ -351,7 +351,7 @@ namespace ApexERP.Application.Security
             _db.TenantSubscriptions.Add(new TenantSubscription { TenantId = tenant.Id, PlanId = trialPlan.Id, Status = "Trial",
                 StartsAt = DateTime.UtcNow, TrialEndsAt = DateTime.UtcNow.AddDays(30), CurrentPeriodEndsAt = DateTime.UtcNow.AddDays(30) });
             _db.TenantOnboardings.Add(new TenantOnboarding { TenantId = tenant.Id, Status = "AdministratorCreated",
-                CompletedStepsJson = "[\\"organisation\\",\\"companies\\",\\"members\\"]" });
+                CompletedStepsJson = "[\"organisation\",\"companies\",\"members\"]" });
             var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
             _db.Roles.Add(adminRole);
             var user = new User
