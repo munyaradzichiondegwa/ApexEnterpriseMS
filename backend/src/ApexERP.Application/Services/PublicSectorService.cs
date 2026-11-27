@@ -227,7 +227,9 @@ namespace ApexERP.Application.Services
                     (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
                 .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
 
-            var available = totalAppropriation - commitments - actuals;
+            // A closed financial-year fund centre has no spendable balance, even when the
+            // unexpended appropriation is reported as lapsed or carried forward.
+            var available = fc.IsClosed ? 0m : totalAppropriation - commitments - actuals;
             var pctUtilised = totalAppropriation == 0 ? 0 : Math.Round((commitments + actuals) / totalAppropriation * 100, 2);
 
             return new BudgetUtilization(fc.Id, fc.Code, fc.Name, totalAppropriation, commitments, actuals, available, pctUtilised, pctUtilised > 90);
@@ -291,7 +293,7 @@ namespace ApexERP.Application.Services
                 var committed = commitments?.Committed ?? 0m;
                 var realised = commitments?.Realised ?? 0m;
                 var outstanding = commitments?.Outstanding ?? 0m;
-                var available = totalBudget - outstanding - actuals;
+                var available = fundCentre.IsClosed ? 0m : totalBudget - outstanding - actuals;
                 var utilised = totalBudget == 0m ? 0m :
                     Math.Round((outstanding + actuals) / totalBudget * 100m, 2);
 
