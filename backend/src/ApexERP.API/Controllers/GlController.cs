@@ -27,17 +27,15 @@ namespace ApexERP.API.Controllers
         private readonly GlPostingService _gl;
         private readonly PeriodCloseService _close;
         private readonly GovernanceService _gov;
-        private readonly FxRevaluationService _fxRevaluation;
         private readonly AuditService _audit;
 
         public GlController(ApexErpDbContext db, GlPostingService gl, PeriodCloseService close,
-            GovernanceService gov, FxRevaluationService fxRevaluation, AuditService audit)
+            GovernanceService gov, AuditService audit)
         {
             _db = db;
             _gl = gl;
             _close = close;
             _gov = gov;
-            _fxRevaluation = fxRevaluation;
             _audit = audit;
         }
 
@@ -250,7 +248,6 @@ namespace ApexERP.API.Controllers
                 return Ok(account);
             });
 
-        public record FxRevaluationPostRequest(DateTime AsOfDate, Guid FxGainAccountId, Guid FxLossAccountId);
     public record SetExchangeRateRequest(string FromCurrency, string ToCurrency, DateTime RateDate,
         decimal Rate, bool IsManualOverride = false);
 
@@ -319,17 +316,6 @@ namespace ApexERP.API.Controllers
                 return Ok(await _db.ExchangeRates.FirstAsync(r => r.CompanyId == CompanyId &&
                     r.FromCurrency == from && r.ToCurrency == to && r.RateDate == rateDate));
             });
-
-        [HttpGet("fx-revaluation/preview")]
-        [HasPermission(Permissions.GlJournalsCreate)]
-        public Task<IActionResult> PreviewFxRevaluation([FromQuery] DateTime asOfDate) =>
-            Run(async () => Ok(await _fxRevaluation.PreviewAsync(CompanyId, asOfDate)));
-
-        [HttpPost("fx-revaluation/post")]
-        [HasPermission(Permissions.GlJournalsPost)]
-        public Task<IActionResult> PostFxRevaluation([FromBody] FxRevaluationPostRequest request) =>
-            Run(async () => Ok(await _fxRevaluation.PostAsync(CompanyId, request.AsOfDate,
-                request.FxGainAccountId, request.FxLossAccountId, UserId)));
 
         [HttpPost("journal-entries/{id}/reject")]
         [HasPermission(Permissions.GlJournalsApprove)]
