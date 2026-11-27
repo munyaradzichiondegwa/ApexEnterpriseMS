@@ -120,31 +120,31 @@ public sealed class SupplyChainIntegrationTests
         });
         seed.Vendors.Add(new Vendor
         {
-            Id = vendorId, TenantId = tenantId, CompanyId = companyId,
+            Id = vendorId, CompanyId = companyId,
             Code = "V-GRN", Name = "GRN Supplier", IsApproved = true, Currency = "USD"
         });
         seed.GlAccounts.AddRange(
             new GlAccount
             {
-                Id = assetAccountId, TenantId = tenantId, CompanyId = companyId,
+                Id = assetAccountId, CompanyId = companyId,
                 Code = "1400", Name = "Inventory Asset", Type = GlAccountType.Asset, Currency = "USD"
             },
             new GlAccount
             {
-                Id = cogsAccountId, TenantId = tenantId, CompanyId = companyId,
+                Id = cogsAccountId, CompanyId = companyId,
                 Code = "5000", Name = "Inventory Clearing", Type = GlAccountType.Expense, Currency = "USD"
             });
         seed.InventoryItems.AddRange(
             new InventoryItem
             {
-                Id = itemId, TenantId = tenantId, CompanyId = companyId,
+                Id = itemId, CompanyId = companyId,
                 Sku = "GRN-001", Name = "Primary item", UnitOfMeasure = "EA",
                 AssetAccountId = assetAccountId, CogsAccountId = cogsAccountId,
                 ValuationMethod = ValuationMethod.FIFO, QuantityOnHand = 0m
             },
             new InventoryItem
             {
-                Id = otherItemId, TenantId = tenantId, CompanyId = companyId,
+                Id = otherItemId, CompanyId = companyId,
                 Sku = "GRN-002", Name = "Different item", UnitOfMeasure = "EA",
                 AssetAccountId = assetAccountId, CogsAccountId = cogsAccountId,
                 ValuationMethod = ValuationMethod.FIFO, QuantityOnHand = 0m
