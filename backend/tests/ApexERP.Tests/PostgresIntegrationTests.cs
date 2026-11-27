@@ -216,7 +216,9 @@ namespace ApexERP.Tests
             Assert.Equal(new[] { caller }, visible.OrderBy(x => x).ToArray());
             Assert.DoesNotContain(consentingParent, visible);
 
-            var childVisible = await scope.GetVisibleCompanyIdsAsync(childWithExternalParent);
+            await using var childContext = db.NewContext(childWithExternalParent, tenantId: tenantA);
+            var childScope = new GroupScopeService(childContext);
+            var childVisible = await childScope.GetVisibleCompanyIdsAsync(childWithExternalParent);
             Assert.Equal(new[] { childWithExternalParent }, childVisible.OrderBy(x => x).ToArray());
             Assert.DoesNotContain(consentingParent, childVisible);
 
