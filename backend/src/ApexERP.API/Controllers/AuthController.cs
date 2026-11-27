@@ -219,7 +219,7 @@ namespace ApexERP.API.Controllers
                 var result = await _auth.IssueTokensForCompanyAsync(CurrentUserId, request.CompanyId, Ip, null, ct);
                 return Ok(Deliver(result));
             }
-            catch (UnauthorizedAccessException ex) { return Forbid(); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
         }
 
         private Guid CurrentUserId => Guid.Parse((User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))!.Value);
