@@ -83,7 +83,7 @@ public sealed class PlatformAdministrationController : ControllerBase
         };
         var company = new Company
         {
-            TenantId = tenant.Id, Name = request.InitialCompanyName.Trim(),
+            TenantId = tenant.Id, Tenant = tenant, Name = request.InitialCompanyName.Trim(),
             BaseCurrency = (request.Currency ?? "USD").ToUpperInvariant(),
             FunctionalCurrency = (request.Currency ?? "USD").ToUpperInvariant(),
             FiscalYearStartMonth = request.FiscalYearStartMonth,
