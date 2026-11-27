@@ -463,5 +463,43 @@ namespace ApexERP.Tests
                 signature, now.AddMinutes(6)));
         }
 
+        [PostgresFact]
+        public async Task Webhook_lookup_is_provider_case_insensitive_and_invalid_signatures_never_create_messages()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var tenantId = Guid.NewGuid();
+            var companyId = Guid.NewGuid();
+            await using (var seed = db.NewContext(null))
+            {
+                seed.CustomerOrganisations.Add(new CustomerOrganisation
+                {
+                    Id = tenantId, Name = "Webhook tenant", IsActive = true
+                });
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, TenantId = tenantId, Name = "Webhook company",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD", IsActive = true
+                });
+                seed.IntegrationEndpoints.Add(new IntegrationEndpoint
+                {
+                    CompanyId = companyId, Provider = "EcoCash", Name = "EcoCash",
+                    SecretName = "APEX_TEST_ECOCASH_SECRET", IsActive = true
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(null);
+            var service = new IntegrationService(ctx, new ArService(ctx, Gl(ctx)),
+                new SettingsService(ctx), new AuditService(ctx), _ => Secret);
+            var result = await service.ReceiveWebhookAsync(companyId, "ecocash",
+                """{"externalRef":"invalid-signature-1","status":"Paid","amount":25.00,"currency":"USD","reference":"INV-1"}""",
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(
+                    System.Globalization.CultureInfo.InvariantCulture), "not-a-valid-signature");
+
+            Assert.Equal(401, result.Status);
+            await using var verify = db.NewContext(companyId);
+            Assert.Empty(await verify.IntegrationMessages.ToListAsync());
+        }
+
     }
 }
