@@ -450,7 +450,6 @@ The GitHub Actions workflow (`.github/workflows/build.yml`) builds and tests the
 
 The authoritative schema is always the committed EF Core migrations. `scripts/export-schema.sh` writes them out as one idempotent SQL script (`backend/database/schema.generated.sql`) for DBAs and audits. The older hand-written `schema.sql` was removed because it drifted.
 
-**Repository snapshot:** 12 commits · 0 stars · 0 forks · MIT licence
 
 ---
 
