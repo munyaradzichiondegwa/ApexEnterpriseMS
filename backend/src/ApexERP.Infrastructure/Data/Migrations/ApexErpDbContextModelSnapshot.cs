@@ -33,6 +33,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<string>("Code")
                         .IsRequired()
+                        .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
                     b.Property<string>("Name")
