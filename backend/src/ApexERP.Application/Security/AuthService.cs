@@ -344,8 +344,14 @@ namespace ApexERP.Application.Security
                 BaseCurrency = "USD",
                 FunctionalCurrency = "USD"
             };
+            var trialPlan = await _db.SubscriptionPlans.SingleOrDefaultAsync(p => p.Code == "TRIAL" && p.IsActive, ct)
+                ?? throw new InvalidOperationException("Self-service registration is unavailable because the trial plan is not configured.");
             _db.CustomerOrganisations.Add(tenant);
             _db.Companies.Add(company);
+            _db.TenantSubscriptions.Add(new TenantSubscription { TenantId = tenant.Id, PlanId = trialPlan.Id, Status = "Trial",
+                StartsAt = DateTime.UtcNow, TrialEndsAt = DateTime.UtcNow.AddDays(30), CurrentPeriodEndsAt = DateTime.UtcNow.AddDays(30) });
+            _db.TenantOnboardings.Add(new TenantOnboarding { TenantId = tenant.Id, Status = "AdministratorCreated",
+                CompletedStepsJson = "[\\"organisation\\",\\"companies\\",\\"members\\"]" });
             var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = "[\"*\"]" };
             _db.Roles.Add(adminRole);
             var user = new User
