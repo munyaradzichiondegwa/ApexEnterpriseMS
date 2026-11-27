@@ -263,6 +263,15 @@ namespace ApexERP.Tests
                     new Company { Id = companyA1, TenantId = tenantA, Name = "RLS A1" },
                     new Company { Id = companyA2, TenantId = tenantA, Name = "RLS A2" },
                     new Company { Id = companyB1, TenantId = tenantB, Name = "RLS B1" });
+                var plan = new SubscriptionPlan { Id = Guid.NewGuid(), Code = "RLS-TEST", Name = "RLS test", MaxSeats = 10, MaxCompanies = 5, ModuleCodesJson = "[\"*\"]", Currency = "USD", IsActive = true };
+                seed.SubscriptionPlans.Add(plan);
+                seed.TenantSubscriptions.AddRange(
+                    new TenantSubscription { TenantId = tenantA, PlanId = plan.Id, Status = "Active" },
+                    new TenantSubscription { TenantId = tenantB, PlanId = plan.Id, Status = "Active" });
+                seed.TenantJurisdictions.AddRange(
+                    new TenantJurisdiction { TenantId = tenantA, CompanyId = companyA1, CountryCode = "ZW", FunctionalCurrency = "ZWG" },
+                    new TenantJurisdiction { TenantId = tenantA, CompanyId = companyA2, CountryCode = "ZW", FunctionalCurrency = "ZWG" },
+                    new TenantJurisdiction { TenantId = tenantB, CompanyId = companyB1, CountryCode = "ZW", FunctionalCurrency = "ZWG" });
                 seed.GlAccounts.AddRange(
                     new GlAccount { CompanyId = companyA1, Code = "RLS1000", Name = "A1 Cash", Type = GlAccountType.Asset },
                     new GlAccount { CompanyId = companyA2, Code = "RLS1000", Name = "A2 Cash", Type = GlAccountType.Asset },
@@ -316,26 +325,36 @@ namespace ApexERP.Tests
                 Assert.Equal(0L, await CountAsync("Companies"));
                 Assert.Equal(0L, await CountAsync("CustomerOrganisations"));
                 Assert.Equal(0L, await CountAsync("GlAccounts"));
+                Assert.Equal(0L, await CountAsync("TenantSubscriptions"));
+                Assert.Equal(0L, await CountAsync("TenantJurisdictions"));
 
                 await SetContextAsync(tenantA, companyA1);
                 Assert.Equal(2L, await CountAsync("Companies"));                 // all legal entities in this tenant
                 Assert.Equal(1L, await CountAsync("CustomerOrganisations"));    // only this tenant
                 Assert.Equal(1L, await CountAsync("GlAccounts"));                // only the selected company
+                Assert.Equal(1L, await CountAsync("TenantSubscriptions"));      // tenant-only records follow tenant identity
+                Assert.Equal(1L, await CountAsync("TenantJurisdictions"));      // tenant + selected company
 
                 await SetContextAsync(tenantA, companyA2);
                 Assert.Equal(2L, await CountAsync("Companies"));
                 Assert.Equal(1L, await CountAsync("CustomerOrganisations"));
                 Assert.Equal(1L, await CountAsync("GlAccounts"));                // company A2 only
+                Assert.Equal(1L, await CountAsync("TenantSubscriptions"));
+                Assert.Equal(1L, await CountAsync("TenantJurisdictions"));
 
                 await SetContextAsync(tenantB, companyA1);
                 Assert.Equal(1L, await CountAsync("Companies"));                 // tenant B only
                 Assert.Equal(1L, await CountAsync("CustomerOrganisations"));
                 Assert.Equal(0L, await CountAsync("GlAccounts"));                // A1 does not belong to tenant B
+                Assert.Equal(1L, await CountAsync("TenantSubscriptions"));
+                Assert.Equal(0L, await CountAsync("TenantJurisdictions"));
 
                 await SetContextAsync(null, null, bypass: true);
                 Assert.Equal(3L, await CountAsync("Companies"));
                 Assert.Equal(2L, await CountAsync("CustomerOrganisations"));
                 Assert.Equal(3L, await CountAsync("GlAccounts"));
+                Assert.Equal(2L, await CountAsync("TenantSubscriptions"));
+                Assert.Equal(3L, await CountAsync("TenantJurisdictions"));
 
                 await using var flags = connection.CreateCommand();
                 flags.CommandText = @"SELECT COUNT(*), bool_and(relrowsecurity), bool_and(relforcerowsecurity)

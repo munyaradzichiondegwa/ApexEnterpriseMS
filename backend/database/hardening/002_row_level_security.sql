@@ -94,11 +94,11 @@ BEGIN
                 t.table_schema, t.table_name);
         END IF;
     END LOOP;
-END $;
+END $$;
 
 -- Tenant-level records without a CompanyId are scoped directly to the signed tenant.
 -- Global catalogues (plans, jurisdictions and deployment profiles) remain readable by design.
-DO $
+DO $$
 DECLARE t record;
 BEGIN
     FOR t IN
@@ -125,7 +125,7 @@ BEGIN
             'CREATE POLICY apex_tenant_isolation ON %I.%I USING (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid) WITH CHECK (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid)',
             t.table_schema, t.table_name);
     END LOOP;
-END $;
+END $$;
 
 
 -- A user identity remains anchored to its home company, but may be read in another
@@ -136,21 +136,17 @@ CREATE POLICY apex_user_membership_access ON "Users"
     USING (
         coalesce(current_setting('app.rls_bypass', true), '') = 'on'
         OR apex_rls_allowed("CompanyId")
-        OR (
-            "Id" = nullif(current_setting('app.user_id', true), '')::uuid
-            AND EXISTS (
-                SELECT 1 FROM "CompanyMemberships" m
-                WHERE m."UserId" = "Users"."Id"
-                  AND m."CompanyId" = nullif(current_setting('app.company_id', true), '')::uuid
-                  AND m."IsActive" = true
-                  AND (m."ValidFrom" IS NULL OR m."ValidFrom" <= now())
-                  AND (m."ValidTo" IS NULL OR m."ValidTo" > now())
-            )
+        OR EXISTS (
+            SELECT 1 FROM "CompanyMemberships" m
+            WHERE m."UserId" = "Users"."Id"
+              AND m."CompanyId" = nullif(current_setting('app.company_id', true), '')::uuid
+              AND m."IsActive" = true
+              AND (m."ValidFrom" IS NULL OR m."ValidFrom" <= now())
+              AND (m."ValidTo" IS NULL OR m."ValidTo" > now())
         )
     )
     WITH CHECK (
         coalesce(current_setting('app.rls_bypass', true), '') = 'on'
         OR apex_rls_allowed("CompanyId")
     );
-
 COMMIT;

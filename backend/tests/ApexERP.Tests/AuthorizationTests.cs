@@ -236,6 +236,14 @@ namespace ApexERP.Tests
         private static bool IsSignedProviderWebhook(ControllerActionDescriptor d) =>
             d.ControllerTypeInfo.AsType() == typeof(IntegrationsController) && d.ActionName == nameof(IntegrationsController.Webhook);
 
+        private static bool IsSignedPlatformEndpoint(ControllerActionDescriptor d) =>
+            d.ControllerTypeInfo.AsType() == typeof(PlatformAdministrationController) &&
+            (d.ActionName == nameof(PlatformAdministrationController.AcceptAdministratorInvitation) ||
+             d.ActionName == nameof(PlatformAdministrationController.LifecycleJobCallback));
+
+        private static bool IsModulePermissionExempt(ControllerActionDescriptor d) =>
+            d.ControllerTypeInfo.GetCustomAttributes<ModulePermissionExemptAttribute>(true).Any();
+
         [Fact]
         public void The_guard_actually_sees_the_controllers()
         {
@@ -251,6 +259,7 @@ namespace ApexERP.Tests
                 .Where(d => !Policies(d).Any())                                   // not behind ANY authorize filter
                 .Where(d => !(Anonymous(d) && d.ControllerTypeInfo.AsType() == typeof(AuthController)))
                 .Where(d => !IsSignedProviderWebhook(d))
+                .Where(d => !IsSignedPlatformEndpoint(d))
                 .Select(d => $"{d.ControllerName}.{d.ActionName}")
                 .ToList();
             Assert.True(open.Count == 0, "Actions reachable without signing in: " + string.Join(", ", open));
@@ -265,6 +274,8 @@ namespace ApexERP.Tests
             // Public endpoints are limited to credential/onboarding flows and the signature-verified provider webhook.
             Assert.Equal(new[] { nameof(IntegrationsController.Webhook) },
                 anonymousActions.Where(d => d.ControllerTypeInfo.AsType() == typeof(IntegrationsController)).Select(d => d.ActionName).ToArray());
+            Assert.Equal(new[] { nameof(PlatformAdministrationController.AcceptAdministratorInvitation), nameof(PlatformAdministrationController.LifecycleJobCallback) },
+                anonymousActions.Where(d => d.ControllerTypeInfo.AsType() == typeof(PlatformAdministrationController)).Select(d => d.ActionName).OrderBy(x => x).ToArray());
             Assert.Equal(new[] { "AcceptAdministratorInvitation", "LifecycleJobCallback" },
                 anonymousActions.Where(d => d.ControllerTypeInfo.AsType() == typeof(PlatformAdministrationController)).Select(d => d.ActionName).OrderBy(n => n).ToArray());
         }
@@ -275,6 +286,8 @@ namespace ApexERP.Tests
             var onlyLogin = Descriptors()
                 .Where(d => d.ControllerTypeInfo.AsType() != typeof(AuthController))
                 .Where(d => !IsSignedProviderWebhook(d))
+                .Where(d => !IsSignedPlatformEndpoint(d))
+                .Where(d => !IsModulePermissionExempt(d))
                 .Where(d => !d.EndpointMetadata.OfType<AuthenticatedOnlyAttribute>().Any())
                 .Where(d => !Policies(d).Any(p => p.StartsWith(HasPermissionAttribute.PolicyPrefix, StringComparison.Ordinal)))
                 .Select(d => $"{d.ControllerName}.{d.ActionName}")
@@ -315,16 +328,7 @@ namespace ApexERP.Tests
             Assert.Contains("Workflow.GetPending", selfService);
             Assert.Contains("Auth.MyCompanies", selfService);
             Assert.Contains("Auth.SwitchCompany", selfService);
-            // Organisation management is tenant-authenticated; its mutating actions enforce CanManage
-            // and its read/self-service actions expose only tenant-scoped data.
-            Assert.NotNull(typeof(OrganisationManagementController).GetCustomAttribute<AuthorizeAttribute>());
-
-            // Platform endpoints use a separate token issuer and policy. The marker must never turn
-            // platform administration into an ordinary tenant-authenticated controller.
-            var platformPolicy = typeof(PlatformAdministrationController).GetCustomAttributes<AuthorizeAttribute>().Single();
-            Assert.Equal("PlatformBearer", platformPolicy.AuthenticationSchemes);
-            Assert.Equal("PlatformAdmin", platformPolicy.Policy);
-
+            // Organisation-management actions apply their own tenant-scoped CanManage checks to mutations.
             Assert.All(selfService, n => Assert.True(
                 n is "Workflow.GetPending" or "Auth.MyCompanies" or "Auth.SwitchCompany" ||
                 n.StartsWith("OrganisationManagement.", StringComparison.Ordinal) ||

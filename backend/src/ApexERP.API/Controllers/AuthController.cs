@@ -142,14 +142,30 @@ namespace ApexERP.API.Controllers
             var user = new User { CompanyId = company.Id, Email = invitation.Email,
                 PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
                 LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true };
-            _db.Users.Add(user);
-            var existingMemberships = await _db.CompanyMemberships.IgnoreQueryFilters().CountAsync(x => x.UserId == user.Id && x.IsActive, ct);
-            _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
-                MembershipRole = role.Name, RoleId = role.Id, IsDefault = existingMemberships == 0,
-                IsActive = true, ValidFrom = DateTime.UtcNow });
-            invitation.AcceptedAt = DateTime.UtcNow;
-            invitation.AcceptedUserId = user.Id;
-            await _db.SaveChangesAsync(ct);
+            var transaction = _db.Database.CurrentTransaction;
+            var ownsTransaction = transaction is null;
+            if (ownsTransaction) transaction = await _db.Database.BeginTransactionAsync(ct);
+            try
+            {
+                _db.Users.Add(user);
+                await _db.SaveChangesAsync(ct);
+                _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
+                    MembershipRole = role.Name, RoleId = role.Id, IsDefault = true,
+                    IsActive = true, ValidFrom = DateTime.UtcNow });
+                invitation.AcceptedAt = DateTime.UtcNow;
+                invitation.AcceptedUserId = user.Id;
+                await _db.SaveChangesAsync(ct);
+                if (ownsTransaction) await transaction!.CommitAsync(ct);
+            }
+            catch
+            {
+                if (ownsTransaction && transaction is not null) await transaction.RollbackAsync(ct);
+                throw;
+            }
+            finally
+            {
+                if (ownsTransaction && transaction is not null) await transaction.DisposeAsync();
+            }
             var login = await _auth.IssueTokensAsync(user, Ip, null, ct);
             return Ok(Deliver(login));
         }
@@ -173,7 +189,6 @@ namespace ApexERP.API.Controllers
 
         [HttpGet("companies")]
         [Authorize]
-        [AuthenticatedOnly]
         public async Task<IActionResult> MyCompanies(CancellationToken ct)
         {
             var userId = CurrentUserId;
@@ -194,7 +209,6 @@ namespace ApexERP.API.Controllers
 
         [HttpPost("switch-company")]
         [Authorize]
-        [AuthenticatedOnly]
         [EnableRateLimiting("auth")]
         public async Task<IActionResult> SwitchCompany(SwitchCompanyRequest request, CancellationToken ct)
         {
@@ -203,7 +217,7 @@ namespace ApexERP.API.Controllers
                 var result = await _auth.IssueTokensForCompanyAsync(CurrentUserId, request.CompanyId, Ip, null, ct);
                 return Ok(Deliver(result));
             }
-            catch (UnauthorizedAccessException ex) { return Forbid(); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
         }
 
         private Guid CurrentUserId => Guid.Parse((User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))!.Value);

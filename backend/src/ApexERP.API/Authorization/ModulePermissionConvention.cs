@@ -68,7 +68,9 @@ namespace ApexERP.API.Authorization
             action.Attributes.OfType<HasPermissionAttribute>().Any() ||
             controller.Attributes.OfType<HasPermissionAttribute>().Any() ||
             action.Attributes.OfType<AuthenticatedOnlyAttribute>().Any() ||
-            controller.Attributes.OfType<AuthenticatedOnlyAttribute>().Any();
+            controller.Attributes.OfType<AuthenticatedOnlyAttribute>().Any() ||
+            action.Attributes.OfType<ModulePermissionExemptAttribute>().Any() ||
+            controller.Attributes.OfType<ModulePermissionExemptAttribute>().Any();
 
         private static bool IsReadOnly(ActionModel action)
         {

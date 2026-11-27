@@ -14,7 +14,7 @@ namespace ApexERP.API.Controllers;
 
 [Route("api/v1/organisation")]
 [Authorize]
-[AuthenticatedOnly]
+[ModulePermissionExempt]
 public sealed class OrganisationManagementController : ApiControllerBase
 {
     private readonly ApexErpDbContext _db;
@@ -66,6 +66,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
     [HttpPost("subscription/renewal-request")]
     public async Task<IActionResult> RequestSubscriptionRenewal(CancellationToken ct)
     {
+        if (DenyManagement() is { } denied) return denied;
         using var scope = _db.SystemAccessScope("tenant self-service: request subscription renewal");
         var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId)
             .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
@@ -131,6 +132,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             OwnershipPercentage = request.OwnershipPercentage, IsPublicSectorEntity = request.IsPublicSectorEntity
         };
         _db.Companies.Add(company);
+        await _db.SaveChangesAsync(ct);
         var roleMap = new Dictionary<Guid, Guid>();
         foreach (var oldRole in sourceRoles)
         {
@@ -139,6 +141,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             _db.Roles.Add(newRole);
             roleMap[oldRole.Id] = newRole.Id;
         }
+        await _db.SaveChangesAsync(ct);
         var currentRoleId = Guid.TryParse(User.FindFirst("role_id")?.Value, out var rid) ? rid : sourceRoles.FirstOrDefault(x => x.Name == User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value)?.Id;
         Guid? targetRole = currentRoleId.HasValue && roleMap.TryGetValue(currentRoleId.Value, out var mapped)
             ? mapped : roleMap.Values.Select(x => (Guid?)x).FirstOrDefault();
@@ -169,6 +172,33 @@ public sealed class OrganisationManagementController : ApiControllerBase
         foreach (var membership in memberships) { membership.IsActive = false; membership.ValidTo = DateTime.UtcNow; }
         await _db.SaveChangesAsync(ct);
         return Ok(new { deactivated = true, companyId });
+    }
+
+
+    [HttpGet("companies/{companyId:guid}/roles")]
+    public async Task<IActionResult> CompanyRoles(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: list company roles");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        return Ok(await _db.Roles.IgnoreQueryFilters().AsNoTracking().Where(x => x.CompanyId == companyId)
+            .OrderBy(x => x.Name).Select(x => new { x.Id, x.Name, x.IsSystemRole }).ToListAsync(ct));
+    }
+
+    [HttpGet("jurisdiction-catalogue")]
+    public async Task<IActionResult> JurisdictionCatalogue(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant configuration: list country defaults");
+        return Ok(await _db.JurisdictionProfiles.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.CountryName)
+            .Select(x => new { x.CountryCode, x.CountryName, x.DefaultCurrency, x.DefaultTimeZone, x.DefaultReportingFramework }).ToListAsync(ct));
+    }
+
+    [HttpGet("onboarding")]
+    public async Task<IActionResult> Onboarding(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant onboarding: read wizard state");
+        var row = await _db.TenantOnboardings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == TenantId, ct);
+        if (row is null) return NotFound();
+        return Ok(new { row.Status, row.CompletedStepsJson, row.DeploymentProfileId, row.CompletedAt, row.BlockedReason });
     }
 
     [HttpGet("companies/{companyId:guid}/branches")]
@@ -354,7 +384,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
     {
         if (DenyManagement() is { } denied) return denied;
         if (string.IsNullOrWhiteSpace(request.CountryCode) || request.CountryCode.Length != 2 || request.FiscalYearStartMonth is < 1 or > 12 ||
-            string.IsNullOrWhiteSpace(request.FunctionalCurrency) || request.FunctionalCurrency.Length != 3) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
+            string.IsNullOrWhiteSpace(request.FunctionalCurrency) || request.FunctionalCurrency.Length != 3 ||
+            (request.BaseCurrency is not null && request.BaseCurrency.Length != 3)) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
         using var scope = _db.SystemAccessScope("tenant configuration: set jurisdiction");
         var profile = await _db.JurisdictionProfiles.SingleOrDefaultAsync(x => x.CountryCode == request.CountryCode.ToUpperInvariant() && x.IsActive, ct);
         if (profile is null) return BadRequest(new { error = "The jurisdiction is not in the configured country catalogue." });
@@ -370,6 +401,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         row.IsPrimary = request.IsPrimary;
         row.ConfigurationStatus = "PendingStatutoryReview";
         targetCompany.FunctionalCurrency = row.FunctionalCurrency;
+        targetCompany.BaseCurrency = (request.BaseCurrency ?? profile.DefaultCurrency).ToUpperInvariant();
         targetCompany.FiscalYearStartMonth = row.FiscalYearStartMonth;
         if (!string.IsNullOrWhiteSpace(request.Timezone)) targetCompany.Timezone = request.Timezone;
         if (request.IsPrimary)
@@ -447,5 +479,5 @@ public sealed record AssignBranchRequest(Guid? BranchId);
 public sealed record AddCompanyMemberRequest(Guid UserId, Guid RoleId);
 public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
-    string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null);
+    string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null, string? BaseCurrency = null);
 public sealed record UpdateOnboardingRequest(string[] CompletedSteps, Guid? DeploymentProfileId = null, bool Completed = false);
