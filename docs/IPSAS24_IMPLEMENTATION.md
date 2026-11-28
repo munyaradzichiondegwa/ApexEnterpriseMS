@@ -56,6 +56,13 @@ The backend suite includes regression coverage for reviewed source-submission re
 
 The VAT/WHT restriction is intentional and remains a release gate. The invoice models retain tax amounts and tax-code IDs, but the tax code does not persist the actual tax-control GL account used at posting; the posting methods receive those account IDs as arguments. AP WHT also reduces the supplier payable, so the supplier cash payment and tax-liability component must be reconciled separately. The required persisted tax-account mapping, settlement-line allocation, approved recoverable/irrecoverable VAT and WHT budget-treatment policy, provenance and acceptance tests are specified in [IPSAS 24 AR/AP tax allocation design](IPSAS24_AR_AP_TAX_ALLOCATION_DESIGN.md). Do not enable tax-bearing invoices until those controls and entity-approved policy are implemented and independently tested.
 
+### AR/AP tax-account provenance foundation — 28 November 2026
+
+- AR invoice posting now persists the exact VAT output GL account used. AP invoice posting persists the exact VAT input and WHT payable GL accounts used.
+- Posting validates company ownership, active/postable status and expected account class (AR VAT output: liability; AP VAT input: asset; AP WHT payable: liability).
+- Added migration `20261128120000_PersistArApTaxPostingAccounts`; historical rows remain null rather than being backfilled by inference. PostgreSQL regressions cover valid AR/AP persistence and invalid AR VAT account type/company.
+- This does **not** complete tax-bearing IPSAS 24 actuals. Effective-dated tax-code/account mapping, source journal-line identity, settlement-line tax allocation and independently approved budget-treatment policy remain outstanding. The adapter continues to reject VAT/WHT-bearing invoices pending those controls.
+
 ### Standards basis
 
 IPSAS 24 requires original and final budget amounts, actual amounts on a comparable basis, and explanations of material differences. Changes from original to final budget must explain whether they result from reallocations within the budget or other factors. Where budget and financial-statement actuals are not comparable, the reconciliation must identify basis, timing and entity differences; for accrual budgets it covers total revenue, total expense and net cash flows from operating, investing and financing, while for non-accrual budgets it covers the three net cash-flow sections. See the [IPSASB/IFAC-hosted IPSAS 24 text](https://ifacweb.blob.core.windows.net/publicfiles/2025-04/A33_IPSAS%2024.pdf) and [UN IPSAS guidance on material differences](https://www.un.org/ipsas/Chapter16.html).
