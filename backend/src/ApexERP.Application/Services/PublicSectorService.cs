@@ -2519,7 +2519,8 @@ namespace ApexERP.Application.Services
 
             var existingSourceAllocations = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
                 x.CompanyId == companyId && x.SourceKind == sourceKind &&
-                x.SourceRecordId == sourceRecordId).ToListAsync(ct);
+                x.SourceRecordId == sourceRecordId && !x.ReversalOfId.HasValue &&
+                x.Status != PublicSectorBudgetActualStatus.Reversed).ToListAsync(ct);
             if (await _db.PublicSectorCashSourceReconciliationLines.AnyAsync(line =>
                 line.CompanyId == companyId && line.SourceRecordId == sourceRecordId &&
                 _db.PublicSectorCashSourceSubmissions.Any(submission =>
