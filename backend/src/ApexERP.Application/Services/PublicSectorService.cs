@@ -1449,7 +1449,9 @@ namespace ApexERP.Application.Services
                         j.CompanyId == companyId && j.Status == JournalStatus.Posted) ||
                     (!capturedSourceIds.Contains(x.Id) && !excludedBankSourceIds.Contains(x.Id) &&
                      !capturedSettlementJournalIds.Contains(x.JournalEntryId.Value)), ct);
-                var pendingCashActuals = cashActuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
+                var pendingCashActuals = cashActuals.Count(x =>
+                    x.Status == PublicSectorBudgetActualStatus.Draft ||
+                    x.Status == PublicSectorBudgetActualStatus.PendingCertification);
                 var certifiedActuals = cashActuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
                 var invalidCertifiedCashActuals = 0;
                 foreach (var certifiedActual in certifiedActuals)
@@ -1544,7 +1546,8 @@ namespace ApexERP.Application.Services
                     invalidCertifiedCashActuals == 0 && cashSourceControlsComplete)
                 {
                     foreach (var group in cashActuals.GroupBy(x => x.BudgetVersionLineId))
-                        cashActualsByBudgetLine[group.Key] = group.Sum(x => x.Amount);
+                        cashActualsByBudgetLine[group.Key] = group.Sum(x =>
+                            x.ReversalOfId.HasValue ? -x.Amount : x.Amount);
                 }
             }
             if (companyProfile == null)
