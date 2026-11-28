@@ -12,6 +12,13 @@ namespace ApexERP.API.Controllers
     public record CreateFundCentreRequest(string Code, string Name, FundCentreLevel Level, Guid? ParentId, int FinancialYear, decimal AppropriationAmount, decimal CarriedForward);
     public record CreateBudgetAllocationRequest(Guid FundCentreId, Guid GlAccountId, Guid? CostCentreId, int FinancialYear, decimal Amount);
 
+    public record CreateBudgetVersionLineRequest(Guid FundCentreId, Guid GlAccountId, Guid? CostCentreId,
+        string Description, string ClassificationCode, decimal Amount);
+    public record CreateBudgetVersionRequest(int FinancialYear, PublicSectorBudgetVersionKind Kind, string Currency,
+        AccountingBasis AccountingBasis, string ClassificationBasis, string EntityScope, DateTime PeriodStart,
+        DateTime PeriodEnd, string AuthorityReference, string? AmendmentReason,
+        IReadOnlyCollection<CreateBudgetVersionLineRequest> Lines);
+
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
     public record CreateTenderRequest(string Title, string? Specifications, DateTime SubmissionDeadline);
@@ -98,6 +105,65 @@ namespace ApexERP.API.Controllers
             CancellationToken ct)
         {
             try { return Ok(await _publicSector.GetClassificationScheduleAsync(CompanyId, year, fundCentreId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-versions")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateBudgetVersion(CreateBudgetVersionRequest req, CancellationToken ct)
+        {
+            try
+            {
+                var version = await _publicSector.CreateBudgetVersionAsync(CompanyId, req.FinancialYear, req.Kind,
+                    req.Currency, req.AccountingBasis, req.ClassificationBasis, req.EntityScope,
+                    req.PeriodStart, req.PeriodEnd, req.AuthorityReference, req.AmendmentReason,
+                    req.Lines.Select(x => new PublicSectorService.BudgetVersionLineInput(x.FundCentreId,
+                        x.GlAccountId, x.CostCentreId, x.Description, x.ClassificationCode, x.Amount)).ToArray(),
+                    UserId, ct);
+                return Ok(version);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-versions/{id}/submit-for-approval")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitBudgetVersionForApproval(Guid id, CancellationToken ct)
+        {
+            try
+            {
+                var version = await _db.PublicSectorBudgetVersions.Include(x => x.Lines)
+                    .FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == CompanyId, ct);
+                if (version == null) return NotFound(new { error = "Budget version not found." });
+                if (version.Status != PublicSectorBudgetVersionStatus.Draft)
+                    return BadRequest(new { error = "Only a draft budget version can be submitted." });
+                var total = version.Lines.Sum(x => x.Amount);
+                var workflow = await _db.InTransactionAsync(async token =>
+                {
+                    var request = await _approvalChains.SubmitForApprovalAsync(CompanyId,
+                        "PublicSectorBudgetVersion", version.Id, "PublicSectorBudgetVersion", UserId,
+                        total, null, $"Approve {version.Kind} public-sector budget version {version.VersionNumber} for FY{version.FinancialYear}.", token);
+                    await _publicSector.MarkBudgetVersionPendingAsync(CompanyId, version.Id, request.Id, token);
+                    return request;
+                }, ct);
+                return Ok(workflow);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-versions/{id}/finalise-approval")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> FinaliseBudgetVersionApproval(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.FinaliseBudgetVersionApprovalAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>IPSAS 24 statement: approved original and final budgets, comparable actuals and variance explanations.</summary>
+        [HttpGet("budget-versions/comparison")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetBudgetComparison([FromQuery] int year, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.GetBudgetComparisonAsync(CompanyId, year, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
