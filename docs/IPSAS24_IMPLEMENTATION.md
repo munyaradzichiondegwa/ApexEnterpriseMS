@@ -117,6 +117,8 @@ The branch now has a separate record-level reconciliation lifecycle attached to 
 - The service derives the source amount, date and currency from the company-owned source record. It checks source kind, budget version, reporting period, currency, actual status, source-record identity and source reference; it does not trust caller-supplied amounts.
 - The submitted source population's distinct record count and sum of distinct source-record amounts must equal the reviewed submission's record count and control total exactly.
 - A separate reconciliation preparer submits the transaction mapping; an independent reviewer must differ from the source preparer, source reviewer and reconciliation submitter.
+- Rejected source-control or record-level submissions remain immutable history. A new numbered submission revision can be created after rejection; the comparison and register-completeness checks evaluate only the latest revision for each expected source. A certified actual can be reused in a later revision only after its earlier mapping was rejected; active mappings remain unique.
+- Reviewed reason-coded exclusions count as reconciled source coverage, but only for source records linked to posted settlement journals. A later actual cannot be created for a source record already reconciled or excluded in an active revision.
 - PostgreSQL makes mapping rows append-only and prevents mapping a certified actual more than once. Final record-reconciliation states are immutable. The cash-flow bridge now requires the record-level reconciliation to be independently reviewed for every required source.
 
 API routes:
