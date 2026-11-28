@@ -29,29 +29,10 @@ public sealed class PersistArApTaxPostingAccounts : Migration
             table: "ApInvoices",
             type: "uuid",
             nullable: true);
-
-        migrationBuilder.CreateIndex(
-            name: "IX_ArInvoices_VatOutputAccountId",
-            table: "ArInvoices",
-            column: "VatOutputAccountId");
-
-        migrationBuilder.CreateIndex(
-            name: "IX_ApInvoices_VatInputAccountId",
-            table: "ApInvoices",
-            column: "VatInputAccountId");
-
-        migrationBuilder.CreateIndex(
-            name: "IX_ApInvoices_WhtPayableAccountId",
-            table: "ApInvoices",
-            column: "WhtPayableAccountId");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.DropIndex(name: "IX_ArInvoices_VatOutputAccountId", table: "ArInvoices");
-        migrationBuilder.DropIndex(name: "IX_ApInvoices_VatInputAccountId", table: "ApInvoices");
-        migrationBuilder.DropIndex(name: "IX_ApInvoices_WhtPayableAccountId", table: "ApInvoices");
-
         migrationBuilder.DropColumn(name: "VatOutputAccountId", table: "ArInvoices");
         migrationBuilder.DropColumn(name: "VatInputAccountId", table: "ApInvoices");
         migrationBuilder.DropColumn(name: "WhtPayableAccountId", table: "ApInvoices");
