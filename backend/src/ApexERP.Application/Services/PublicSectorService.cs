@@ -818,6 +818,7 @@ namespace ApexERP.Application.Services
             decimal sourceAmount;
             DateTime sourceDate;
             string sourceCurrency;
+            string expectedSourceReference;
             Guid? sourceJournalEntryId;
             if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
             {
@@ -826,6 +827,8 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("The bank transaction does not exist in this company.");
                 sourceAmount = Math.Max(source.Debit, source.Credit);
                 sourceDate = source.TransactionDate;
+                expectedSourceReference = string.IsNullOrWhiteSpace(source.Reference)
+                    ? source.Id.ToString("N") : source.Reference!;
                 sourceJournalEntryId = source.JournalEntryId;
                 sourceCurrency = await _db.BankAccounts.Where(x => x.Id == source.BankAccountId && x.CompanyId == companyId)
                     .Select(x => x.Currency).SingleOrDefaultAsync(ct)
@@ -846,6 +849,8 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("The AR receipt does not belong to the registered receivables control account.");
                 sourceAmount = source.Amount;
                 sourceDate = source.ReceiptDate;
+                expectedSourceReference = string.IsNullOrWhiteSpace(source.ReceiptNo)
+                    ? source.Id.ToString("N") : source.ReceiptNo;
                 sourceJournalEntryId = source.JournalEntryId;
                 sourceCurrency = source.Currency;
             }
@@ -860,10 +865,14 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("The AP payment does not belong to the registered payables control account.");
                 sourceAmount = source.Amount;
                 sourceDate = source.PaymentDate;
+                expectedSourceReference = string.IsNullOrWhiteSpace(source.PaymentNo)
+                    ? source.Id.ToString("N") : source.PaymentNo;
                 sourceJournalEntryId = source.JournalEntryId;
                 sourceCurrency = source.Currency;
             }
 
+            if (!string.Equals(sourceReference.Trim(), expectedSourceReference, StringComparison.Ordinal))
+                throw new InvalidOperationException("The supplied source reference does not match the company-owned source record.");
             if (sourceDate < submission.PeriodStart || sourceDate >= submission.PeriodEnd)
                 throw new InvalidOperationException("The source record falls outside the submitted reporting period.");
             if (!sourceJournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(j =>
