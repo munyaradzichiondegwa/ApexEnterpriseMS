@@ -451,8 +451,8 @@ namespace ApexERP.Tests
             var executions = await verify.JobExecutions.IgnoreQueryFilters()
                 .Where(x => x.JobCode == "test.tenant-context").ToListAsync();
             Assert.Equal(2, executions.Count);
-            Assert.Contains(executions, x => x.CompanyId == companyA && x.Status == "Succeeded" && x.Message == "tenant context verified");
-            Assert.Contains(executions, x => x.CompanyId == companyB && x.Status == "Succeeded" && x.Message == "tenant context verified");
+            Assert.Contains(executions, x => x.CompanyId == companyA && x.Status == "Succeeded" && x.Message == "tenant and company context verified");
+            Assert.Contains(executions, x => x.CompanyId == companyB && x.Status == "Succeeded" && x.Message == "tenant and company context verified");
         }
 
         // ---- idempotency table ---------------------------------------------------------------------------------------------
