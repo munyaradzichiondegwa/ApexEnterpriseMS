@@ -478,59 +478,7 @@ namespace ApexERP.Application.Services
         private sealed record ExpectedCashSourcePopulation(
             HashSet<Guid> RecordIds, Dictionary<Guid, ExpectedCashSourceRecord> Records,
             decimal ControlTotal, bool CurrencyMatches, decimal? NetMovement,
-            decimal? OpeningSubledgerBalance, decimal? ClosingSubledgerBalance,
             decimal? OpeningGlBalance, decimal? ClosingGlBalance);
-
-        private async Task<decimal> GetArControlSubledgerBalanceAsync(
-            Guid companyId, Guid controlAccountId, string currency, DateTime asOf, CancellationToken ct)
-        {
-            var invoices = await _db.ArInvoices.Where(x =>
-                x.CompanyId == companyId && x.Currency == currency && x.InvoiceDate < asOf &&
-                x.Status != InvoiceStatus.Draft && x.Status != InvoiceStatus.Cancelled &&
-                x.JournalEntryId.HasValue &&
-                _db.Customers.Any(customer => customer.Id == x.CustomerId &&
-                    customer.CompanyId == companyId && customer.ArAccountId == controlAccountId) &&
-                _db.JournalEntries.Any(journal => journal.Id == x.JournalEntryId.Value &&
-                    journal.CompanyId == companyId &&
-                    journal.Status == JournalStatus.Posted))
-                .Select(x => new { x.Id, x.Total }).ToListAsync(ct);
-            var invoiceIds = invoices.Select(x => x.Id).ToArray();
-            if (invoiceIds.Length == 0) return 0m;
-            var applied = await _db.ArReceiptAllocations.Where(x => invoiceIds.Contains(x.ArInvoiceId) &&
-                _db.ArReceipts.Any(receipt => receipt.Id == x.ArReceiptId &&
-                    receipt.CompanyId == companyId && receipt.Currency == currency &&
-                    receipt.ReceiptDate < asOf && receipt.JournalEntryId.HasValue &&
-                    _db.JournalEntries.Any(journal => journal.Id == receipt.JournalEntryId.Value &&
-                        journal.CompanyId == companyId &&
-                        journal.Status == JournalStatus.Posted)))
-                .SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
-            return invoices.Sum(x => x.Total) - applied;
-        }
-
-        private async Task<decimal> GetApControlSubledgerBalanceAsync(
-            Guid companyId, Guid controlAccountId, string currency, DateTime asOf, CancellationToken ct)
-        {
-            var invoices = await _db.ApInvoices.Where(x =>
-                x.CompanyId == companyId && x.Currency == currency && x.InvoiceDate < asOf &&
-                x.JournalEntryId.HasValue &&
-                _db.Suppliers.Any(supplier => supplier.Id == x.SupplierId &&
-                    supplier.CompanyId == companyId && supplier.ApAccountId == controlAccountId) &&
-                _db.JournalEntries.Any(journal => journal.Id == x.JournalEntryId.Value &&
-                    journal.CompanyId == companyId &&
-                    journal.Status == JournalStatus.Posted))
-                .Select(x => new { x.Id, x.Total }).ToListAsync(ct);
-            var invoiceIds = invoices.Select(x => x.Id).ToArray();
-            if (invoiceIds.Length == 0) return 0m;
-            var applied = await _db.ApPaymentAllocations.Where(x => invoiceIds.Contains(x.ApInvoiceId) &&
-                _db.ApPayments.Any(payment => payment.Id == x.ApPaymentId &&
-                    payment.CompanyId == companyId && payment.Currency == currency &&
-                    payment.PaymentDate < asOf && payment.JournalEntryId.HasValue &&
-                    _db.JournalEntries.Any(journal => journal.Id == payment.JournalEntryId.Value &&
-                        journal.CompanyId == companyId &&
-                        journal.Status == JournalStatus.Posted)))
-                .SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
-            return invoices.Sum(x => x.Total) - applied;
-        }
 
         private async Task<decimal> GetControlGlBalanceAsync(
             Guid companyId, Guid controlAccountId, string currency, DateTime asOf,
@@ -552,13 +500,9 @@ namespace ApexERP.Application.Services
             ExpectedCashSourcePopulation population)
         {
             if (expected.SourceKind == "BankAccount") return true;
-            return population.OpeningSubledgerBalance.HasValue &&
-                population.ClosingSubledgerBalance.HasValue &&
-                population.OpeningGlBalance.HasValue && population.ClosingGlBalance.HasValue &&
-                CloseEnough(openingBalance, population.OpeningSubledgerBalance.Value) &&
-                CloseEnough(closingBalance, population.ClosingSubledgerBalance.Value) &&
-                CloseEnough(population.OpeningSubledgerBalance.Value, population.OpeningGlBalance.Value) &&
-                CloseEnough(population.ClosingSubledgerBalance.Value, population.ClosingGlBalance.Value);
+            return population.OpeningGlBalance.HasValue && population.ClosingGlBalance.HasValue &&
+                CloseEnough(openingBalance, population.OpeningGlBalance.Value) &&
+                CloseEnough(closingBalance, population.ClosingGlBalance.Value);
         }
 
         // Re-read the live source population rather than trusting a previously submitted count.
@@ -590,7 +534,7 @@ namespace ApexERP.Application.Services
                 return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
                     rows.Sum(x => Math.Max(x.Debit, x.Credit)),
                     string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase),
-                    rows.Sum(x => x.Credit - x.Debit), null, null, null, null);
+                    rows.Sum(x => x.Credit - x.Debit), null, null);
             }
 
             if (expected.SourceKind == "ReceivablesControl")
@@ -610,10 +554,6 @@ namespace ApexERP.Application.Services
                     x.Amount, string.IsNullOrWhiteSpace(x.ReceiptNo) ? x.Id.ToString("N") : x.ReceiptNo,
                     x.ReceiptDate, x.Currency, x.JournalEntryId, true));
                 var normalisedControlCurrency = controlCurrency.Trim().ToUpperInvariant();
-                var openingSubledger = await GetArControlSubledgerBalanceAsync(
-                    companyId, sourceId, normalisedControlCurrency, periodStart, ct);
-                var closingSubledger = await GetArControlSubledgerBalanceAsync(
-                    companyId, sourceId, normalisedControlCurrency, periodEnd, ct);
                 var openingGl = await GetControlGlBalanceAsync(
                     companyId, sourceId, normalisedControlCurrency, periodStart, liability: false, ct: ct);
                 var closingGl = await GetControlGlBalanceAsync(
@@ -622,7 +562,7 @@ namespace ApexERP.Application.Services
                     rows.Sum(x => x.Amount),
                     string.Equals(normalisedControlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
                     rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)),
-                    null, openingSubledger, closingSubledger, openingGl, closingGl);
+                    null, openingGl, closingGl);
             }
 
             if (expected.SourceKind == "PayablesControl")
@@ -642,10 +582,6 @@ namespace ApexERP.Application.Services
                     x.Amount, string.IsNullOrWhiteSpace(x.PaymentNo) ? x.Id.ToString("N") : x.PaymentNo,
                     x.PaymentDate, x.Currency, x.JournalEntryId, true));
                 var normalisedControlCurrency = controlCurrency.Trim().ToUpperInvariant();
-                var openingSubledger = await GetApControlSubledgerBalanceAsync(
-                    companyId, sourceId, normalisedControlCurrency, periodStart, ct);
-                var closingSubledger = await GetApControlSubledgerBalanceAsync(
-                    companyId, sourceId, normalisedControlCurrency, periodEnd, ct);
                 var openingGl = await GetControlGlBalanceAsync(
                     companyId, sourceId, normalisedControlCurrency, periodStart, liability: true, ct: ct);
                 var closingGl = await GetControlGlBalanceAsync(
