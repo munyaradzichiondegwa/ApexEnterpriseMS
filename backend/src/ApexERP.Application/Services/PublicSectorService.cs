@@ -993,9 +993,9 @@ namespace ApexERP.Application.Services
         }
 
         /// <summary>
-        /// Captures a cash-basis actual only from an independently reconciled bank movement or
-        /// a posted and authorised AR/AP cash transaction. Accrual invoices and payment instructions
-        /// are not accepted as cash evidence.
+        /// Captures a cash-basis actual only from an independently reconciled bank movement
+        /// whose posted journal contains an exact matching budget-line classification. AR/AP
+        /// settlement allocations are not enabled until their source-to-budget mapping is complete.
         /// </summary>
         public async Task<PublicSectorBudgetExecutionActual> CreateBudgetExecutionActualAsync(
             Guid companyId, Guid budgetVersionId, Guid budgetVersionLineId,
