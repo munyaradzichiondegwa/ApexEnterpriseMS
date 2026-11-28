@@ -1378,8 +1378,8 @@ namespace ApexERP.Tests
 
             var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
-            Assert.Equal(100m, comparison.Lines.Single(x => x.GlAccountId == revenueGlId).ActualOnComparableBasis);
-            Assert.Equal(200m, comparison.Lines.Single(x => x.GlAccountId == expenseGlId).ActualOnComparableBasis);
+            Assert.Equal(100m, comparison.Lines.Single(x => x.AccountCode == "4100").ActualOnComparableBasis);
+            Assert.Equal(200m, comparison.Lines.Single(x => x.AccountCode == "5100").ActualOnComparableBasis);
         }
     }
 }
