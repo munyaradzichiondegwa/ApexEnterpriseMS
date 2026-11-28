@@ -38,7 +38,7 @@ public sealed record ZimbabweElectronicCommerceTaxResult(
 public static class ZimbabweElectronicCommerceTaxEvaluator
 {
     public const decimal Rate = 0.05m;
-    public const DateTime EffectiveFrom = new(2026, 1, 1);
+    public static readonly DateTime EffectiveFrom = new(2026, 1, 1);
     public const string LegalReference =
         "Income Tax Act [Chapter 23:06], sections 12(6), 12(7) and 12A; Finance Act [Chapter 23:04], section 14(2)(k); Finance Act No. 7 of 2025, section 14.";
 
