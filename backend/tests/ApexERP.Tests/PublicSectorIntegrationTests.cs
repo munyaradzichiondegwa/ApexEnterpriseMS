@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Xunit;
 
 namespace ApexERP.Tests
@@ -1173,6 +1175,8 @@ namespace ApexERP.Tests
             var bankCompletenessCertifierId = Guid.NewGuid();
             var statementPeriodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var statementPeriodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var statementBytes = Encoding.UTF8.GetBytes("authenticated-test-statement");
+            var statementSha256 = Convert.ToHexString(SHA256.HashData(statementBytes)).ToLowerInvariant();
             var budgetVersionId = Guid.NewGuid();
             var budgetLineId = Guid.NewGuid();
             var preparerId = Guid.NewGuid();
@@ -1257,8 +1261,8 @@ namespace ApexERP.Tests
                     TotalDebits = 100m, TotalCredits = 0m, TransactionCount = 2,
                     OriginalFileName = "statement-2026.csv", MediaType = "text/csv",
                     ParserVersion = BankStatementCsvParser.ParserVersion,
-                    Sha256 = new string('a', 64), ByteLength = 32,
-                    OriginalBytes = System.Text.Encoding.UTF8.GetBytes("authenticated-test-statement"),
+                    Sha256 = statementSha256, ByteLength = statementBytes.Length,
+                    OriginalBytes = statementBytes,
                     UploadedBy = bankUploaderId, UploadedAt = DateTime.UtcNow,
                     AuthenticationMethod = BankStatementOriginAuthenticationMethod.IndependentBankConfirmation,
                     AuthenticationEvidenceReference = "BANK-CONFIRM-TEST-2026",
