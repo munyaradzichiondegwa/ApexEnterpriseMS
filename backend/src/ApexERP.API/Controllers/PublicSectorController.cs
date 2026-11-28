@@ -468,7 +468,8 @@ namespace ApexERP.API.Controllers
         [HasPermission(Permissions.PublicSectorBudgetOverride)]
         public async Task<IActionResult> CreateBudgetReconciliation(CreateBudgetReconciliationRequest req, CancellationToken ct)
         {
-            if (req.StatementSection is "Operating" or "Investing" or "Financing")
+            if (new[] { "Operating", "Investing", "Financing" }.Any(section =>
+                string.Equals(section, req.StatementSection, StringComparison.OrdinalIgnoreCase)))
                 return BadRequest(new { error = "Cash-flow bridge adjustments must be generated from the current system-calculated candidate, not entered manually." });
             try
             {
