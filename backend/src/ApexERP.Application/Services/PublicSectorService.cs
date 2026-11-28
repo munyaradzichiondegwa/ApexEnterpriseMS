@@ -1004,8 +1004,44 @@ namespace ApexERP.Application.Services
                 if (invalidCertifiedCashActuals > 0)
                     comparabilityIssues.Add($"Cash actual evidence has changed or is no longer valid for {invalidCertifiedCashActuals} certified records.");
 
+                // A source-backed comparison is not complete merely because captured actuals
+                // agree with posted settlements. Require a complete approved source register,
+                // independently reviewed control totals and independently reviewed record-level
+                // allocations/exclusions for every registered source (including zero-record sources).
+                var expectedSources = await _db.PublicSectorExpectedCashSources.Where(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id).ToListAsync(ct);
+                var sourceSubmissions = await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id).ToListAsync(ct);
+                var sourceRegisterApproved = expectedSources.Count > 0 &&
+                    expectedSources.All(x => x.Status == "Approved");
+                var everyExpectedSourceReviewed = expectedSources.All(source =>
+                    sourceSubmissions.Any(submission => submission.ExpectedCashSourceId == source.Id &&
+                        submission.Status == "Reviewed" && submission.RecordLevelStatus == "Reviewed"));
+                var noOrphanOrUnreviewedSubmissions = sourceSubmissions.Count == expectedSources.Count &&
+                    sourceSubmissions.All(submission => submission.Status == "Reviewed" &&
+                        submission.RecordLevelStatus == "Reviewed" &&
+                        expectedSources.Any(source => source.Id == submission.ExpectedCashSourceId));
+                var registerAttestation = await _db.PublicSectorExpectedCashSourceRegisterAttestations
+                    .Where(x => x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id)
+                    .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+                var registerCompletenessCertified = registerAttestation != null &&
+                    registerAttestation.Status == "Certified" &&
+                    registerAttestation.CertifiedBy.HasValue && registerAttestation.CertifiedAt.HasValue &&
+                    registerAttestation.ExpectedSourceCount == expectedSources.Count &&
+                    registerAttestation.EntityScope == actualVersion.EntityScope &&
+                    sourceRegisterApproved && everyExpectedSourceReviewed && noOrphanOrUnreviewedSubmissions;
+                if (!sourceRegisterApproved)
+                    comparabilityIssues.Add("The approved expected cash-source register is missing or contains unapproved entries.");
+                if (!everyExpectedSourceReviewed || !noOrphanOrUnreviewedSubmissions)
+                    comparabilityIssues.Add("One or more expected cash sources lack independently reviewed source control totals or record-level reconciliation.");
+                if (!registerCompletenessCertified)
+                    comparabilityIssues.Add("Independent expected-source register completeness certification is missing, stale or inconsistent with the approved budget scope.");
+
+                var cashSourceControlsComplete = sourceRegisterApproved && everyExpectedSourceReviewed &&
+                    noOrphanOrUnreviewedSubmissions && registerCompletenessCertified;
                 if (uncapturedMovements == 0 && missingArSettlementCoverage == 0 &&
-                    missingApSettlementCoverage == 0 && pendingCashActuals == 0 && invalidCertifiedCashActuals == 0)
+                    missingApSettlementCoverage == 0 && pendingCashActuals == 0 &&
+                    invalidCertifiedCashActuals == 0 && cashSourceControlsComplete)
                 {
                     foreach (var group in cashActuals.GroupBy(x => x.BudgetVersionLineId))
                         cashActualsByBudgetLine[group.Key] = group.Sum(x => x.Amount);
