@@ -88,6 +88,19 @@ namespace ApexERP.API.Controllers
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
+        /// <summary>
+        /// Consolidated public-sector schedule using tenant-configured GL SubType economic
+        /// classifications, Vote/Programme/Sub-Programme fund centres and cost-centre objectives.
+        /// </summary>
+        [HttpGet("budget-allocations/classification-schedule")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetClassificationSchedule([FromQuery] int year, [FromQuery] Guid? fundCentreId,
+            CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.GetClassificationScheduleAsync(CompanyId, year, fundCentreId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
         [HttpPost("budget-allocations")]
         public async Task<IActionResult> CreateBudgetAllocation(CreateBudgetAllocationRequest req)
         {
