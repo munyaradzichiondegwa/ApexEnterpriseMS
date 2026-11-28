@@ -655,8 +655,8 @@ namespace ApexERP.Infrastructure.Data
                 .HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
                     "\"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
-                .HasIndex(x => new { x.CompanyId, x.SourceKind, x.SourceRecordId }).IsUnique()
-                .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_Source");
+                .HasIndex(x => new { x.CompanyId, x.SourceKind, x.SourceRecordId, x.BudgetVersionLineId }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_SourceAllocation");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasIndex(x => new { x.BudgetVersionId, x.EffectiveDate });
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
