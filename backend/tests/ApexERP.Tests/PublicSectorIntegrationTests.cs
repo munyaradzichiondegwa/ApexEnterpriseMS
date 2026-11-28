@@ -586,9 +586,9 @@ namespace ApexERP.Tests
                     AppropriationAmount = 1000m
                 });
                 seed.GlAccounts.AddRange(
-                    new GlAccount { Id = expenseId, CompanyId = companyId, Code = "5100", Name = "Operating Expense", Type = GlAccountType.Expense, Currency = "USD" },
-                    new GlAccount { Id = incomeId, CompanyId = companyId, Code = "4100", Name = "Service Revenue", Type = GlAccountType.Income, Currency = "USD" },
-                    new GlAccount { Id = addedExpenseId, CompanyId = companyId, Code = "5200", Name = "New Programme Expense", Type = GlAccountType.Expense, Currency = "USD" });
+                    new GlAccount { Id = expenseId, CompanyId = companyId, Code = "5100", Name = "Operating Expense", SubType = "EC-01", Type = GlAccountType.Expense, Currency = "USD" },
+                    new GlAccount { Id = incomeId, CompanyId = companyId, Code = "4100", Name = "Service Revenue", SubType = "REV-01", Type = GlAccountType.Income, Currency = "USD" },
+                    new GlAccount { Id = addedExpenseId, CompanyId = companyId, Code = "5200", Name = "New Programme Expense", SubType = "EC-02", Type = GlAccountType.Expense, Currency = "USD" });
                 seed.AccountingPeriods.Add(new AccountingPeriod
                 {
                     Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 1,
@@ -615,7 +615,7 @@ namespace ApexERP.Tests
             var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var original = await service.CreateBudgetVersionAsync(companyId, 2026,
                 PublicSectorBudgetVersionKind.Original, "USD", AccountingBasis.Accrual,
-                "Tenant approved programme/economic classification", "Whole MDA",
+                "Tenant approved programme/economic classification", "IPSAS 24 MDA",
                 periodStart, periodEnd, "Appropriation Act 2026", null,
                 new[]
                 {
@@ -707,7 +707,7 @@ namespace ApexERP.Tests
                 });
                 seed.GlAccounts.Add(new GlAccount
                 {
-                    Id = expenseId, CompanyId = companyId, Code = "5300", Name = "Cash Expense",
+                    Id = expenseId, CompanyId = companyId, Code = "5300", Name = "Cash Expense", SubType = "EC-CASH",
                     Type = GlAccountType.Expense, Currency = "USD"
                 });
                 await seed.SaveChangesAsync();
