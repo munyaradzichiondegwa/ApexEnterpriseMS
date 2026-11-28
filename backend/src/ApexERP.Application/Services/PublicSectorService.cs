@@ -62,7 +62,8 @@ namespace ApexERP.Application.Services
             PublicSectorBudgetVersionKind kind, string currency, AccountingBasis accountingBasis,
             string classificationBasis, string entityScope, DateTime periodStart, DateTime periodEnd,
             string authorityReference, string? amendmentReason, IReadOnlyCollection<BudgetVersionLineInput> lines,
-            Guid actorId, CancellationToken ct = default)
+            Guid actorId, CancellationToken ct = default,
+            PublicSectorBudgetAmendmentNature? amendmentNature = null)
         {
             if (financialYear < 2000 || financialYear > 2200 || periodStart >= periodEnd ||
                 periodStart.Year > financialYear || periodEnd.Year < financialYear ||
@@ -70,8 +71,12 @@ namespace ApexERP.Application.Services
                 string.IsNullOrWhiteSpace(classificationBasis) || string.IsNullOrWhiteSpace(entityScope) ||
                 string.IsNullOrWhiteSpace(authorityReference) || lines.Count == 0)
                 throw new InvalidOperationException("A valid reporting year, period, currency, classification, entity scope, authority reference and at least one budget line are required.");
-            if (kind == PublicSectorBudgetVersionKind.Revised && string.IsNullOrWhiteSpace(amendmentReason))
-                throw new InvalidOperationException("A revised budget requires an explanation of changes from the original budget.");
+            if (kind == PublicSectorBudgetVersionKind.Revised &&
+                (string.IsNullOrWhiteSpace(amendmentReason) || !amendmentNature.HasValue ||
+                 !Enum.IsDefined(amendmentNature.Value)))
+                throw new InvalidOperationException("A revised budget requires both an explanation and a classification stating whether changes are reallocations within the budget, other authorised factors, or a mixture.");
+            if (kind == PublicSectorBudgetVersionKind.Original && amendmentNature.HasValue)
+                throw new InvalidOperationException("An original budget cannot carry an amendment nature.");
             if (lines.Any(x => x.Amount < 0 || string.IsNullOrWhiteSpace(x.Description) || string.IsNullOrWhiteSpace(x.ClassificationCode)))
                 throw new InvalidOperationException("Budget lines require non-negative amounts, descriptions and classification codes.");
 
@@ -123,7 +128,7 @@ namespace ApexERP.Application.Services
                 Kind = kind, Currency = currency.Trim().ToUpperInvariant(), AccountingBasis = accountingBasis,
                 ClassificationBasis = classificationBasis.Trim(), EntityScope = entityScope.Trim(),
                 PeriodStart = periodStart, PeriodEnd = periodEnd, AuthorityReference = authorityReference.Trim(),
-                AmendmentReason = amendmentReason?.Trim(), CreatedBy = actorId,
+                AmendmentReason = amendmentReason?.Trim(), AmendmentNature = amendmentNature, CreatedBy = actorId,
                 Lines = lines.Select((line, index) => new PublicSectorBudgetVersionLine
                 {
                     CompanyId = companyId, FundCentreId = line.FundCentreId, GlAccountId = line.GlAccountId,
@@ -1393,6 +1398,16 @@ namespace ApexERP.Application.Services
                     }
                 }
                 var originalAmount = dimension.OriginalLine?.Amount ?? 0m;
+                var amendmentExplanation = final?.AmendmentNature switch
+                {
+                    PublicSectorBudgetAmendmentNature.ReallocationWithinBudget =>
+                        $"Reallocation within the approved budget: {final.AmendmentReason}",
+                    PublicSectorBudgetAmendmentNature.OtherAuthorisedFactors =>
+                        $"Other authorised factors: {final.AmendmentReason}",
+                    PublicSectorBudgetAmendmentNature.Mixed =>
+                        $"Reallocation and other authorised factors: {final.AmendmentReason}",
+                    _ => final?.AmendmentReason
+                };
                 // A dimension absent from the final approved budget has a final amount of zero,
                 // not an unknown/null amount. The same applies to a line introduced after the
                 // original budget: its original amount is zero.
@@ -1403,8 +1418,11 @@ namespace ApexERP.Application.Services
                     originalAmount, finalAmount, actual, variance,
                     actual.HasValue && finalAmount != 0m
                         ? Math.Round(variance!.Value / finalAmount * 100m, 2) : null,
-                    dimension.OriginalLine == null ? "Line introduced in the final approved budget." :
-                    dimension.FinalLine == null ? "Line removed from the final approved budget." : final?.AmendmentReason,
+                    dimension.OriginalLine == null
+                        ? $"Line introduced in the final approved budget. {amendmentExplanation}"
+                        : dimension.FinalLine == null
+                            ? $"Line removed from the final approved budget. {amendmentExplanation}"
+                            : amendmentExplanation,
                     (dimension.FinalLine ?? dimension.OriginalLine!).Id));
             }
 
