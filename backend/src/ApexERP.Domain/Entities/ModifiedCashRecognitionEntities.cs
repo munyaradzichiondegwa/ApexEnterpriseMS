@@ -4,7 +4,7 @@ using ApexERP.Domain.Common;
 namespace ApexERP.Domain.Entities;
 
 public enum ModifiedCashPolicyStatus { Draft, PendingApproval, Approved, Rejected, Superseded }
-public enum ModifiedCashRecognitionTreatment { IncludeInBudgetActual, DiscloseSeparately }
+public enum ModifiedCashBudgetTreatment { IncludeInBudgetActual, DiscloseSeparately }
 public enum ModifiedCashLedgerEventKind { Recognition, Liquidation, Reversal }
 public enum ModifiedCashLedgerEventStatus { Draft, PendingCertification, Certified, Rejected }
 
@@ -21,7 +21,7 @@ public sealed class ModifiedCashRecognitionPolicy : TenantEntity
     public DateTime ReportingPeriodStart { get; set; }
     public DateTime ReportingPeriodEnd { get; set; }
     public int PostPeriodRecognitionWindowDays { get; set; }
-    public ModifiedCashRecognitionTreatment Treatment { get; set; }
+    public ModifiedCashBudgetTreatment Treatment { get; set; }
     public ModifiedCashPolicyStatus Status { get; set; } = ModifiedCashPolicyStatus.Draft;
     public Guid PreparedBy { get; set; }
     public Guid? ApprovalWorkflowId { get; set; }
