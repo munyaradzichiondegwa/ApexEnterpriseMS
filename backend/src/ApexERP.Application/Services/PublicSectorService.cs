@@ -263,6 +263,7 @@ namespace ApexERP.Application.Services
                 throw new InvalidOperationException("The financial-statement reconciliation period must have a valid start and end.");
             if (!string.Equals(reconciliationEntityScope, companyName, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Only the registered company financial-statement entity is currently available as a source; budget subsets are reconciled against that registered entity.");
+            reconciliationEntityScope = companyName;
             if (approvedBudget.AccountingBasis != AccountingBasis.Accrual &&
                 approvedBudget.AccountingBasis != AccountingBasis.Cash)
                 throw new InvalidOperationException("This budget accounting basis does not yet have an approved IPSAS 24 reconciliation adapter.");
@@ -346,7 +347,7 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Budget reconciliation row not found.");
             if (item.Status != PublicSectorBudgetReconciliationStatus.Draft)
                 throw new InvalidOperationException("Only a draft reconciliation row can be submitted for approval.");
-            if (item.StatementSection is "Revenue" or "Expense" &&
+            if ((item.StatementSection is "Revenue" or "Expense") &&
                 (!item.BudgetVersionId.HasValue || !item.StatementPeriodStart.HasValue ||
                  !item.StatementPeriodEnd.HasValue || string.IsNullOrWhiteSpace(item.SourceFingerprint)))
                 throw new InvalidOperationException("Revenue/expense reconciliations must be scoped and fingerprinted against an approved budget version and statement period.");
@@ -1497,6 +1498,8 @@ namespace ApexERP.Application.Services
             var comparabilityIssues = new List<string>();
             if (companyProfile != null && !string.Equals(statementEntityScope, companyProfile.Name, StringComparison.OrdinalIgnoreCase))
                 comparabilityIssues.Add("The financial-statement entity scope must match the registered company because no external entity ledger adapter is registered.");
+            else if (companyProfile != null)
+                statementEntityScope = companyProfile.Name;
             var cashActualsByBudgetLine = new Dictionary<Guid, decimal>();
             var usesZfrmClassification =
                 original.ClassificationBasis.Contains("ZFRM", StringComparison.OrdinalIgnoreCase) ||
