@@ -428,7 +428,7 @@ namespace ApexERP.Infrastructure.Data
 
             modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>().ToTable(t =>
             {
-                t.HasCheckConstraint("CK_ExpectedCashSourceRegisterAttestation_Count", "\\"ExpectedSourceCount\\" > 0");
+                t.HasCheckConstraint("CK_ExpectedCashSourceRegisterAttestation_Count", "\"ExpectedSourceCount\" > 0");
             });
             modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
                 .HasOne<PublicSectorBudgetVersion>().WithMany()
