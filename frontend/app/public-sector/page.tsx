@@ -365,8 +365,9 @@ export default function PublicSectorPage() {
                   </span>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Source coverage: {cashActualReconciliation.sourceCoverageComplete ? "complete for posted bank movements" : "incomplete"} ·
-                  Uncaptured/unreconciled posted movements: {cashActualReconciliation.uncapturedOrUnreconciledPostedBankMovements} ·
+                  Source coverage: {cashActualReconciliation.sourceCoverageComplete ? "complete for in-period bank movements" : "incomplete"} ·
+                  {cashActualReconciliation.noSourceBackedCashActuals ? "No source-backed cash actuals or zero-activity certification captured · " : ""}
+                  Uncaptured/unreconciled bank movements: {cashActualReconciliation.uncapturedOrUnreconciledPostedBankMovements} ·
                   Draft/pending actuals: {cashActualReconciliation.pendingOrDraftActuals} ·
                   Invalidated source/journal links: {cashActualReconciliation.invalidCertifiedActuals}
                 </p>
