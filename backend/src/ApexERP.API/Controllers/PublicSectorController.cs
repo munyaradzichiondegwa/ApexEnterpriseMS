@@ -637,10 +637,14 @@ namespace ApexERP.API.Controllers
             var requiredSourceSubmissionsReviewed = requiredExpectedSources.All(source =>
                 sourceSubmissions.Any(submission => submission.ExpectedCashSourceId == source.Id &&
                     submission.Status == "Reviewed"));
-            var noUnreviewedSourceSubmissions = sourceSubmissions.All(x => x.Status == "Reviewed");
+            var requiredSourceRecordReconciliationsReviewed = requiredExpectedSources.All(source =>
+                sourceSubmissions.Any(submission => submission.ExpectedCashSourceId == source.Id &&
+                    submission.Status == "Reviewed" && submission.RecordLevelStatus == "Reviewed"));
+            var noUnreviewedSourceSubmissions = sourceSubmissions.All(x =>
+                x.Status == "Reviewed" && x.RecordLevelStatus == "Reviewed");
             var registeredSourceSubmissionCoverageComplete = expectedSourceRegisterPresent &&
                 expectedSourceRegisterApproved && requiredSourceSubmissionsReviewed &&
-                noUnreviewedSourceSubmissions;
+                requiredSourceRecordReconciliationsReviewed && noUnreviewedSourceSubmissions;
 
             // Record-level matching of every external statement row to one or more actual
             // allocations (or an independently approved exclusion) is not implemented yet.
@@ -675,6 +679,9 @@ namespace ApexERP.API.Controllers
                 RequiredExpectedSources = requiredExpectedSources.Count,
                 RequiredSourceSubmissionsReviewed = requiredExpectedSources.Count(x =>
                     sourceSubmissions.Any(s => s.ExpectedCashSourceId == x.Id && s.Status == "Reviewed")),
+                RequiredSourceRecordReconciliationsReviewed = requiredExpectedSources.Count(x =>
+                    sourceSubmissions.Any(s => s.ExpectedCashSourceId == x.Id &&
+                        s.Status == "Reviewed" && s.RecordLevelStatus == "Reviewed")),
                 RegisteredSourceSubmissionCoverageComplete = registeredSourceSubmissionCoverageComplete,
                 RecordLevelSourceReconciliationComplete = recordLevelSourceReconciliationComplete,
                 ExpectedSourceRegisterCompletenessCertified = expectedSourceRegisterCompletenessCertified,
