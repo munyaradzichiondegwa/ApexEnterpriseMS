@@ -789,7 +789,7 @@ namespace ApexERP.Tests
                 seed.TaxCodes.Add(new TaxCode
                 {
                     Id = taxCodeId, CompanyId = company, Code = "VAT15", Name = "VAT 15%", Rate = 0.15m,
-                    Type = TaxType.VAT, IsActive = true, EffectiveFrom = new DateTime(2026, 1, 1)
+                    Type = TaxType.VAT, IsActive = true, EffectiveFrom = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
                 });
                 await seed.SaveChangesAsync();
             }
@@ -835,7 +835,7 @@ namespace ApexERP.Tests
             var arControl = new GlAccount { CompanyId = company, Code = "1100", Name = "AR Control", Type = GlAccountType.Asset };
             var foreignVat = new GlAccount { CompanyId = otherCompany, Code = "2100", Name = "Foreign VAT", Type = GlAccountType.Liability };
             var customer = new Customer { CompanyId = company, Code = "C001", Name = "Test customer" };
-            var tax = new TaxCode { CompanyId = company, Code = "VAT15", Name = "VAT 15%", Rate = 0.15m, Type = TaxType.VAT, IsActive = true, EffectiveFrom = new DateTime(2026, 1, 1) };
+            var tax = new TaxCode { CompanyId = company, Code = "VAT15", Name = "VAT 15%", Rate = 0.15m, Type = TaxType.VAT, IsActive = true, EffectiveFrom = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) };
             await using (var seed = db.NewContext(null))
             {
                 seed.GlAccounts.AddRange(income, arControl, foreignVat);
