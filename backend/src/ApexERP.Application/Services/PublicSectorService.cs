@@ -1388,9 +1388,9 @@ namespace ApexERP.Application.Services
                 var capturedSourceIds = cashActuals
                     .Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
-                var arReceiptIds = cashActuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ArReceipt)
+                var arReceiptIds = cashActuals.Where(x => !x.ReversalOfId.HasValue && x.SourceKind == PublicSectorBudgetActualSourceKind.ArReceipt)
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
-                var apPaymentIds = cashActuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ApPayment)
+                var apPaymentIds = cashActuals.Where(x => !x.ReversalOfId.HasValue && x.SourceKind == PublicSectorBudgetActualSourceKind.ApPayment)
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
                 // A source record may instead be explicitly excluded, with a mandatory reason,
                 // in the latest record-level reconciliation revision independently reviewed.
@@ -1452,7 +1452,16 @@ namespace ApexERP.Application.Services
                 var invalidCertifiedCashActuals = 0;
                 foreach (var certifiedActual in certifiedActuals)
                 {
-                    if (!await IsCertifiedCashActualSourceValidAsync(companyId, certifiedActual, ct))
+                    if (certifiedActual.ReversalOfId.HasValue)
+                    {
+                        var original = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
+                            x.Id == certifiedActual.ReversalOfId.Value && x.CompanyId == companyId, ct);
+                        if (original == null || original.Status != PublicSectorBudgetActualStatus.Reversed ||
+                            original.Amount != certifiedActual.Amount || original.EventKind == certifiedActual.EventKind ||
+                            string.IsNullOrWhiteSpace(certifiedActual.ReversalReason))
+                            invalidCertifiedCashActuals++;
+                    }
+                    else if (!await IsCertifiedCashActualSourceValidAsync(companyId, certifiedActual, ct))
                         invalidCertifiedCashActuals++;
                 }
 
