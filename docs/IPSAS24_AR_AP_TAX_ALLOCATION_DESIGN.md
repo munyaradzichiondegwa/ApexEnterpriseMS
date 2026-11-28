@@ -1,66 +1,49 @@
-# IPSAS 24 AR/AP tax allocation
+# IPSAS 24 AR/AP tax allocation controls
 
-**Status:** implementation present on `feature/apexerp-consolidated-enterprise`; latest integration verification is pending.  
-**Scope:** cash-basis IPSAS 24 actuals sourced from posted AR receipts, AP payments and separate WHT remittances.
+**Status:** implementation added; final CI verification is pending for the current branch head.  
+**Scope:** tax-bearing cash actuals from posted AR receipts, AP supplier payments and separate WHT remittances.
 
-## 1. Effective-dated tax-account mappings
+## Accounting rules enforced
 
-`TaxAccountMapping` is company-scoped and versioned. Supported purposes are:
+- AR VAT is part of the customer receipt but is not automatically treated as revenue. Its budget treatment is controlled by an approved policy for the specific VAT tax code.
+- AP supplier cash is the net amount paid to the supplier. WHT withheld is a separate liability and is never allocated as supplier cash.
+- AP VAT input may be recoverable or irrecoverable. The treatment is configured by tax code; the software does not infer recoverability from the tax type or GL account.
+- WHT becomes a cash payment only when remitted to the tax authority from a reconciled bank transaction. The remittance is allocated to the original posted WHT components and the WHT payable journal line.
+- No tax is prorated across budget dimensions. Partial multi-line settlements require explicit component allocations.
 
-- `AR-VAT-OUTPUT`: VAT output liability account, mapped per VAT tax code.
-- `AP-VAT-INPUT`: VAT input asset account, mapped per VAT tax code.
-- `AP-WHT-PAYABLE`: WHT payable liability account, currently code-less because supplier WHT is calculated from the supplier's configured WHT rate.
+## Implemented data model
 
-The API provides draft creation, submission and independent finalisation after the linked approval workflow is approved. Posting checks the mapping's company, purpose, tax type/code, approval status and invoice-date effectiveness, and checks that the GL account is active, postable and of the expected account type. The invoice stores the exact control-account IDs used. Approved mapping versions cannot be edited or deleted; corrections require a new version.
+1. **TaxAccountMapping** — company-scoped, effective-dated, versioned tax control-account mapping. Supported purposes are AR-VAT-OUTPUT, AP-VAT-INPUT and AP-WHT-PAYABLE. The GL account must be company-owned, active, postable and of the required type. Mapping approval uses an independent workflow. An approved version is immutable; a later effective-dated version supersedes it for subsequent invoice dates.
+2. **InvoiceTaxComponent** — immutable invoice tax snapshot containing invoice kind/ID, originating invoice line where applicable, tax code/type, taxable base, configured rate, amount, GL account, mapping ID/version, journal entry ID and exact journal-line ID. Tax-code identity is also carried on the posted JournalLine.
+3. **SettlementComponentAllocation** — immutable allocation of a receipt/payment to an invoice line or tax component. AR and AP rows identify supplier/customer settlement cash. TX rows identify WHT components remitted through a reconciled bank transaction. Database constraints enforce valid component shapes, positive amounts and allowed settlement kinds.
+4. **PublicSectorTaxBudgetPolicy** — company-scoped, effective-dated and independently approved policy, keyed by VAT tax code or the code-less WHT component. Treatment is IncludeInBudgetActual, ExcludeFromBudgetActual or SeparateClassification. Separate classification requires an active budget GL account and Fund Centre, with an optional active Cost Centre. Approved policy versions are immutable; the latest effective approved version is applied.
 
-## 2. Immutable tax-component provenance
+## Posting and settlement controls
 
-Each posted tax component is stored as an `InvoiceTaxComponent` with invoice kind/ID, originating invoice-line ID where applicable, tax code/type, taxable base, applied rate, amount, GL account, mapping ID/version, journal ID and exact journal-line ID. The posting path verifies that the selected journal line and amount match the tax component. AR and AP VAT tax codes must be active, company-owned, effective on the invoice date and agree with the line VAT calculation. AP WHT is a separate payable component and is not treated as supplier cash.
+- AR posting requires active company-owned VAT tax codes effective on the invoice date, validates line VAT against the configured rate, reconciles invoice line totals to the header, requires an approved AR-VAT-OUTPUT mapping and persists line-level VAT components against the exact posted tax journal line.
+- AP posting applies the equivalent controls for AP-VAT-INPUT. If WHT applies, posting requires an approved AP-WHT-PAYABLE mapping and persists a separate WHT component against its exact posted journal line.
+- The AR receipt and AP payment operations accept optional componentAllocations. Tax-bearing settlements require explicit allocations to invoice lines and VAT components. Partial multi-line settlements also require explicit allocation evidence. Tax-free full settlements may be deterministically allocated by invoice line; partial multi-line settlements are not guessed.
+- AR/AP settlement and GL posting execute within one transaction. Component allocations cannot exceed the original invoice-line or tax-component balance, cannot be duplicated, and must sum exactly to the parent invoice settlement allocation.
+- WHT remittance uses POST bank-transactions/{id}/tax-remittance-allocations. It requires a reconciled outgoing bank transaction, a posted journal, exact WHT component and mapping provenance, approved WHT budget policy, and remittance amounts that reconcile to the bank debit and the WHT payable debit journal lines. WHT cannot be marked as paid through the AP supplier payment.
+- IPSAS 24 actual capture resolves the effective approved policy for each settled tax component. Include treatment follows the originating invoice-line dimensions (or the AP invoice Fund Centre for WHT); exclude treatment does not create a budget actual; separate treatment uses the approved budget GL/Fund Centre/Cost Centre. WHT remittance actuals are resolved against the WHT policy and the separate bank-remittance evidence.
+- Certification re-reads the posted invoice, tax journal line, exact mapping version, settlement allocation, effective policy and bank source. Changed or missing evidence fails closed. Tax component snapshots, approved mapping/policy versions and settlement allocations are immutable; correction requires controlled reversal/replacement rather than editing history.
 
-Invoice tax-component rows and posted journal lines are immutable. Historical invoices are not backfilled with guessed mapping or journal provenance.
+## API policy workflow
 
-## 3. Explicit settlement-component allocation
+Tax mappings and budget policies are created as drafts, submitted through the configured approval chain, and finalised only after the linked workflow is approved by someone other than the preparer. VAT policies must identify the VAT tax code so recoverable and irrecoverable treatments can differ. WHT policy is currently code-less because the AP supplier model does not yet persist a WHT tax-code reference. Unsupported tax types are rejected.
 
-`SettlementComponentAllocation` records each receipt/payment allocation against either an invoice line or a tax component. The API accepts explicit component allocations for each invoice settlement. Allocations must be positive, unique, reference a component belonging to the same invoice/company and sum exactly to the parent invoice settlement amount. Cumulative allocations cannot exceed the source invoice-line or tax-component amount.
+## Known boundaries
 
-- Partial receipts/payments and one receipt/payment allocated across multiple invoices are supported when the component evidence is explicit.
-- A partial settlement across multiple GL/cost-centre dimensions is not prorated. The caller must provide the split.
-- VAT-bearing AR receipts and VAT/WHT-bearing AP payments cannot fall back to automatic tax-free allocation.
-- WHT is not part of supplier cash. It is excluded from AP supplier-payment component allocations and must be separately evidenced by an outgoing, reconciled bank transaction against the WHT payable journal leg. The WHT remittance endpoint binds each component to its originating AP invoice and validates the bank debit, posted journal and remaining WHT balance.
-- Settlement component rows are immutable; corrections use compensating source events and the existing reversal/replacement controls.
+- The implementation currently supports VAT and WHT. DST and other tax types are not enabled for IPSAS 24 actuals.
+- An AR invoice and an AP invoice currently use one VAT control-account argument per posting. Multiple tax codes may be represented, but their approved mappings must resolve to that same control account for the invoice.
+- WHT remittance allocation requires the bank transaction to be reconciled and its posted journal to contain one exact WHT payable debit line per mapped payable account. Mixed-purpose bank payments containing other debit components are not silently treated as WHT-only remittances.
+- No legal/tax policy is preconfigured. The reporting entity must approve the effective-dated treatment for each VAT code and WHT. Recoverability, budget classification and Fund Centre policy are entity decisions.
+- Modified-cash recognition, Treasury 2026 official classification dictionaries/templates, cashbook ingestion and external tax-authority integrations remain separate acceptance items.
 
-## 4. Independently approved IPSAS 24 tax-budget policy
+## Acceptance evidence
 
-`PublicSectorTaxBudgetPolicy` is company-scoped, versioned and effective-dated. The policy identifies the tax type and, for VAT, the tax code. It specifies one of:
-
-- `IncludeInBudgetActual`: classify the cash-settled component with its originating invoice line's approved budget dimensions.
-- `ExcludeFromBudgetActual`: retain the source evidence but exclude that tax component from the budget actual.
-- `SeparateClassification`: use the explicitly configured budget GL account and Fund Centre, with an optional cost centre.
-
-Draft policies are submitted to the approval workflow and may only be finalised by a user other than the preparer after that workflow is approved. Separate classifications are validated against company-owned GL, Fund Centre and cost-centre records. Approved policy versions are immutable. No treatment is inferred from VAT/WHT type: the reporting entity must configure and approve its accounting/budget treatment.
-
-The AR/AP source validator revalidates the exact invoice mapping version, effective policy, source settlement allocations, invoice lines, tax journal lines, bank journal and source-currency amounts before certification. WHT remittance actuals use their own bank evidence and the approved WHT policy.
-
-## 5. Reconciliation and remaining boundaries
-
-For AR, invoice gross reconciles to receivables, revenue and VAT; receipt allocations reconcile to the cash received. The approved tax policy determines whether VAT is included with revenue, excluded, or separately classified.
-
-For AP, expense/asset lines, VAT input, WHT payable and AP control reconcile to the posted invoice journal. Supplier cash payment is distinct from WHT withheld; the WHT liability is settled using separate tax-authority bank/payment evidence. The approved tax policy determines the budget treatment of VAT and WHT remittances.
-
-All settlement component amounts remain in source currency; cash actual conversion retains the existing approved FX-rate provenance. Tax component rate and amount are retained as posted; no current tax rate is retroactively applied to historic invoices.
-
-Outstanding acceptance is not a missing model design: it is successful full CI for the latest commits, comprehensive PostgreSQL coverage of tax-bearing source certification and reversal/replacement, and entity-specific approved policy configuration. This implementation does not determine whether VAT is recoverable/irrecoverable or whether a tax component belongs in a particular statutory budget classification.
-
-## Acceptance tests
-
-- Company isolation and active/effective-dated tax mapping; wrong GL type, missing mapping and foreign-company account rejection.
-- AR and AP posted tax components preserve exact tax code, source line, applied rate, mapping version and journal-line identity.
-- Partial and full tax-bearing AR receipts; AP payments with VAT and WHT; multiple invoice lines/dimensions; multi-invoice receipts/payments; no implicit pro-rata allocation.
-- WHT remittance ties to its originating AP invoice, WHT payable account, bank debit and posted remittance journal; supplier cash allocation excludes WHT.
-- Unapproved/expired policy, missing separate classification, changed source population, over-allocation, duplicate allocation, journal mismatch and cross-company references fail closed.
-- Approved mappings/policies, invoice tax components, journal lines and settlement allocations cannot be silently edited or deleted.
-- Reversal and replacement preserve the exact original source/tax provenance and are independently certified.
+The PostgreSQL integration suite verifies AR/AP tax posting and exact tax journal-line provenance, the IPSAS 24 cash actual settlement fixture now uses explicit invoice-line allocation evidence, and the CI migration gate checks the new schema on a clean database. The latest complete run before the newest tax-policy/remittance hardening passed backend, frontend and migration checks; the current branch head is still undergoing its own CI verification.
 
 ## Release rule
 
-The software controls are implemented on the feature branch, but statutory use remains conditional on successful CI, the reporting entity's approved VAT/WHT budget-treatment policies and approved classification dimensions. No tax treatment or Treasury classification is supplied by default. PR #17 remains draft and unmerged pending the complete IPSAS 24 acceptance gates.
+Tax-bearing actuals are not comparable merely because the invoice is posted. Each source must have a valid approved mapping, a valid approved budget-treatment policy, explicit settlement evidence, and independent source-completeness certification. A passing CI run does not approve the reporting entity's accounting policy or replace Treasury/PAAB review.
