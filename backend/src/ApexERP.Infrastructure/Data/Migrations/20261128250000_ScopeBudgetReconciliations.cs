@@ -38,7 +38,7 @@ public sealed class ScopeBudgetReconciliations : Migration
         migrationBuilder.CreateIndex(
             name: "UX_PublicSectorBudgetRecon_ScopeDescription",
             table: "PublicSectorBudgetReconciliations",
-            columns: new[] { "CompanyId", "BudgetVersionId", "StatementPeriodStart", "StatementPeriodEnd", "Type", "Description" },
+            columns: new[] { "CompanyId", "BudgetVersionId", "StatementPeriodStart", "StatementPeriodEnd", "StatementEntityScope", "Type", "StatementSection", "Description" },
             unique: true);
         migrationBuilder.AddCheckConstraint(
             name: "CK_PublicSectorBudgetRecon_StatementPeriod",
