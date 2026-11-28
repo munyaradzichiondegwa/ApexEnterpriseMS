@@ -2869,7 +2869,8 @@ namespace ApexERP.Application.Services
                         string.IsNullOrWhiteSpace(actual.ReversalReason))
                         throw new InvalidOperationException("The reversal no longer matches an independently certifiable original actual.");
                     if (await _db.PublicSectorBudgetExecutionActuals.AnyAsync(x =>
-                        x.CompanyId == companyId && x.ReversalOfId == reversalOriginal.Id, token))
+                        x.CompanyId == companyId && x.ReversalOfId == reversalOriginal.Id &&
+                        x.Id != actual.Id, token))
                         throw new InvalidOperationException("The original actual already has a reversal.");
                 }
                 if (!actual.ReversalOfId.HasValue &&
