@@ -32,10 +32,13 @@ namespace ApexERP.Application.Services
             await _db.SaveChangesAsync(ct);
         }
 
-        public Task<List<CompanySetting>> ListAsync(Guid companyId, CancellationToken ct = default) =>
-            _db.CompanySettings.Where(s => s.CompanyId == companyId &&
-                !s.Key.StartsWith("ipsas24.statement.issue:"))
+        public async Task<List<CompanySetting>> ListAsync(Guid companyId, CancellationToken ct = default)
+        {
+            var rows = await _db.CompanySettings.Where(s => s.CompanyId == companyId)
                 .OrderBy(s => s.Key).ToListAsync(ct);
+            return rows.Where(s => !s.Key.StartsWith("ipsas24.statement.issue:",
+                StringComparison.OrdinalIgnoreCase)).ToList();
+        }
 
         // Well-known keys
         public const string AllowSelfApproval = "controls.allowSelfApproval";
