@@ -2412,6 +2412,7 @@ namespace ApexERP.Tests
             await using var db = await TestDb.CreateAsync();
             var companyId = Guid.NewGuid();
             var periodId = Guid.NewGuid();
+            var openingPeriodId = Guid.NewGuid();
             var arControlId = Guid.NewGuid();
             var apControlId = Guid.NewGuid();
             var revenueId = Guid.NewGuid();
@@ -2435,13 +2436,21 @@ namespace ApexERP.Tests
                     Id = companyId, Name = "IPSAS AR AP Control MDA",
                     BaseCurrency = "USD", FunctionalCurrency = "USD"
                 });
-                seed.AccountingPeriods.Add(new AccountingPeriod
-                {
-                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 6,
-                    StartDate = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
-                    EndDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
-                    Status = PeriodStatus.Open
-                });
+                seed.AccountingPeriods.AddRange(
+                    new AccountingPeriod
+                    {
+                        Id = openingPeriodId, CompanyId = companyId, Year = 2026, PeriodNo = 1,
+                        StartDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                        EndDate = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc),
+                        Status = PeriodStatus.Open
+                    },
+                    new AccountingPeriod
+                    {
+                        Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 6,
+                        StartDate = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+                        EndDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
+                        Status = PeriodStatus.Open
+                    });
                 seed.GlAccounts.AddRange(
                     new GlAccount
                     {
@@ -2482,7 +2491,7 @@ namespace ApexERP.Tests
                     {
                         Id = arOpeningJournalId, CompanyId = companyId, EntryNo = "JE-AR-OPEN",
                         Description = "Opening AR invoice", EntryDate = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc),
-                        PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                        PeriodId = openingPeriodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
                     },
                     new JournalEntry
                     {
@@ -2494,7 +2503,7 @@ namespace ApexERP.Tests
                     {
                         Id = apOpeningJournalId, CompanyId = companyId, EntryNo = "JE-AP-OPEN",
                         Description = "Opening AP invoice", EntryDate = new DateTime(2026, 1, 12, 0, 0, 0, DateTimeKind.Utc),
-                        PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                        PeriodId = openingPeriodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
                     },
                     new JournalEntry
                     {
