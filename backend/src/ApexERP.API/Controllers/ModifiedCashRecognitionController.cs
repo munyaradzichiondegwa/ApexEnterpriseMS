@@ -16,7 +16,7 @@ public sealed record CreateModifiedCashPolicyRequest(
     DateTime ReportingPeriodStart, DateTime ReportingPeriodEnd, int PostPeriodRecognitionWindowDays,
     ModifiedCashBudgetTreatment Treatment, IReadOnlyCollection<ModifiedCashMappingInput> Mappings);
 public sealed record CreateModifiedCashRecognitionRequest(Guid CommitmentId, Guid GoodsReceiptLineId, string EvidenceReference);
-public sealed record CreateModifiedCashReversalRequest(string EvidenceReference);
+public sealed record CreateModifiedCashReversalRequest(string EvidenceReference);\npublic sealed record CreateModifiedCashLiquidationRequest(Guid ApPaymentAllocationId, string EvidenceReference);
 
 [Route("api/v1/public-sector/modified-cash")]
 public sealed class ModifiedCashRecognitionController : ApiControllerBase
@@ -260,7 +260,7 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
 
     [HttpPost("ledger-events/{id:guid}/liquidations")]
     [HasPermission(Permissions.PublicSectorBudgetOverride)]
-    public async Task<IActionResult> CreateLiquidation(Guid id, CreateModifiedCashReversalRequest req, CancellationToken ct)
+    public async Task<IActionResult> CreateLiquidation(Guid id, CreateModifiedCashLiquidationRequest req, CancellationToken ct)
     {
         try
         {
@@ -284,19 +284,10 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                     x.EventKind == ModifiedCashLedgerEventKind.Reversal &&
                     x.Status != ModifiedCashLedgerEventStatus.Rejected, token))
                     throw new InvalidOperationException("A reversed recognition event cannot be liquidated.");
-                var apAllocations = await _db.ApPaymentAllocations.Where(x =>
-                    _db.ApInvoices.Any(i => i.Id == x.ApInvoiceId && i.CompanyId == CompanyId &&
-                        i.CommitmentId == original.CommitmentId))
-                    .Select(x => x.Id).ToListAsync(token);
-                ModifiedCashApSettlementEvidence? settlement = null;
-                foreach (var allocationId in apAllocations)
-                {
-                    settlement = await ModifiedCashApSettlementEvidenceValidator.ValidateAsync(
-                        _db, CompanyId, allocationId, original.CommitmentId, token);
-                    if (settlement != null) break;
-                }
+                var settlement = await ModifiedCashApSettlementEvidenceValidator.ValidateAsync(
+                    _db, CompanyId, req.ApPaymentAllocationId, original.CommitmentId, token);
                 if (settlement == null)
-                    throw new InvalidOperationException("A reconciled bank-funded AP payment allocation linked to the original commitment is required to liquidate the recognition.");
+                    throw new InvalidOperationException("The selected AP payment allocation must be a reconciled bank-funded settlement linked to the original commitment.");
                 if (settlement.PaymentDate < policy.ReportingPeriodStart ||
                     settlement.PaymentDate >= policy.ReportingPeriodEnd ||
                     settlement.PaymentDate < policy.EffectiveFrom ||
