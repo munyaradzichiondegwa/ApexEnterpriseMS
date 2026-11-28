@@ -753,6 +753,8 @@ namespace ApexERP.Infrastructure.Data
                 .HasIndex(x => new { x.CompanyId, x.ExpectedCashSourceId, x.SubmissionRevision }).IsUnique()
                 .HasDatabaseName("UX_PublicSectorCashSourceSubmission_Revision");
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Revision", "\"SubmissionRevision\" >= 1");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
                 .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Period", "\"PeriodEnd\" > \"PeriodStart\"");
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
                 .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_RecordCount", "\"RecordCount\" >= 0");
