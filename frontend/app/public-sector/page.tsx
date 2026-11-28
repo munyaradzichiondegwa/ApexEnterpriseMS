@@ -35,6 +35,7 @@ export default function PublicSectorPage() {
   const [budgetDraftId, setBudgetDraftId] = useState<string | null>(null);
   const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "" });
   const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", amount: 0 }]);
+  const [varianceDraft, setVarianceDraft] = useState({ budgetVersionLineId: "", explanation: "", evidenceReference: "" });
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [newFund, setNewFund] = useState({ code: "", name: "", level: "Vote", financialYear: year, appropriationAmount: 0, carriedForward: 0 });
@@ -86,6 +87,8 @@ export default function PublicSectorPage() {
       { header: "Variance", value: (row: any) => row.variance },
       { header: "Variance Percent", value: (row: any) => row.variancePercent },
       { header: "Explanation", value: (row: any) => row.originalToFinalExplanation },
+      { header: "Final vs Actual Variance", value: (row: any) => row.variance },
+      { header: "Variance Explanation", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.explanation ?? "" },
     ]);
   }
 
@@ -227,6 +230,34 @@ export default function PublicSectorPage() {
     } catch (err) { setError(extractErrorMessage(err)); }
   }
 
+
+
+  async function createVarianceExplanation(e: React.FormEvent) {
+    e.preventDefault();
+    if (!budgetComparison?.finalBudgetVersionId || !varianceDraft.budgetVersionLineId) return;
+    try {
+      await api.post("/public-sector/budget-variance-explanations", {
+        budgetVersionId: budgetComparison.finalBudgetVersionId,
+        budgetVersionLineId: varianceDraft.budgetVersionLineId,
+        explanation: varianceDraft.explanation,
+        evidenceReference: varianceDraft.evidenceReference,
+      });
+      setVarianceDraft({ budgetVersionLineId: "", explanation: "", evidenceReference: "" });
+      setMsg("Variance explanation created. Submit it for independent review.");
+      await loadBudgetComparison();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function varianceExplanationAction(id: string, action: "submit" | "review") {
+    try {
+      if (action === "submit") await api.post(`/public-sector/budget-variance-explanations/${id}/submit`);
+      else await api.post(`/public-sector/budget-variance-explanations/${id}/review`, {
+        accepted: true, reviewNote: "Variance explanation and supporting evidence independently reviewed.",
+      });
+      setMsg(action === "submit" ? "Variance explanation submitted for review." : "Variance explanation approved.");
+      await loadBudgetComparison();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
 
   async function createExpectedCashSource(e: React.FormEvent) {
     e.preventDefault();
@@ -752,7 +783,7 @@ export default function PublicSectorPage() {
               )}
               <div className="overflow-x-auto">
                 <table className="table-base min-w-[900px]">
-                  <thead><tr><th>Classification</th><th>Fund centre</th><th>Account</th><th className="text-right">Original</th><th className="text-right">Final</th><th className="text-right">Actual (comparable)</th><th className="text-right">Variance</th><th>Explanation</th></tr></thead>
+                  <thead><tr><th>Classification</th><th>Fund centre</th><th>Account</th><th className="text-right">Original</th><th className="text-right">Final</th><th className="text-right">Actual (comparable)</th><th className="text-right">Variance</th><th>Original-to-final explanation</th><th>Final-to-actual explanation</th></tr></thead>
                   <tbody>
                     {budgetComparison.lines.map((line: any, index: number) => (
                       <tr key={`${line.accountCode}-${line.fundCentreCode}-${index}`}>
@@ -764,11 +795,45 @@ export default function PublicSectorPage() {
                         <td className="text-right">{line.actualOnComparableBasis == null ? "—" : fmt(line.actualOnComparableBasis)}</td>
                         <td className="text-right">{line.variance == null ? "—" : fmt(line.variance)}</td>
                         <td>{line.originalToFinalExplanation ?? "—"}</td>
+                        <td>{budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId)?.explanation ?? (line.variance ? "Explanation required" : "—")}</td>
                       </tr>
                     ))}
-                    {budgetComparison.lines.length === 0 && <tr><td colSpan={8} className="text-center text-slate-500">No budget lines are available.</td></tr>}
+                    {budgetComparison.lines.length === 0 && <tr><td colSpan={9} className="text-center text-slate-500">No budget lines are available.</td></tr>}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className="font-semibold">Final budget-to-actual variance explanations</h3>
+                  <span className={budgetComparison.varianceExplanationsComplete ? "text-sm text-green-700" : "text-sm text-amber-700"}>
+                    {budgetComparison.varianceExplanationsComplete ? "All non-zero variances explained and approved" : "Independent explanations outstanding"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">Until an approved entity-specific materiality threshold is configured, ApexERP applies a conservative rule: every non-zero comparable final-budget-to-actual variance requires an evidence-backed explanation and independent approval.</p>
+                <form onSubmit={createVarianceExplanation} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <select className="input" required value={varianceDraft.budgetVersionLineId} onChange={(e) => setVarianceDraft({ ...varianceDraft, budgetVersionLineId: e.target.value })}>
+                    <option value="">Select unexplained variance</option>
+                    {budgetComparison.lines.filter((line: any) => line.variance != null && Number(line.variance) !== 0 &&
+                      !budgetComparison.varianceExplanations?.some((x: any) => x.budgetVersionLineId === line.budgetVersionLineId)).map((line: any) => (
+                      <option key={line.budgetVersionLineId} value={line.budgetVersionLineId}>{line.accountCode} · {line.fundCentreCode} · {fmt(line.variance)}</option>
+                    ))}
+                  </select>
+                  <input className="input" required placeholder="Explanation of variance" value={varianceDraft.explanation} onChange={(e) => setVarianceDraft({ ...varianceDraft, explanation: e.target.value })} />
+                  <input className="input" required placeholder="Supporting evidence reference" value={varianceDraft.evidenceReference} onChange={(e) => setVarianceDraft({ ...varianceDraft, evidenceReference: e.target.value })} />
+                  <button className="btn-secondary md:col-span-3" disabled={!budgetComparison.comparableActualsAvailable || !varianceDraft.budgetVersionLineId}>Create variance explanation</button>
+                </form>
+                <div className="overflow-x-auto">
+                  <table className="table-base"><thead><tr><th>Variance</th><th>Explanation</th><th>Evidence</th><th>Status</th><th>Action</th></tr></thead>
+                    <tbody>{budgetComparison.varianceExplanations?.map((item: any) => (
+                      <tr key={item.id}>
+                        <td>{fmt(item.varianceAmount)}</td><td>{item.explanation}</td><td>{item.evidenceReference}</td><td>{item.status}</td>
+                        <td>{item.status === "Draft" ? <button type="button" className="btn-secondary" onClick={() => varianceExplanationAction(item.id, "submit")}>Submit</button> : item.status === "PendingReview" ? <button type="button" className="btn-secondary" onClick={() => varianceExplanationAction(item.id, "review")}>Approve</button> : "—"}</td>
+                      </tr>
+                    ))}
+                    {!budgetComparison.varianceExplanations?.length && <tr><td colSpan={5} className="text-center text-slate-500">No variance explanations recorded.</td></tr>}</tbody>
+                  </table>
+                </div>
               </div>
               {budgetComparison.reconciliations?.length > 0 && (
                 <div>
