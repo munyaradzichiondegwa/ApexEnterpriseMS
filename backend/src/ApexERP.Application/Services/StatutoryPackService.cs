@@ -134,6 +134,7 @@ public sealed class StatutoryPackService
                 throw new InvalidOperationException("A published pack already takes effect on or after this date. New versions must advance the jurisdiction's effective timeline.");
 
             ValidateJurisdictionRules(document);
+            EnsureActivationAdapterAvailable(document.JurisdictionCode);
             await ApplyApprovedRulesAsync(companyId, document, token);
             var published = document with { Status = "Published", PublishedAt = DateTime.UtcNow };
             setting.Value = JsonSerializer.Serialize(published);
@@ -292,6 +293,14 @@ public sealed class StatutoryPackService
             await _db.SaveChangesAsync(token);
             return changed;
         }, ct);
+    }
+
+    private static void EnsureActivationAdapterAvailable(string jurisdictionCode)
+    {
+        // Applying a pack mutates live payroll and tax configuration. Never let a structurally
+        // valid pack for an unsupported country fall through to the Zimbabwe-specific mapper.
+        if (!string.Equals(jurisdictionCode, "ZW", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"No validated statutory activation adapter is available for jurisdiction {jurisdictionCode}. The pack may be reviewed and approved, but it cannot be published or applied until that jurisdiction's rules are implemented and tested.");
     }
 
     private static void ValidateJurisdictionRules(StatutoryPackDocument document)
