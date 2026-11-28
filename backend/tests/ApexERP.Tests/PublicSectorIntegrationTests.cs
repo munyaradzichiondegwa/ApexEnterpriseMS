@@ -699,7 +699,7 @@ namespace ApexERP.Tests
             var reconciliation = await service.CreateBudgetReconciliationAsync(companyId, 2026,
                 PublicSectorBudgetReconciliationType.Basis, "Modified cash commitments not yet paid",
                 "Operating", 5m, -2m, 0m, "Reconciliation workpaper WP-IPSAS24-01",
-                preparerId, default, 10m, -15m);
+                preparerId, default, 10m, -15m, budgetVersionId: revised.Id);
             var workflowId = Guid.NewGuid();
             ctx.WorkflowRequests.Add(new WorkflowRequest
             {
