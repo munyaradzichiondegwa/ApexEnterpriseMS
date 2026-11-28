@@ -13,7 +13,7 @@ public sealed class AddIpsas24ReconciliationActualIndex : Migration
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.CreateIndex(
-            name: "IX_CashSourceReconciliationLines_ActualId",
+            name: "IX_PublicSectorCashSourceReconciliationLines_BudgetExecutionActualId",
             table: "PublicSectorCashSourceReconciliationLines",
             column: "BudgetExecutionActualId");
     }
@@ -21,7 +21,7 @@ public sealed class AddIpsas24ReconciliationActualIndex : Migration
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.DropIndex(
-            name: "IX_CashSourceReconciliationLines_ActualId",
+            name: "IX_PublicSectorCashSourceReconciliationLines_BudgetExecutionActualId",
             table: "PublicSectorCashSourceReconciliationLines");
     }
 }
