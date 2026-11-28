@@ -1084,7 +1084,7 @@ namespace ApexERP.Application.Services
         }
 
         public async Task<PublicSectorBudgetExecutionActual> SubmitBudgetExecutionActualAsync(
-            Guid companyId, Guid actualId, CancellationToken ct = default)
+            Guid companyId, Guid actualId, Guid actorId, CancellationToken ct = default)
         {
             var actual = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
                 x.Id == actualId && x.CompanyId == companyId, ct)
@@ -1092,6 +1092,10 @@ namespace ApexERP.Application.Services
             if (actual.Status != PublicSectorBudgetActualStatus.Draft)
                 throw new InvalidOperationException("Only a draft budget actual can be submitted for certification.");
             actual.Status = PublicSectorBudgetActualStatus.PendingCertification;
+            _audit.Record(companyId, actorId, "PublicSectorBudgetExecutionActual.Submitted", "PublicSector",
+                nameof(PublicSectorBudgetExecutionActual), actual.Id,
+                new { Status = PublicSectorBudgetActualStatus.Draft },
+                new { Status = actual.Status, actual.SourceKind, actual.SourceRecordId });
             await _db.SaveChangesAsync(ct);
             return actual;
         }
