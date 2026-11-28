@@ -730,6 +730,23 @@ namespace ApexERP.Tests
             Assert.Equal(PublicSectorBudgetReconciliationStatus.Approved, approvedRecon.Status);
             Assert.Equal(5m, approvedRecon.OperatingAmount);
             Assert.Equal(-2m, approvedRecon.InvestingAmount);
+
+            Assert.False(report.VarianceExplanationsComplete);
+            var varianceExplanation = await service.CreateBudgetVarianceExplanationAsync(
+                companyId, revised.Id, expense.BudgetVersionLineId,
+                "Actual expenditure was below the final appropriation because two planned service contracts commenced in the next quarter.",
+                "WP-IPSAS24-VARIANCE-5100", preparerId);
+            await service.SubmitBudgetVarianceExplanationAsync(companyId, varianceExplanation.Id, preparerId);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ReviewBudgetVarianceExplanationAsync(companyId, varianceExplanation.Id,
+                    preparerId, true, null));
+            var approvedVariance = await service.ReviewBudgetVarianceExplanationAsync(
+                companyId, varianceExplanation.Id, approverId, true,
+                "Explanation and supporting workpaper reviewed.");
+            Assert.Equal("Approved", approvedVariance.Status);
+            var explainedReport = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.True(explainedReport.VarianceExplanationsComplete);
+            Assert.Contains(explainedReport.VarianceExplanations, x => x.Id == varianceExplanation.Id);
         }
 
         [PostgresFact]
