@@ -47,6 +47,7 @@ public static class ZimbabweDigitalServicesTaxEvaluator
             {
                 ZimbabweDigitalServiceKind.PhysicalGoods => "Physical goods are outside DSWT; apply import VAT and customs rules instead.",
                 ZimbabweDigitalServiceKind.NonElectronicImportedService => "Non-electronic imported services fall under the separate imported-services VAT self-accounting rules.",
+                ZimbabweDigitalServiceKind.OtherNonResidentPayment => "Royalties, dividends, management fees and professional fees may trigger separate non-resident income-tax withholding; assess those rules independently of DSWT.",
                 ZimbabweDigitalServiceKind.LocalService => "Payments to local suppliers do not attract DSWT.",
                 _ => "The supply is outside the electronic imported-services scope."
             });
