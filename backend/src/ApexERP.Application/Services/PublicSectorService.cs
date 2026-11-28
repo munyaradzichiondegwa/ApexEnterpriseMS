@@ -3421,13 +3421,23 @@ namespace ApexERP.Application.Services
                 var bank = await _db.BankAccounts.AnyAsync(x =>
                     x.Id == source.BankAccountId && x.CompanyId == companyId &&
                     x.Currency == actual.Currency, ct);
-                if (!bank || (isReceipt
-                    ? source.Credit != actual.SourceAmount || source.Debit != 0m
-                    : source.Debit != actual.SourceAmount || source.Credit != 0m)) return false;
+                if (!bank) return false;
                 var posted = await _db.JournalEntries.AnyAsync(x =>
                     x.Id == source.JournalEntryId.Value && x.CompanyId == companyId &&
                     x.Status == JournalStatus.Posted, ct);
                 if (!posted) return false;
+                var whtAmount = await CalculateWhtRemittanceBudgetAmountAsync(companyId, source,
+                    actual.GlAccountId, actual.FundCentreId, actual.CostCentreId, ct);
+                var bankReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
+                if (whtAmount.HasValue)
+                    return !isReceipt && source.Debit > 0m && source.Credit == 0m &&
+                        whtAmount.Value == actual.SourceAmount &&
+                        source.TransactionDate.Date == actual.SourceDate.Date &&
+                        actual.EffectiveDate.Date == source.TransactionDate.Date &&
+                        string.Equals(actual.SourceReference, bankReference, StringComparison.Ordinal);
+                if (isReceipt
+                    ? source.Credit != actual.SourceAmount || source.Debit != 0m
+                    : source.Debit != actual.SourceAmount || source.Credit != 0m) return false;
                 var mappedLines = _db.JournalLines.Where(x =>
                     x.JournalEntryId == source.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId &&
                     x.FundCentreId == actual.FundCentreId && x.CostCentreId == actual.CostCentreId);
@@ -3435,7 +3445,6 @@ namespace ApexERP.Application.Services
                     isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
                 var mappedBase = await mappedLines.SumAsync(x =>
                     isReceipt ? x.BaseCredit - x.BaseDebit : x.BaseDebit - x.BaseCredit, ct);
-                var bankReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
                 return mapped == actual.SourceAmount && mappedBase == actual.Amount &&
                     source.TransactionDate.Date == actual.SourceDate.Date &&
                     actual.EffectiveDate.Date == source.TransactionDate.Date &&
