@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
 using ApexERP.Application.Security;
+using ApexERP.Application.Services;
 using ApexERP.API.Authorization;
 using ApexERP.API.Services;
 using ApexERP.Domain.Entities;
@@ -18,7 +19,9 @@ public sealed class OrganisationManagementController : ApiControllerBase
 {
     private readonly ApexErpDbContext _db;
     private readonly IEmailDeliveryService _email;
-    public OrganisationManagementController(ApexErpDbContext db, IEmailDeliveryService email) { _db = db; _email = email; }
+    private readonly AuditService _audit;
+    public OrganisationManagementController(ApexErpDbContext db, IEmailDeliveryService email, AuditService audit)
+    { _db = db; _email = email; _audit = audit; }
 
     private Guid TenantId => Guid.TryParse(User.FindFirst("tenant_id")?.Value, out var id)
         ? id : throw new UnauthorizedAccessException("Missing tenant context.");
@@ -176,8 +179,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
     {
         if (DenyManagement() is { } denied) return denied;
         var tin = request.ZimbabweTaxpayerTin?.Trim();
-        if (string.IsNullOrWhiteSpace(tin) || tin.Length > 40 ||
-            tin.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '/')))
+        if (!ZimbabweTaxpayerTinValidator.IsValid(tin))
             return BadRequest(new { error = "A valid ZIMRA TIN (maximum 40 letters, digits, hyphens or slashes) is required." });
 
         using var scope = _db.SystemAccessScope("tenant administration: update Zimbabwe tax profile");
@@ -185,7 +187,17 @@ public sealed class OrganisationManagementController : ApiControllerBase
             .SingleOrDefaultAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct);
         if (company is null) return NotFound();
 
-        company.ZimbabweTaxpayerTin = tin;
+        var previousTin = company.ZimbabweTaxpayerTin;
+        if (!string.Equals(previousTin, tin, StringComparison.Ordinal))
+        {
+            static string? MaskTin(string? value) => string.IsNullOrWhiteSpace(value)
+                ? null : $"***{value.Trim()[^Math.Min(4, value.Trim().Length)..]}";
+            company.ZimbabweTaxpayerTin = tin;
+            _audit.Record(company.Id, UserId, "Company.ZimbabweTaxProfileUpdated", "Tax",
+                nameof(Company), company.Id,
+                new { ZimbabweTaxpayerTin = MaskTin(previousTin) },
+                new { ZimbabweTaxpayerTin = MaskTin(tin) });
+        }
         await _db.SaveChangesAsync(ct);
         return Ok(new { company.Id, company.Name, company.ZimbabweTaxpayerTin });
     }
