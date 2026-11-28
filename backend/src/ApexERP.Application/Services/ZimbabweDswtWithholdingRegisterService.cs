@@ -234,7 +234,8 @@ public sealed class ZimbabweDswtWithholdingRegisterService
                 x.CompanyId == companyId && x.Id == statementLine.ImportBatchId &&
                 x.AuthenticationMethod == BankStatementOriginAuthenticationMethod.IndependentBankConfirmation &&
                 x.AuthenticatedAt.HasValue &&
-                x.Status is BankStatementImportStatus.Authenticated or BankStatementImportStatus.Certified, token)
+                (x.Status == BankStatementImportStatus.Authenticated ||
+                 x.Status == BankStatementImportStatus.Certified), token)
                 ?? throw new InvalidOperationException("The statement row must belong to an independently authenticated bank statement batch.");
             var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
                 x.CompanyId == companyId && x.Id == payment.BankAccountId.Value, token)
