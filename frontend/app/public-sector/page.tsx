@@ -243,28 +243,24 @@ export default function PublicSectorPage() {
     }
   }
 
-  async function createBudgetReconciliation(e: React.FormEvent) {
-    e.preventDefault();
+  async function createAutomaticCashFlowBudgetReconciliation(section: string) {
+    const budgetVersionId = approvedBudgetVersions[0]?.id;
+    const supportingReference = budgetReconciliationDraft.supportingReference.trim();
+    if (!budgetVersionId || !supportingReference) {
+      setError("Select an approved cash budget and provide the supporting workpaper reference.");
+      return;
+    }
     setError(null);
     try {
-      const payload = {
+      await api.post("/public-sector/budget-reconciliations/cash-flow/automatic", {
         financialYear: year,
-        ...budgetReconciliationDraft,
-        revenueAmount: Number(budgetReconciliationDraft.revenueAmount),
-        expenseAmount: Number(budgetReconciliationDraft.expenseAmount),
-        operatingAmount: Number(budgetReconciliationDraft.operatingAmount),
-        investingAmount: Number(budgetReconciliationDraft.investingAmount),
-        financingAmount: Number(budgetReconciliationDraft.financingAmount),
-      };
-      await api.post("/public-sector/budget-reconciliations", payload);
-      setBudgetReconciliationDraft({
-        type: "Basis", description: "", statementSection: "Operating",
-        revenueAmount: 0, expenseAmount: 0, operatingAmount: 0,
-        investingAmount: 0, financingAmount: 0, supportingReference: "",
-        isNoDifferenceAttestation: false,
+        budgetVersionId,
+        statementSection: section,
+        supportingReference,
       });
-      setMsg("Reconciliation adjustment created. Submit it for independent workflow approval.");
-      await loadBudgetComparison();
+      setBudgetReconciliationDraft((current) => ({ ...current, supportingReference: "" }));
+      setMsg(`System-calculated ${section.toLowerCase()} cash-flow reconciliation created. Submit it for independent approval.`);
+      await Promise.all([loadBudgetComparison(), loadCashActuals()]);
     } catch (err) { setError(extractErrorMessage(err)); }
   }
 
@@ -1148,49 +1144,38 @@ export default function PublicSectorPage() {
               <div className="border rounded-lg p-4 space-y-3">
                 <h3 className="font-semibold">Reconciliation of budget and financial-statement actuals</h3>
                 <p className="text-xs text-slate-500">Revenue and expense adjustments reconcile comparable budget actuals to accrual financial-statement actuals. Operating, investing and financing adjustments separately reconcile the Statement of Cash Flows. Every adjustment or no-difference attestation requires independent workflow approval.</p>
-                <form onSubmit={createBudgetReconciliation} className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  <select className="input" required value={budgetReconciliationDraft.type}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, type: e.target.value })}>
-                    <option value="Basis">Basis difference</option><option value="Timing">Timing difference</option>
-                    <option value="Entity">Entity difference</option><option value="Presentation">Presentation difference</option>
-                  </select>
-                  <select className="input" required value={budgetReconciliationDraft.statementSection}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft,
-                      statementSection: e.target.value, revenueAmount: 0, expenseAmount: 0,
-                      operatingAmount: 0, investingAmount: 0, financingAmount: 0,
-                      isNoDifferenceAttestation: false })}>
-                    <option value="Operating">Net cash flows — operating</option>
-                    <option value="Investing">Net cash flows — investing</option>
-                    <option value="Financing">Net cash flows — financing</option>
-                  </select>
-                  <input className="input" required placeholder="Description of difference"
-                    value={budgetReconciliationDraft.description}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, description: e.target.value })} />
-                  <p className="md:col-span-3 text-xs text-slate-500">Revenue and expense basis/timing/entity/presentation rows are generated from the calculation candidates above. This form is reserved for the separate operating, investing and financing cash-flow bridge.</p>
-                  {budgetReconciliationDraft.statementSection === "Operating" && <input className="input" type="number" step="0.01" placeholder="Operating cash-flow adjustment"
-                    value={budgetReconciliationDraft.operatingAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, operatingAmount: Number(e.target.value) })} />}
-                  {budgetReconciliationDraft.statementSection === "Investing" && <input className="input" type="number" step="0.01" placeholder="Investing cash-flow adjustment"
-                    value={budgetReconciliationDraft.investingAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, investingAmount: Number(e.target.value) })} />}
-                  {budgetReconciliationDraft.statementSection === "Financing" && <input className="input" type="number" step="0.01" placeholder="Financing cash-flow adjustment"
-                    value={budgetReconciliationDraft.financingAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, financingAmount: Number(e.target.value) })} />}
-
-                  <input className="input md:col-span-2" required placeholder="Supporting workpaper / evidence reference"
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500">Cash-flow bridge adjustments are calculated from certified cash-budget actuals and the Statement of Cash Flows. Amounts cannot be entered or altered manually. Each generated candidate stores a source fingerprint and must pass independent approval; approval is rejected if source data changes.</p>
+                  <input className="input w-full" required placeholder="Supporting cash-flow workpaper / evidence reference"
                     value={budgetReconciliationDraft.supportingReference}
                     onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, supportingReference: e.target.value })} />
-                  <button className="btn-secondary md:col-span-3"
-                    disabled={!budgetComparison?.finalBudgetAvailable || !budgetReconciliationDraft.description.trim() ||
-                      !budgetReconciliationDraft.supportingReference.trim() ||
-                      (!budgetReconciliationDraft.isNoDifferenceAttestation &&
-                        Number(budgetReconciliationDraft.revenueAmount) === 0 && Number(budgetReconciliationDraft.expenseAmount) === 0 &&
-                        Number(budgetReconciliationDraft.operatingAmount) === 0 && Number(budgetReconciliationDraft.investingAmount) === 0 &&
-                        Number(budgetReconciliationDraft.financingAmount) === 0) ||
-                      (budgetReconciliationDraft.isNoDifferenceAttestation && !["Revenue", "Expense"].includes(budgetReconciliationDraft.statementSection))}>
-                    Create reconciliation adjustment
-                  </button>
-                </form>
+                  {!approvedBudgetVersions.length
+                    ? <p className="text-sm text-amber-700">An approved cash-basis budget is required to generate the cash-flow bridge.</p>
+                    : <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                      {(cashActualReconciliation?.sections ?? []).map((section: any) => {
+                        const hasActive = budgetReconciliations.some((item: any) =>
+                          item.budgetVersionId === approvedBudgetVersions[0]?.id &&
+                          item.statementSection === section.section && item.status !== "Rejected");
+                        return <div key={section.section} className="border rounded-lg p-3 space-y-2">
+                          <h4 className="font-semibold">{section.section} activities</h4>
+                          <div className="text-xs space-y-1">
+                            <div className="flex justify-between"><span>Budget-basis actual</span><strong>{fmt(section.budgetBasisActual)}</strong></div>
+                            <div className="flex justify-between"><span>Statement of Cash Flows</span><strong>{fmt(section.statementOfCashFlowsActual)}</strong></div>
+                            <div className="flex justify-between"><span>Calculated adjustment</span><strong>{fmt(section.requiredAdjustment)}</strong></div>
+                            <div className="flex justify-between"><span>Approved adjustment</span><strong>{fmt(section.approvedAdjustment)}</strong></div>
+                            <div className="flex justify-between"><span>Unreconciled</span><strong>{fmt(section.unreconciledDifference)}</strong></div>
+                          </div>
+                          <button type="button" className="btn-secondary w-full"
+                            disabled={!cashActualReconciliation?.sourceCoverageComplete ||
+                              !cashActualReconciliation?.cashFlowStatementReconciled ||
+                              !budgetReconciliationDraft.supportingReference.trim() || hasActive}
+                            onClick={() => createAutomaticCashFlowBudgetReconciliation(section.section)}>
+                            {hasActive ? "Reconciliation already recorded" : "Generate calculated adjustment"}
+                          </button>
+                        </div>;
+                      })}
+                    </div>}
+                </div>
                 <div className="overflow-x-auto">
                   <table className="table-base">
                     <thead><tr><th>Type</th><th>Description</th><th>Section</th><th>No difference</th><th>Revenue</th><th>Expense</th><th>Operating</th><th>Investing</th><th>Financing</th><th>Status</th><th>Action</th></tr></thead>
