@@ -59,6 +59,8 @@ public sealed class AddIpsas24BudgetComparison : Migration
                 InvestingAmount = table.Column<decimal>(type: "numeric(20,6)", nullable: false),
                 FinancingAmount = table.Column<decimal>(type: "numeric(20,6)", nullable: false),
                 SupportingReference = table.Column<string>(type: "text", nullable: false),
+                Status = table.Column<int>(type: "integer", nullable: false),
+                ApprovalWorkflowId = table.Column<Guid>(type: "uuid", nullable: true),
                 ApprovedBy = table.Column<Guid>(type: "uuid", nullable: true),
                 ApprovedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                 CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
