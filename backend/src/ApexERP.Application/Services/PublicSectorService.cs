@@ -2631,8 +2631,10 @@ namespace ApexERP.Application.Services
                             latest.ExpectedCashSourceId == submission.ExpectedCashSourceId)
                         .Max(latest => latest.SubmissionRevision)), ct))
                 throw new InvalidOperationException("This source record has already been reconciled or excluded in the latest active source revision. Complete a replacement source revision before creating a new actual.");
-            if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction && existingSourceAllocations.Count > 0)
-                throw new InvalidOperationException("A bank transaction is captured once against its exact posted journal classification; only AR/AP invoice settlements support split source allocation.");
+            if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction && existingSourceAllocations.Count > 0 &&
+                !await _db.SettlementComponentAllocations.AnyAsync(x => x.CompanyId == companyId &&
+                    x.SettlementKind == "TX" && x.SettlementAllocationId == sourceRecordId, ct))
+                throw new InvalidOperationException("A bank transaction is captured once unless it is an explicitly allocated WHT remittance.");
             if (existingSourceAllocations.Any(x => x.BudgetVersionLineId == line.Id))
                 throw new InvalidOperationException("This source transaction has already been allocated to the selected budget line.");
             if (existingSourceAllocations.Any(x => x.Status == PublicSectorBudgetActualStatus.Certified))
@@ -2655,15 +2657,26 @@ namespace ApexERP.Application.Services
                 if (!source.JournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(x =>
                     x.Id == source.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
                     throw new InvalidOperationException("The reconciled bank transaction must be linked to a posted journal entry.");
-                amount = isReceipt ? source.Credit : source.Debit;
-                if (amount <= 0m || (isReceipt ? source.Debit != 0m : source.Credit != 0m))
-                    throw new InvalidOperationException("The bank transaction direction and amount do not match the selected cash event type.");
-                var mappedJournalAmount = await _db.JournalLines.Where(x =>
-                    x.JournalEntryId == source.JournalEntryId.Value && x.GlAccountId == line.GlAccountId &&
-                    x.FundCentreId == line.FundCentreId && x.CostCentreId == line.CostCentreId)
-                    .SumAsync(x => isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
-                if (mappedJournalAmount != amount)
-                    throw new InvalidOperationException("The posted journal does not contain an exact matching amount for this budget line, Fund Centre and cost centre.");
+                var whtRemittanceAmount = await CalculateWhtRemittanceBudgetAmountAsync(companyId, source,
+                    line.GlAccountId, line.FundCentreId, line.CostCentreId, ct);
+                if (whtRemittanceAmount.HasValue)
+                {
+                    if (isReceipt || source.Debit <= 0m || source.Credit != 0m || whtRemittanceAmount.Value <= 0m)
+                        throw new InvalidOperationException("A WHT remittance is an outgoing cash payment and must have an included amount under its approved tax policy.");
+                    amount = whtRemittanceAmount.Value;
+                }
+                else
+                {
+                    amount = isReceipt ? source.Credit : source.Debit;
+                    if (amount <= 0m || (isReceipt ? source.Debit != 0m : source.Credit != 0m))
+                        throw new InvalidOperationException("The bank transaction direction and amount do not match the selected cash event type.");
+                    var mappedJournalAmount = await _db.JournalLines.Where(x =>
+                        x.JournalEntryId == source.JournalEntryId.Value && x.GlAccountId == line.GlAccountId &&
+                        x.FundCentreId == line.FundCentreId && x.CostCentreId == line.CostCentreId)
+                        .SumAsync(x => isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
+                    if (mappedJournalAmount != amount)
+                        throw new InvalidOperationException("The posted journal does not contain an exact matching amount for this budget line, Fund Centre and cost centre.");
+                }
                 var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
                     x.Id == source.BankAccountId && x.CompanyId == companyId, ct)
                     ?? throw new InvalidOperationException("The source bank account is not available to this company.");
