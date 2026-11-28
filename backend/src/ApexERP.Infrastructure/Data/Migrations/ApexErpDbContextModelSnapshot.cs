@@ -3919,6 +3919,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("OriginalEventId").HasColumnType("uuid");
                     b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
                     b.Property<DateTime>("EventDate").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("EvidenceAcceptedAt").HasColumnType("timestamp with time zone");
                     b.Property<string>("EvidenceReference").IsRequired().HasMaxLength(1000).HasColumnType("character varying(1000)");
                     b.Property<int>("Status").HasColumnType("integer");
                     b.Property<Guid>("PreparedBy").HasColumnType("uuid");
