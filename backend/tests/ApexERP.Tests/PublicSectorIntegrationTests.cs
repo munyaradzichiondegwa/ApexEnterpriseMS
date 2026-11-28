@@ -1134,6 +1134,7 @@ namespace ApexERP.Tests
                     PublicSectorBudgetActualEventKind.CashPayment,
                     PublicSectorBudgetActualSourceKind.BankTransaction, unmappedBankTransactionId,
                     effectiveDate, CashFlowCategory.Operating, preparerId));
+        }
 
         [PostgresFact]
         public async Task Ipsas24_cash_budget_allows_investing_asset_classification_lines()
@@ -1182,7 +1183,6 @@ namespace ApexERP.Tests
             var line = Assert.Single(version.Lines);
             Assert.Equal(assetAccountId, line.GlAccountId);
             Assert.Equal(250m, line.Amount);
-        }
         }
     }
 }
