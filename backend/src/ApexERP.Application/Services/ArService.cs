@@ -117,6 +117,16 @@ namespace ApexERP.Application.Services
                 if (taxableLines.Sum(x => x.LineVat) != invoice.VatAmount ||
                     invoice.Lines.Sum(x => x.LineSubtotal) != invoice.Subtotal)
                     throw new InvalidOperationException("AR invoice line tax and subtotal amounts must reconcile exactly to the invoice header.");
+                var mappings = await _db.TaxAccountMappings.Where(x =>
+                    x.CompanyId == companyId && x.Purpose == "AR-VAT-OUTPUT" &&
+                    x.TaxCodeId.HasValue && taxCodeIds.Contains(x.TaxCodeId.Value) &&
+                    x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
+                    (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
+                    .ToListAsync(ct);
+                if (mappings.Count != taxCodeIds.Length ||
+                    mappings.Select(x => x.TaxCodeId).Distinct().Count() != taxCodeIds.Length ||
+                    mappings.Any(x => x.GlAccountId != vatOutputAccountId))
+                    throw new InvalidOperationException("Each AR VAT tax code requires one approved, effective AR-VAT-OUTPUT account mapping matching the requested control account.");
                 var taxAccount = await _db.GlAccounts.SingleOrDefaultAsync(x =>
                     x.Id == vatOutputAccountId && x.CompanyId == companyId && x.IsActive && x.IsPostable, ct);
                 if (taxAccount == null || taxAccount.Type != GlAccountType.Liability)
@@ -132,10 +142,46 @@ namespace ApexERP.Application.Services
                 glLines.Add(new GlLineRequest(group.Key.GlAccountId, 0, group.Sum(l => l.LineSubtotal), invoice.Currency,
                     invoice.ExchangeRate, group.Key.CostCentreId, "Sales income", invoice.FundCentreId, invoice.GrantId));
             if (invoice.VatAmount > 0)
-                glLines.Add(new GlLineRequest(vatOutputAccountId, 0, invoice.VatAmount, invoice.Currency, invoice.ExchangeRate, null, "VAT output"));
+            {
+                var taxCodes = invoice.Lines.Where(x => x.LineVat > 0m).Select(x => x.TaxCodeId!.Value).Distinct().ToArray();
+                foreach (var taxCodeId in taxCodes)
+                {
+                    var taxAmount = invoice.Lines.Where(x => x.TaxCodeId == taxCodeId).Sum(x => x.LineVat);
+                    glLines.Add(new GlLineRequest(vatOutputAccountId, 0, taxAmount, invoice.Currency,
+                        invoice.ExchangeRate, null, "VAT output", invoice.FundCentreId, invoice.GrantId, taxCodeId));
+                }
+            }
 
             var je = await _gl.PostAsync(companyId, invoice.InvoiceDate, JournalSource.AR, $"AR Invoice {invoice.InvoiceNo}", invoice.InvoiceNo, glLines, ct);
             invoice.JournalEntryId = je.Id;
+            if (invoice.VatAmount > 0m)
+            {
+                var taxCodeIdsForComponents = invoice.Lines.Where(x => x.LineVat > 0m).Select(x => x.TaxCodeId!.Value).Distinct().ToArray();
+                foreach (var taxCodeId in taxCodeIdsForComponents)
+                {
+                    var mapping = await _db.TaxAccountMappings.Where(x =>
+                        x.CompanyId == companyId && x.Purpose == "AR-VAT-OUTPUT" && x.TaxCodeId == taxCodeId &&
+                        x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
+                        (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
+                        .SingleAsync(ct);
+                    var journalLine = je.Lines.Single(x => x.TaxCodeId == taxCodeId &&
+                        x.GlAccountId == mapping.GlAccountId && x.Credit ==
+                        invoice.Lines.Where(l => l.TaxCodeId == taxCodeId).Sum(l => l.LineVat));
+                    foreach (var invoiceLine in invoice.Lines.Where(x => x.TaxCodeId == taxCodeId && x.LineVat > 0m))
+                    {
+                        _db.InvoiceTaxComponents.Add(new InvoiceTaxComponent
+                        {
+                            CompanyId = companyId, InvoiceKind = "AR", InvoiceId = invoice.Id,
+                            InvoiceLineId = invoiceLine.Id, TaxCodeId = taxCodeId, TaxType = TaxType.VAT,
+                            TaxableBase = invoiceLine.LineSubtotal,
+                            Rate = invoiceLine.LineSubtotal == 0m ? 0m : invoiceLine.LineVat / invoiceLine.LineSubtotal,
+                            Amount = invoiceLine.LineVat, GlAccountId = mapping.GlAccountId,
+                            TaxAccountMappingId = mapping.Id, MappingVersionNumber = mapping.VersionNumber,
+                            JournalEntryId = je.Id, JournalLineId = journalLine.Id
+                        });
+                    }
+                }
+            }
             invoice.Status = InvoiceStatus.Posted;
             await _db.SaveChangesAsync(ct);
             return invoice;
