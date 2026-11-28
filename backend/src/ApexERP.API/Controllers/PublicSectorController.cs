@@ -32,6 +32,9 @@ namespace ApexERP.API.Controllers
     public record CreateCashSourceReconciliationLineRequest(Guid SourceRecordId, string SourceReference,
         Guid? BudgetExecutionActualId, bool IsExcluded, string? ExclusionReason);
     public record ReviewCashSourceRecordReconciliationRequest(bool Accepted, string? ReviewNote);
+    public record CreateExpectedCashSourceRegisterAttestationRequest(Guid BudgetVersionId, int ExpectedSourceCount,
+        string EntityScope, string EvidenceReference);
+    public record ReviewExpectedCashSourceRegisterAttestationRequest(bool Accepted, string? ReviewNote);
 
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
@@ -479,6 +482,44 @@ namespace ApexERP.API.Controllers
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
+
+        // Independent certification of the expected-source population itself.
+        [HttpGet("expected-cash-sources/completeness-attestation")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetExpectedCashSourceRegisterAttestation([FromQuery] Guid budgetVersionId, CancellationToken ct)
+        {
+            if (budgetVersionId == Guid.Empty) return BadRequest(new { error = "A budget version is required." });
+            return Ok(await _publicSector.GetExpectedCashSourceRegisterAttestationAsync(CompanyId, budgetVersionId, ct));
+        }
+
+        [HttpPost("expected-cash-sources/completeness-attestation")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateExpectedCashSourceRegisterAttestation(
+            CreateExpectedCashSourceRegisterAttestationRequest req, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.CreateExpectedCashSourceRegisterAttestationAsync(CompanyId,
+                req.BudgetVersionId, req.ExpectedSourceCount, req.EntityScope, req.EvidenceReference, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("expected-cash-sources/completeness-attestation/{id}/submit")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitExpectedCashSourceRegisterAttestation(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.SubmitExpectedCashSourceRegisterAttestationAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("expected-cash-sources/completeness-attestation/{id}/review")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> ReviewExpectedCashSourceRegisterAttestation(Guid id,
+            ReviewExpectedCashSourceRegisterAttestationRequest req, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.ReviewExpectedCashSourceRegisterAttestationAsync(CompanyId, id,
+                UserId, req.Accepted, req.ReviewNote, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
         // Transaction-level source-to-actual reconciliation. Source control totals are reviewed
         // first; these rows then prove that every source record is allocated or explicitly excluded.
         [HttpGet("cash-source-submissions/{id}/reconciliation-lines")]
@@ -637,6 +678,9 @@ namespace ApexERP.API.Controllers
             var requiredSourceSubmissionsReviewed = requiredExpectedSources.All(source =>
                 sourceSubmissions.Any(submission => submission.ExpectedCashSourceId == source.Id &&
                     submission.Status == "Reviewed"));
+            var allExpectedSourceSubmissionsReviewed = expectedSources.All(source =>
+                sourceSubmissions.Any(submission => submission.ExpectedCashSourceId == source.Id &&
+                    submission.Status == "Reviewed" && submission.RecordLevelStatus == "Reviewed"));
             var requiredSourceRecordReconciliationsReviewed = requiredExpectedSources.All(source =>
                 sourceSubmissions.Any(submission => submission.ExpectedCashSourceId == source.Id &&
                     submission.Status == "Reviewed" && submission.RecordLevelStatus == "Reviewed"));
@@ -644,16 +688,21 @@ namespace ApexERP.API.Controllers
                 x.Status == "Reviewed" && x.RecordLevelStatus == "Reviewed");
             var registeredSourceSubmissionCoverageComplete = expectedSourceRegisterPresent &&
                 expectedSourceRegisterApproved && requiredSourceSubmissionsReviewed &&
-                requiredSourceRecordReconciliationsReviewed && noUnreviewedSourceSubmissions;
+                allExpectedSourceSubmissionsReviewed && noUnreviewedSourceSubmissions;
+            var registerAttestation = await _db.PublicSectorExpectedCashSourceRegisterAttestations
+                .FirstOrDefaultAsync(x => x.CompanyId == CompanyId && x.BudgetVersionId == version.Id, ct);
+            var expectedSourceRegisterCompletenessCertified = registerAttestation != null &&
+                registerAttestation.Status == "Certified" && registerAttestation.CertifiedBy.HasValue &&
+                registerAttestation.CertifiedAt.HasValue &&
+                registerAttestation.ExpectedSourceCount == expectedSources.Count &&
+                registerAttestation.EntityScope == version.EntityScope &&
+                expectedSourceRegisterApproved && allExpectedSourceSubmissionsReviewed;
 
             // Record-level matching of every external statement row to one or more actual
             // allocations (or an independently approved exclusion) is not implemented yet.
             // Keep this explicit false gate so a control-total submission is never mistaken for
             // transaction-level completeness.
             const bool recordLevelSourceReconciliationComplete = false;
-            // The approved register itself also needs an independent completeness attestation;
-            // approval of the entries currently present cannot prove that no source was omitted.
-            const bool expectedSourceRegisterCompletenessCertified = false;
             var sourceCoverageComplete = (noSourceBackedCashActuals
                     ? certifiedZeroActivity
                     : true) &&
@@ -685,6 +734,8 @@ namespace ApexERP.API.Controllers
                 RegisteredSourceSubmissionCoverageComplete = registeredSourceSubmissionCoverageComplete,
                 RecordLevelSourceReconciliationComplete = recordLevelSourceReconciliationComplete,
                 ExpectedSourceRegisterCompletenessCertified = expectedSourceRegisterCompletenessCertified,
+                ExpectedSourceRegisterAttestationStatus = registerAttestation?.Status,
+                ExpectedSourceRegisterAttestationEvidence = registerAttestation?.EvidenceReference,
                 UncapturedOrUnreconciledPostedBankMovements = uncapturedPostedMovements,
                 MissingPostedArSettlementCoverage = missingArSettlementCoverage,
                 MissingPostedApSettlementCoverage = missingApSettlementCoverage,
