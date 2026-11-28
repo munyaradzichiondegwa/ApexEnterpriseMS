@@ -1936,12 +1936,37 @@ namespace ApexERP.Application.Services
                             x.Status == ModifiedCashLedgerEventStatus.Certified &&
                             x.EventKind == ModifiedCashLedgerEventKind.Recognition &&
                             !x.OriginalEventId.HasValue, ct);
+                        var postedInvoiceExists = commitment != null && await _db.ApInvoices.AnyAsync(x =>
+                            x.CompanyId == companyId && x.CommitmentId == commitment.Id &&
+                            (x.Status == InvoiceStatus.Posted || x.Status == InvoiceStatus.Paid ||
+                             x.Status == InvoiceStatus.Partial), ct);
                         valid = sourceValid && policyPeriodValid && mappingValid &&
-                            original != null && commitment != null && commitment.RealisedAmount == 0m &&
+                            original != null && commitment != null && !postedInvoiceExists &&
                             original.PolicyId == ledger.PolicyId &&
                             original.CommitmentId == ledger.CommitmentId &&
                             original.SourceEventId == ledger.SourceEventId &&
                             original.Amount == ledger.Amount && original.EventDate == ledger.EventDate;
+                    }
+                    else if (ledger.EventKind == ModifiedCashLedgerEventKind.Liquidation &&
+                        ledger.OriginalEventId.HasValue)
+                    {
+                        var original = await _db.ModifiedCashRecognitionLedgerEvents.FirstOrDefaultAsync(x =>
+                            x.Id == ledger.OriginalEventId.Value && x.CompanyId == companyId &&
+                            x.Status == ModifiedCashLedgerEventStatus.Certified &&
+                            x.EventKind == ModifiedCashLedgerEventKind.Recognition &&
+                            !x.OriginalEventId.HasValue, ct);
+                        var settlement = await ModifiedCashApSettlementEvidenceValidator.ValidateAsync(
+                            _db, companyId, ledger.SourceEventId, ledger.CommitmentId, ct);
+                        valid = policyPeriodValid && mappingValid && original != null &&
+                            settlement != null && original.PolicyId == ledger.PolicyId &&
+                            original.CommitmentId == ledger.CommitmentId &&
+                            original.SourceEventKind == ledger.SourceEventKind &&
+                            settlement.AllocatedAmount == ledger.Amount &&
+                            settlement.PaymentDate == ledger.EventDate &&
+                            !await _db.ModifiedCashRecognitionLedgerEvents.AnyAsync(x =>
+                                x.CompanyId == companyId && x.OriginalEventId == original.Id &&
+                                x.EventKind == ModifiedCashLedgerEventKind.Reversal &&
+                                x.Status != ModifiedCashLedgerEventStatus.Rejected, ct);
                     }
                     if (!valid) invalidModifiedCashEvents++;
                 }
