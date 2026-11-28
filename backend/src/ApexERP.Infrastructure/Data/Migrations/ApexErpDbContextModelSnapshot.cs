@@ -93,6 +93,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
                     b.Property<Guid>("CompanyId").HasColumnType("uuid");
                     b.Property<int>("TaxType").HasColumnType("integer");
+                    b.Property<string>("Purpose").IsRequired().HasColumnType("text");
                     b.Property<Guid?>("TaxCodeId").HasColumnType("uuid");
                     b.Property<Guid>("GlAccountId").HasColumnType("uuid");
                     b.Property<int>("VersionNumber").HasColumnType("integer");
@@ -109,8 +110,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
-                    b.HasIndex("CompanyId", "TaxType", "TaxCodeId", "VersionNumber").IsUnique();
-                    b.HasIndex("CompanyId", "TaxType", "TaxCodeId", "EffectiveFrom", "EffectiveTo").HasDatabaseName("IX_TaxAccountMappings_Effective");
+                    b.HasIndex("CompanyId", "Purpose", "TaxCodeId", "VersionNumber").IsUnique();
+                    b.HasIndex("CompanyId", "Purpose", "TaxCodeId", "EffectiveFrom", "EffectiveTo").HasDatabaseName("IX_TaxAccountMappings_Effective");
                     b.ToTable("TaxAccountMappings", t =>
                         {
                             t.HasCheckConstraint("CK_TaxAccountMappings_Version", "\"VersionNumber\" > 0");
