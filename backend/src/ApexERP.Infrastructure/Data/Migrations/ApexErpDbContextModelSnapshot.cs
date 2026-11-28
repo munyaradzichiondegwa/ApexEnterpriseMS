@@ -8285,30 +8285,41 @@ namespace ApexERP.Infrastructure.Data.Migrations
                 {
                     b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
                         .WithMany().HasForeignKey("BudgetVersionId")
-                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashPolicy_BudgetVersion")
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionMapping", b =>
                 {
                     b.HasOne("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", null)
                         .WithMany().HasForeignKey("PolicyId")
-                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashMapping_Policy")
+                        .IsRequired();
                     b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", null)
                         .WithMany().HasForeignKey("BudgetVersionLineId")
-                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashMapping_BudgetLine")
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionLedgerEvent", b =>
                 {
                     b.HasOne("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", null)
                         .WithMany().HasForeignKey("PolicyId")
-                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashLedger_Policy")
+                        .IsRequired();
                     b.HasOne("ApexERP.Domain.Entities.Commitment", null)
                         .WithMany().HasForeignKey("CommitmentId")
-                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashLedger_Commitment")
+                        .IsRequired();
                     b.HasOne("ApexERP.Domain.Entities.ModifiedCashRecognitionLedgerEvent", null)
                         .WithMany().HasForeignKey("OriginalEventId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashLedger_OriginalEvent");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", b =>
