@@ -689,13 +689,14 @@ namespace ApexERP.Tests
             var approverId = Guid.NewGuid();
             var reconciliation = await service.CreateBudgetReconciliationAsync(companyId, 2026,
                 PublicSectorBudgetReconciliationType.Basis, "Modified cash commitments not yet paid",
-                "Operating", 5m, -2m, 0m, "Reconciliation workpaper WP-IPSAS24-01", preparerId);
+                "Operating", 5m, -2m, 0m, "Reconciliation workpaper WP-IPSAS24-01",
+                preparerId, default, 10m, -15m);
             var workflowId = Guid.NewGuid();
             ctx.WorkflowRequests.Add(new WorkflowRequest
             {
                 Id = workflowId, CompanyId = companyId, RequestType = "PublicSectorBudgetReconciliation",
                 ReferenceId = reconciliation.Id, ReferenceTable = "PublicSectorBudgetReconciliation",
-                SubmittedBy = preparerId, Amount = 7m, Status = WorkflowStatus.Pending
+                SubmittedBy = preparerId, Amount = 32m, Status = WorkflowStatus.Pending
             });
             await ctx.SaveChangesAsync();
             await service.MarkBudgetReconciliationPendingAsync(companyId, reconciliation.Id, workflowId);
@@ -729,6 +730,8 @@ namespace ApexERP.Tests
             Assert.Equal(10m, added.ActualOnComparableBasis);
             var approvedRecon = Assert.Single(report.Reconciliations);
             Assert.Equal(PublicSectorBudgetReconciliationStatus.Approved, approvedRecon.Status);
+            Assert.Equal(10m, approvedRecon.RevenueAmount);
+            Assert.Equal(-15m, approvedRecon.ExpenseAmount);
             Assert.Equal(5m, approvedRecon.OperatingAmount);
             Assert.Equal(-2m, approvedRecon.InvestingAmount);
 
