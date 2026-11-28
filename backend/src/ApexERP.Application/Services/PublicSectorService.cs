@@ -2219,6 +2219,12 @@ namespace ApexERP.Application.Services
             var existingSourceAllocations = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
                 x.CompanyId == companyId && x.SourceKind == sourceKind &&
                 x.SourceRecordId == sourceRecordId).ToListAsync(ct);
+            if (await _db.PublicSectorCashSourceReconciliationLines.AnyAsync(line =>
+                line.CompanyId == companyId && line.SourceRecordId == sourceRecordId &&
+                _db.PublicSectorCashSourceSubmissions.Any(submission =>
+                    submission.Id == line.CashSourceSubmissionId && submission.CompanyId == companyId &&
+                    submission.BudgetVersionId == version.Id), ct))
+                throw new InvalidOperationException("This source record has already been reconciled or excluded. A reviewed source mapping cannot be bypassed by creating a later budget actual.");
             if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction && existingSourceAllocations.Count > 0)
                 throw new InvalidOperationException("A bank transaction is captured once against its exact posted journal classification; only AR/AP invoice settlements support split source allocation.");
             if (existingSourceAllocations.Any(x => x.BudgetVersionLineId == line.Id))
