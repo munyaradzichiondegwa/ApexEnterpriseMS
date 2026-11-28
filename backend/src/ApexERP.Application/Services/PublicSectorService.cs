@@ -796,7 +796,7 @@ namespace ApexERP.Application.Services
 
         private sealed record ExpectedCashSourceRecord(
             decimal Amount, string Reference, DateTime EffectiveDate, string Currency,
-            Guid? JournalEntryId, bool IsReconciled);
+            Guid? JournalEntryId, bool IsReconciled, bool IsExternalStatementExclusion = false);
 
         private sealed record ExpectedCashSourcePopulation(
             HashSet<Guid> RecordIds, Dictionary<Guid, ExpectedCashSourceRecord> Records,
@@ -896,30 +896,52 @@ namespace ApexERP.Application.Services
 
                 var batchIds = statementBatches.Select(x => x.Id).ToArray();
                 var statementRows = await _db.BankStatementImportedTransactions.Where(x =>
-                        x.CompanyId == companyId && batchIds.Contains(x.ImportBatchId)).ToListAsync(ct);
+                    x.CompanyId == companyId && batchIds.Contains(x.ImportBatchId)).ToListAsync(ct);
                 if (statementRows.Count != statementBatches.Sum(x => x.TransactionCount) ||
-                        statementRows.Any(x => x.Status != BankStatementImportedTransactionStatus.Matched ||
-                            !x.MatchedBankTransactionId.HasValue || !x.MatchedBy.HasValue ||
-                            !x.MatchedAt.HasValue || x.MatchedBy == statementBatches[0].UploadedBy ||
-                            x.MatchedBy == statementBatches[0].AuthenticatedBy ||
-                            x.MatchedBy == statementBatches[0].CompletenessCertifiedBy))
-                        throw new InvalidOperationException($"Bank source {expected.SourceCode} contains unmatched, excluded or non-independently matched statement rows; complete independent source-register review before certification.");
-                var matched = statementRows.ToDictionary(x => x.Id, x => x.MatchedBankTransactionId!.Value);
+                    statementRows.Any(x =>
+                        (x.Status == BankStatementImportedTransactionStatus.Matched &&
+                            (!x.MatchedBankTransactionId.HasValue || !x.MatchedBy.HasValue || !x.MatchedAt.HasValue ||
+                             x.MatchedBy == statementBatches[0].UploadedBy ||
+                             x.MatchedBy == statementBatches[0].AuthenticatedBy ||
+                             x.MatchedBy == statementBatches[0].CompletenessCertifiedBy)) ||
+                        (x.Status == BankStatementImportedTransactionStatus.Excluded &&
+                            (!x.ExcludedBy.HasValue || !x.ExcludedAt.HasValue ||
+                             string.IsNullOrWhiteSpace(x.ExclusionReason) ||
+                             x.ExcludedBy == statementBatches[0].UploadedBy ||
+                             x.ExcludedBy == statementBatches[0].AuthenticatedBy ||
+                             x.ExcludedBy == statementBatches[0].CompletenessCertifiedBy)) ||
+                        (x.Status != BankStatementImportedTransactionStatus.Matched &&
+                         x.Status != BankStatementImportedTransactionStatus.Excluded)))
+                    throw new InvalidOperationException($"Bank source {expected.SourceCode} contains unmatched statement rows or exclusions without independent review evidence.");
+                var matched = statementRows.Where(x => x.Status == BankStatementImportedTransactionStatus.Matched)
+                    .ToDictionary(x => x.Id, x => x.MatchedBankTransactionId!.Value);
                 if (rows.Any(x => !x.IsReconciled || !x.MatchedStatementLineHash.HasValue ||
-                        !matched.TryGetValue(x.MatchedStatementLineHash.Value, out var bankTransactionId) ||
-                        bankTransactionId != x.Id) || matched.Count != rows.Count)
-                        throw new InvalidOperationException($"Bank source {expected.SourceCode} statement rows do not match the complete live bank-transaction population.");
-                if (statementDebits != rows.Sum(x => x.Debit) ||
-                        statementCredits != rows.Sum(x => x.Credit))
-                        throw new InvalidOperationException($"Bank source {expected.SourceCode} statement totals no longer agree with the live bank population.");
+                    !matched.TryGetValue(x.MatchedStatementLineHash.Value, out var bankTransactionId) ||
+                    bankTransactionId != x.Id) || matched.Count != rows.Count)
+                    throw new InvalidOperationException($"Bank source {expected.SourceCode} statement matches do not cover the complete live bank-transaction population.");
+                var statementDebitsFromRows = statementRows.Sum(x => x.Debit);
+                var statementCreditsFromRows = statementRows.Sum(x => x.Credit);
+                if (statementDebits != statementDebitsFromRows ||
+                    statementCredits != statementCreditsFromRows)
+                    throw new InvalidOperationException($"Bank source {expected.SourceCode} statement totals no longer agree with the retained transaction rows.");
+
                 var records = rows.ToDictionary(x => x.Id, x => new ExpectedCashSourceRecord(
                     Math.Max(x.Debit, x.Credit),
                     string.IsNullOrWhiteSpace(x.Reference) ? x.Id.ToString("N") : x.Reference!,
                     x.TransactionDate, account.Currency, x.JournalEntryId, x.IsReconciled));
+                foreach (var excluded in statementRows.Where(x =>
+                    x.Status == BankStatementImportedTransactionStatus.Excluded))
+                {
+                    records.Add(excluded.Id, new ExpectedCashSourceRecord(
+                        Math.Max(excluded.Debit, excluded.Credit),
+                        string.IsNullOrWhiteSpace(excluded.Reference)
+                            ? excluded.ExternalTransactionId : excluded.Reference!,
+                        excluded.TransactionDate, excluded.Currency, null, false, true));
+                }
                 return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
-                    rows.Sum(x => Math.Max(x.Debit, x.Credit)),
+                    records.Values.Sum(x => x.Amount),
                     string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase),
-                    rows.Sum(x => x.Credit - x.Debit),
+                    statementRows.Sum(x => x.Credit - x.Debit),
                     statementBatches[0].OpeningBalance, statementBatches[^1].ClosingBalance);
             }
 
