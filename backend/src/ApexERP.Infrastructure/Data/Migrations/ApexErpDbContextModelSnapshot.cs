@@ -3850,6 +3850,102 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<int>("VersionNumber").HasColumnType("integer");
+                    b.Property<string>("PolicyReference").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<DateTime>("EffectiveFrom").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("EffectiveTo").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("ReportingPeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("ReportingPeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<int>("PostPeriodRecognitionWindowDays").HasColumnType("integer");
+                    b.Property<int>("Treatment").HasColumnType("integer");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid>("PreparedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "VersionNumber").IsUnique()
+                        .HasDatabaseName("UX_ModifiedCashPolicy_Version");
+                    b.ToTable("ModifiedCashRecognitionPolicies", t =>
+                        {
+                            t.HasCheckConstraint("CK_ModifiedCashPolicy_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                            t.HasCheckConstraint("CK_ModifiedCashPolicy_ReportingPeriod", "\"ReportingPeriodEnd\" > \"ReportingPeriodStart\"");
+                            t.HasCheckConstraint("CK_ModifiedCashPolicy_Window", "\"PostPeriodRecognitionWindowDays\" >= 0");
+                            t.HasCheckConstraint("CK_ModifiedCashPolicy_Version", "\"VersionNumber\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionMapping", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("PolicyId").HasColumnType("uuid");
+                    b.Property<string>("SourceEventKind").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
+                    b.Property<Guid>("BudgetVersionLineId").HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionLineId");
+                    b.HasIndex("PolicyId");
+                    b.HasIndex("CompanyId", "PolicyId", "SourceEventKind").IsUnique()
+                        .HasDatabaseName("UX_ModifiedCashMapping_EventKind");
+                    b.ToTable("ModifiedCashRecognitionMappings");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionLedgerEvent", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("PolicyId").HasColumnType("uuid");
+                    b.Property<Guid>("CommitmentId").HasColumnType("uuid");
+                    b.Property<Guid>("SourceEventId").HasColumnType("uuid");
+                    b.Property<string>("SourceEventKind").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
+                    b.Property<int>("EventKind").HasColumnType("integer");
+                    b.Property<Guid?>("OriginalEventId").HasColumnType("uuid");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<DateTime>("EventDate").HasColumnType("timestamp with time zone");
+                    b.Property<string>("EvidenceReference").IsRequired().HasMaxLength(1000).HasColumnType("character varying(1000)");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid>("PreparedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CommitmentId");
+                    b.HasIndex("OriginalEventId").IsUnique().HasFilter("\"OriginalEventId\" IS NOT NULL")
+                        .HasDatabaseName("UX_ModifiedCashLedger_OneReversal");
+                    b.HasIndex("PolicyId");
+                    b.HasIndex("CompanyId", "CommitmentId", "Status", "EventDate")
+                        .HasDatabaseName("IX_ModifiedCashLedger_CommitmentStatusDate");
+                    b.HasIndex("CompanyId", "PolicyId", "SourceEventId", "EventKind").IsUnique()
+                        .HasDatabaseName("UX_ModifiedCashLedger_SourceEvent");
+                    b.ToTable("ModifiedCashRecognitionLedgerEvents", t =>
+                        {
+                            t.HasCheckConstraint("CK_ModifiedCashLedger_Amount", "\"Amount\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
@@ -8182,6 +8278,36 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany().HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionMapping", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", null)
+                        .WithMany().HasForeignKey("PolicyId")
+                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", null)
+                        .WithMany().HasForeignKey("BudgetVersionLineId")
+                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionLedgerEvent", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", null)
+                        .WithMany().HasForeignKey("PolicyId")
+                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.Commitment", null)
+                        .WithMany().HasForeignKey("CommitmentId")
+                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.ModifiedCashRecognitionLedgerEvent", null)
+                        .WithMany().HasForeignKey("OriginalEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", b =>
