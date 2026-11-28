@@ -1,8 +1,12 @@
+using ApexERP.API.Controllers;
 using ApexERP.Application.Services;
 using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using Xunit;
 
 namespace ApexERP.Tests
@@ -2702,5 +2706,161 @@ namespace ApexERP.Tests
                 service.ReviewCashSourceSubmissionAsync(companyId, apSubmission.Id, sourceReviewerId,
                     true, "AP control balances independently reviewed."));
         }
+        [PostgresFact]
+        public async Task Ipsas24_statement_issue_requires_three_independent_stages_and_stable_snapshot()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var accountId = Guid.NewGuid();
+            var budgetVersionId = Guid.NewGuid();
+            var budgetLineId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
+            var preparerId = Guid.NewGuid();
+            var reviewerId = Guid.NewGuid();
+            var approverId = Guid.NewGuid();
+            var publisherId = Guid.NewGuid();
+            var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Statement Issue MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-ISSUE",
+                    Name = "Statement Issue Vote", Level = FundCentreLevel.Vote,
+                    FinancialYear = 2026, AppropriationAmount = 100m
+                });
+                seed.GlAccounts.Add(new GlAccount
+                {
+                    Id = accountId, CompanyId = companyId, Code = "6100",
+                    Name = "Operating expense", SubType = "EC-01",
+                    Type = GlAccountType.Expense, Currency = "USD", IsActive = true
+                });
+                seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
+                {
+                    Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
+                    VersionNumber = 1, Kind = PublicSectorBudgetVersionKind.Original,
+                    Status = PublicSectorBudgetVersionStatus.Approved, Currency = "USD",
+                    AccountingBasis = AccountingBasis.Accrual, ClassificationBasis = "IPSAS accrual",
+                    EntityScope = "Statement Issue MDA", PeriodStart = periodStart, PeriodEnd = periodEnd,
+                    AuthorityReference = "Appropriation Act 2026", ApprovedBy = reviewerId,
+                    ApprovedAt = DateTime.UtcNow
+                });
+                seed.PublicSectorBudgetVersionLines.Add(new PublicSectorBudgetVersionLine
+                {
+                    Id = budgetLineId, CompanyId = companyId, BudgetVersionId = budgetVersionId,
+                    FundCentreId = fundCentreId, GlAccountId = accountId, LineNumber = 1,
+                    Description = "Operating expense", ClassificationCode = "EC-01", Amount = 100m,
+                    NoteReference = "Note 1"
+                });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 6,
+                    StartDate = new DateTime(2026, 6, 1), EndDate = new DateTime(2026, 7, 1),
+                    Status = PeriodStatus.Open
+                });
+                var journal = new JournalEntry
+                {
+                    CompanyId = companyId, EntryNo = "JE-IPSAS24-ISSUE",
+                    Description = "Actual expenditure for statement issue",
+                    EntryDate = new DateTime(2026, 6, 30), PeriodId = periodId,
+                    Source = JournalSource.Manual, Status = JournalStatus.Posted
+                };
+                seed.JournalEntries.Add(journal);
+                seed.JournalLines.Add(new JournalLine
+                {
+                    JournalEntryId = journal.Id, GlAccountId = accountId, FundCentreId = fundCentreId,
+                    Debit = 100m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                    BaseDebit = 100m, BaseCredit = 0m
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var audit = new AuditService(ctx);
+            var cashFlow = new CashFlowStatementService(ctx, new ReportingService(ctx));
+            var publicSector = new PublicSectorService(ctx, audit, cashFlow);
+            var controller = new PublicSectorController(ctx, publicSector, null!, null!, null!, cashFlow, audit);
+            void SetActor(Guid actorId)
+            {
+                var http = new DefaultHttpContext();
+                http.User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                {
+                    new Claim("company_id", companyId.ToString()),
+                    new Claim("sub", actorId.ToString())
+                }, "integration-test"));
+                controller.ControllerContext = new ControllerContext { HttpContext = http };
+            }
+
+            var readyReport = await publicSector.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.True(readyReport.ComparableActualsAvailable, readyReport.ComparabilityMessage);
+            Assert.True(readyReport.VarianceExplanationsComplete);
+            Assert.True(readyReport.OriginalToFinalExplanationsComplete);
+            Assert.True(readyReport.FinancialStatementReconciliation.Complete);
+
+            SetActor(preparerId);
+            var create = await controller.CreateBudgetStatementIssue(new CreateBudgetStatementIssueRequest(
+                2026, null, null, null, "Entity-approved financial reporting template", "2026.1",
+                "IPSAS24-ISSUE-2026-001"), default);
+            var draft = Assert.IsType<BudgetStatementIssueDocument>(Assert.IsType<OkObjectResult>(create).Value);
+            Assert.Equal("Draft", draft.Status);
+            Assert.Equal(64, draft.SnapshotSha256.Length);
+            Assert.Equal(preparerId, draft.PreparedBy);
+
+            SetActor(preparerId);
+            var selfReview = await controller.ReviewBudgetStatementIssue(draft.Id,
+                new ReviewBudgetStatementIssueRequest("Treasury template verification ref", "Reviewed template."), default);
+            Assert.IsType<BadRequestObjectResult>(selfReview);
+
+            SetActor(reviewerId);
+            var reviewed = Assert.IsType<BudgetStatementIssueDocument>(Assert.IsType<OkObjectResult>(
+                await controller.ReviewBudgetStatementIssue(draft.Id,
+                    new ReviewBudgetStatementIssueRequest("Treasury circular / template verification ref",
+                        "Verified the supplied template reference and statement presentation."), default)).Value);
+            Assert.Equal("Reviewed", reviewed.Status);
+            Assert.Equal("IndependentlyVerified", reviewed.TemplateReferenceStatus);
+            Assert.Equal(draft.SnapshotSha256, reviewed.SnapshotSha256);
+
+            SetActor(reviewerId);
+            var selfApproval = await controller.ApproveBudgetStatementIssue(draft.Id,
+                new ApproveBudgetStatementIssueRequest("Approval minute 01", "Approved."), default);
+            Assert.IsType<BadRequestObjectResult>(selfApproval);
+
+            SetActor(approverId);
+            var approved = Assert.IsType<BudgetStatementIssueDocument>(Assert.IsType<OkObjectResult>(
+                await controller.ApproveBudgetStatementIssue(draft.Id,
+                    new ApproveBudgetStatementIssueRequest("Approval minute 02",
+                        "Approved for issue after independent review."), default)).Value);
+            Assert.Equal("Approved", approved.Status);
+            Assert.Equal(draft.SnapshotSha256, approved.SnapshotSha256);
+
+            SetActor(approverId);
+            var selfPublish = await controller.PublishBudgetStatementIssue(draft.Id,
+                new PublishBudgetStatementIssueRequest("Publication register 01", "Issued."), default);
+            Assert.IsType<BadRequestObjectResult>(selfPublish);
+
+            SetActor(publisherId);
+            var issued = Assert.IsType<BudgetStatementIssueDocument>(Assert.IsType<OkObjectResult>(
+                await controller.PublishBudgetStatementIssue(draft.Id,
+                    new PublishBudgetStatementIssueRequest("Publication register 02",
+                        "Published to the entity's approved reporting repository."), default)).Value);
+            Assert.Equal("Issued", issued.Status);
+            Assert.Equal(preparerId, issued.PreparedBy);
+            Assert.Equal(reviewerId, issued.ReviewedBy);
+            Assert.Equal(approverId, issued.ApprovedBy);
+            Assert.Equal(publisherId, issued.IssuedBy);
+            Assert.Equal("Treasury circular / template verification ref", issued.TemplateVerificationReference);
+            Assert.Equal("Approval minute 02", issued.ApprovalReference);
+            Assert.Equal("Publication register 02", issued.PublicationReference);
+            Assert.Equal(draft.SnapshotJson, issued.SnapshotJson);
+            Assert.Equal(draft.SnapshotSha256, issued.SnapshotSha256);
+        }
+
     }
 }
