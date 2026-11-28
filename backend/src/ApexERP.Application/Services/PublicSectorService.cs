@@ -1356,13 +1356,16 @@ namespace ApexERP.Application.Services
                     }
                 }
                 var originalAmount = dimension.OriginalLine?.Amount ?? 0m;
-                var finalAmount = dimension.FinalLine?.Amount;
-                var variance = finalAmount.HasValue && actual.HasValue ? finalAmount.Value - actual.Value : (decimal?)null;
+                // A dimension absent from the final approved budget has a final amount of zero,
+                // not an unknown/null amount. The same applies to a line introduced after the
+                // original budget: its original amount is zero.
+                var finalAmount = dimension.FinalLine?.Amount ?? 0m;
+                var variance = actual.HasValue ? finalAmount - actual.Value : (decimal?)null;
                 rows.Add(new BudgetComparisonLine(dimension.OriginalLine?.LineNumber ?? dimension.FinalLine!.LineNumber,
                     line.Description, fund.Code, fund.Name, account.Code, account.Name, line.ClassificationCode,
                     originalAmount, finalAmount, actual, variance,
-                    finalAmount.HasValue && actual.HasValue && finalAmount.Value != 0m
-                        ? Math.Round(variance!.Value / finalAmount.Value * 100m, 2) : null,
+                    actual.HasValue && finalAmount != 0m
+                        ? Math.Round(variance!.Value / finalAmount * 100m, 2) : null,
                     dimension.OriginalLine == null ? "Line introduced in the final approved budget." :
                     dimension.FinalLine == null ? "Line removed from the final approved budget." : final?.AmendmentReason,
                     (dimension.FinalLine ?? dimension.OriginalLine!).Id));
