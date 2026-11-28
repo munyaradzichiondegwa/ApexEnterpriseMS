@@ -791,6 +791,11 @@ namespace ApexERP.Tests
                     Id = taxCodeId, CompanyId = company, Code = "VAT15", Name = "VAT 15%", Rate = 0.15m,
                     Type = TaxType.VAT, IsActive = true, EffectiveFrom = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
                 });
+                var mappingStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                seed.TaxAccountMappings.AddRange(
+                    new TaxAccountMapping { CompanyId = company, TaxType = TaxType.VAT, Purpose = "AR-VAT-OUTPUT", TaxCodeId = taxCodeId, GlAccountId = accounts["vatOut"].Id, VersionNumber = 1, EffectiveFrom = mappingStart, Status = TaxConfigurationStatus.Approved, SubmittedBy = Guid.NewGuid(), SubmittedAt = mappingStart, ApprovedBy = Guid.NewGuid(), ApprovedAt = mappingStart },
+                    new TaxAccountMapping { CompanyId = company, TaxType = TaxType.VAT, Purpose = "AP-VAT-INPUT", TaxCodeId = taxCodeId, GlAccountId = accounts["vatIn"].Id, VersionNumber = 1, EffectiveFrom = mappingStart, Status = TaxConfigurationStatus.Approved, SubmittedBy = Guid.NewGuid(), SubmittedAt = mappingStart, ApprovedBy = Guid.NewGuid(), ApprovedAt = mappingStart },
+                    new TaxAccountMapping { CompanyId = company, TaxType = TaxType.WHT, Purpose = "AP-WHT-PAYABLE", TaxCodeId = null, GlAccountId = accounts["wht"].Id, VersionNumber = 1, EffectiveFrom = mappingStart, Status = TaxConfigurationStatus.Approved, SubmittedBy = Guid.NewGuid(), SubmittedAt = mappingStart, ApprovedBy = Guid.NewGuid(), ApprovedAt = mappingStart });
                 await seed.SaveChangesAsync();
             }
 
