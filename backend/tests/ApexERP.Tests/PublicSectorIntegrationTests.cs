@@ -747,6 +747,25 @@ namespace ApexERP.Tests
             var explainedReport = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(explainedReport.VarianceExplanationsComplete);
             Assert.Contains(explainedReport.VarianceExplanations, x => x.Id == varianceExplanation.Id);
+
+            // A later posted journal entry changes the actual variance. The earlier approved
+            // explanation remains immutable but no longer satisfies the current variance.
+            var laterJournal = new JournalEntry
+            {
+                CompanyId = companyId, EntryNo = "JE-IPSAS24-LATE-ACTUAL",
+                Description = "Subsequent posted actual", EntryDate = new DateTime(2026, 7, 1),
+                PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+            };
+            ctx.JournalEntries.Add(laterJournal);
+            ctx.JournalLines.Add(new JournalLine
+            {
+                JournalEntryId = laterJournal.Id, GlAccountId = expenseId, FundCentreId = fundCentreId,
+                Debit = 10m, Credit = 0m, BaseDebit = 10m, BaseCredit = 0m
+            });
+            await ctx.SaveChangesAsync();
+            var changedVarianceReport = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.Equal(50m, changedVarianceReport.Lines.Single(x => x.AccountCode == "5100").Variance);
+            Assert.False(changedVarianceReport.VarianceExplanationsComplete);
         }
 
 
