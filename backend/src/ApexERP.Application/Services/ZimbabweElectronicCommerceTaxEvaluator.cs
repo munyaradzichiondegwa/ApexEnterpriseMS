@@ -60,7 +60,7 @@ public static class ZimbabweElectronicCommerceTaxEvaluator
         var currency = request.Currency.ToUpperInvariant();
 
         if (revenueDate.Date < EffectiveFrom)
-            return Excluded(request, currency, "The 2026 implementation does not calculate tax for revenue before 1 January 2026.");
+            return Excluded(request, currency, "Pre-2026 revenue requires the prior-year US$500,000 threshold assessment; it must not be treated as exempt or silently included in the 2026 no-threshold calculation.");
 
         if (request.QualifyingGrossRevenue == 0m)
             return Excluded(request, currency, "No gross revenue was recorded for this transaction.");
