@@ -36,11 +36,16 @@ namespace ApexERP.Application.Services
     {
         private readonly ApexErpDbContext _db;
         private readonly AuditService _audit;
+        private readonly CashFlowStatementService? _cashFlow;
 
         public PublicSectorService(ApexErpDbContext db, AuditService audit)
+            : this(db, audit, null) { }
+
+        public PublicSectorService(ApexErpDbContext db, AuditService audit, CashFlowStatementService? cashFlow)
         {
             _db = db;
             _audit = audit;
+            _cashFlow = cashFlow;
         }
 
 
@@ -402,6 +407,135 @@ namespace ApexERP.Application.Services
             }, ct);
         }
 
+        public async Task<BudgetAutomaticReconciliationCandidate> GetAutomaticCashFlowBudgetReconciliationCandidateAsync(
+            Guid companyId, int financialYear, Guid budgetVersionId, string statementSection,
+            CancellationToken ct = default)
+        {
+            var section = new[] { "Operating", "Investing", "Financing" }.FirstOrDefault(x =>
+                string.Equals(x, statementSection?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (section == null)
+                throw new InvalidOperationException("Cash-flow reconciliation section must be Operating, Investing or Financing.");
+            if (_cashFlow == null)
+                throw new InvalidOperationException("The cash-flow statement service is not configured.");
+
+            var version = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
+                x.Id == budgetVersionId && x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                x.Status == PublicSectorBudgetVersionStatus.Approved &&
+                x.AccountingBasis == AccountingBasis.Cash, ct)
+                ?? throw new InvalidOperationException("An approved cash-basis budget version is required.");
+            var currentFinal = await _db.PublicSectorBudgetVersions.Where(x =>
+                    x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                    x.Status == PublicSectorBudgetVersionStatus.Approved)
+                .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber)
+                .FirstOrDefaultAsync(ct);
+            if (currentFinal?.Id != version.Id)
+                throw new InvalidOperationException("Cash-flow reconciliation must reference the current approved final cash budget.");
+
+            var companyName = await _db.Companies.IgnoreQueryFilters()
+                .Where(x => x.Id == companyId).Select(x => x.Name).SingleAsync(ct);
+            var comparison = await GetBudgetComparisonAsync(companyId, financialYear, ct,
+                version.PeriodStart, version.PeriodEnd, companyName);
+            if (!comparison.ComparableActualsAvailable || comparison.FinalBudgetVersionId != version.Id)
+                throw new InvalidOperationException("Cash-flow reconciliation requires complete, current and independently reviewed cash-source populations: " +
+                    comparison.ComparabilityMessage);
+
+            var actuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == version.Id &&
+                x.EffectiveDate >= version.PeriodStart && x.EffectiveDate < version.PeriodEnd &&
+                x.Status == PublicSectorBudgetActualStatus.Certified).ToListAsync(ct);
+            foreach (var actual in actuals)
+            {
+                if (!await IsCertifiedCashActualSourceValidAsync(companyId, actual, ct))
+                    throw new InvalidOperationException("A certified cash actual is stale or no longer source-valid; reverse and replace it before preparing the cash-flow bridge.");
+            }
+
+            var cashFlow = await _cashFlow.GetStatementAsync(companyId, version.PeriodStart,
+                version.PeriodEnd.AddTicks(-1), ct);
+            if (cashFlow.ReconciliationDifference != 0m)
+                throw new InvalidOperationException("The underlying Statement of Cash Flows must reconcile opening cash plus net movement to closing cash before budget reconciliation.");
+
+            decimal budgetActual = actuals.Where(x => string.Equals(x.CashFlowSection.ToString(), section,
+                    StringComparison.Ordinal))
+                .Sum(x => x.EventKind == PublicSectorBudgetActualEventKind.CashReceipt ? x.Amount : -x.Amount);
+            var statementActual = section switch
+            {
+                "Operating" => cashFlow.NetCashFromOperating,
+                "Investing" => cashFlow.NetCashFromInvesting,
+                "Financing" => cashFlow.NetCashFromFinancing,
+                _ => throw new InvalidOperationException("Unsupported cash-flow section.")
+            };
+            var expected = statementActual - budgetActual;
+            var fingerprintMaterial = new StringBuilder()
+                .Append(version.Id.ToString("N")).Append('|')
+                .Append(version.PeriodStart.ToString("O")).Append('|')
+                .Append(version.PeriodEnd.ToString("O")).Append('|')
+                .Append(companyName).Append('|').Append(section).Append('|')
+                .Append(cashFlow.NetCashFromOperating).Append('|')
+                .Append(cashFlow.NetCashFromInvesting).Append('|')
+                .Append(cashFlow.NetCashFromFinancing).Append('|')
+                .Append(cashFlow.CashAtStart).Append('|').Append(cashFlow.CashAtEnd).Append('|')
+                .Append(cashFlow.ReconciliationDifference).Append('|')
+                .AppendJoin(';', actuals.OrderBy(x => x.Id).Select(x =>
+                    $"{x.Id:N}:{x.SourceKind}:{x.SourceRecordId:N}:{x.EventKind}:{x.CashFlowSection}:{x.SourceReference}:{x.SourceDate:O}:{x.EffectiveDate:O}:{x.Currency}:{x.SourceAmount}:{x.Amount}:{x.ExchangeRateToBudgetCurrency}:{x.ExchangeRateDate:O}:{x.ExchangeRateSource}:{x.ExchangeRateSourceReference}"))
+                .ToString();
+            var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintMaterial)));
+            return new BudgetAutomaticReconciliationCandidate(PublicSectorBudgetReconciliationType.Basis,
+                section, expected,
+                $"Difference between certified cash-budget actuals and the Statement of Cash Flows {section.ToLowerInvariant()} section.",
+                fingerprint, DateTime.UtcNow);
+        }
+
+        public async Task<PublicSectorBudgetReconciliation> CreateAutomaticCashFlowBudgetReconciliationAsync(
+            Guid companyId, int financialYear, Guid budgetVersionId, string statementSection,
+            string supportingReference, Guid actorId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(supportingReference))
+                throw new InvalidOperationException("A cash-flow reconciliation workpaper or evidence reference is required.");
+            return await _db.InTransactionAsync(async token =>
+            {
+                var section = new[] { "Operating", "Investing", "Financing" }.FirstOrDefault(x =>
+                    string.Equals(x, statementSection?.Trim(), StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException("Cash-flow reconciliation section must be Operating, Investing or Financing.");
+                await _db.AcquireTransactionLockAsync(
+                    $"ipsas24-cashflow-reconciliation:{companyId:N}:{budgetVersionId:N}:{section}", token);
+                var candidate = await GetAutomaticCashFlowBudgetReconciliationCandidateAsync(
+                    companyId, financialYear, budgetVersionId, section, token);
+                var version = await _db.PublicSectorBudgetVersions.SingleAsync(x =>
+                    x.Id == budgetVersionId && x.CompanyId == companyId, token);
+                var companyName = await _db.Companies.IgnoreQueryFilters()
+                    .Where(x => x.Id == companyId).Select(x => x.Name).SingleAsync(token);
+                if (await _db.PublicSectorBudgetReconciliations.AnyAsync(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId &&
+                    x.StatementPeriodStart == version.PeriodStart && x.StatementPeriodEnd == version.PeriodEnd &&
+                    x.StatementEntityScope == companyName && x.Type == candidate.Type &&
+                    x.StatementSection == section && x.Status != PublicSectorBudgetReconciliationStatus.Rejected, token))
+                    throw new InvalidOperationException("An active cash-flow reconciliation already exists for this budget version, period and section.");
+
+                var item = new PublicSectorBudgetReconciliation
+                {
+                    CompanyId = companyId, FinancialYear = financialYear, BudgetVersionId = version.Id,
+                    StatementPeriodStart = version.PeriodStart, StatementPeriodEnd = version.PeriodEnd,
+                    StatementEntityScope = companyName, SourceFingerprint = candidate.SourceFingerprint,
+                    CalculatedAt = candidate.CalculatedAt, Type = candidate.Type,
+                    Description = candidate.Explanation, StatementSection = section,
+                    OperatingAmount = section == "Operating" ? candidate.ExpectedAdjustment : 0m,
+                    InvestingAmount = section == "Investing" ? candidate.ExpectedAdjustment : 0m,
+                    FinancingAmount = section == "Financing" ? candidate.ExpectedAdjustment : 0m,
+                    SupportingReference = supportingReference.Trim(),
+                    IsNoDifferenceAttestation = candidate.ExpectedAdjustment == 0m,
+                    Status = PublicSectorBudgetReconciliationStatus.Draft, CreatedBy = actorId
+                };
+                _db.PublicSectorBudgetReconciliations.Add(item);
+                _audit.Record(companyId, actorId, "PublicSectorBudgetReconciliation.CashFlowAutomaticDraftCreated",
+                    "PublicSector", nameof(PublicSectorBudgetReconciliation), item.Id, null,
+                    new { item.BudgetVersionId, item.StatementSection, item.OperatingAmount,
+                        item.InvestingAmount, item.FinancingAmount, item.SourceFingerprint,
+                        item.CalculatedAt, candidate.ExpectedAdjustment });
+                await _db.SaveChangesAsync(token);
+                return item;
+            }, ct);
+        }
+
         public async Task MarkBudgetReconciliationPendingAsync(Guid companyId, Guid reconciliationId,
             Guid workflowId, CancellationToken ct = default)
         {
@@ -410,10 +544,11 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Budget reconciliation row not found.");
             if (item.Status != PublicSectorBudgetReconciliationStatus.Draft)
                 throw new InvalidOperationException("Only a draft reconciliation row can be submitted for approval.");
-            if ((item.StatementSection is "Revenue" or "Expense") &&
+            if ((item.StatementSection is "Revenue" or "Expense" or "Operating" or "Investing" or "Financing") &&
                 (!item.BudgetVersionId.HasValue || !item.StatementPeriodStart.HasValue ||
-                 !item.StatementPeriodEnd.HasValue || string.IsNullOrWhiteSpace(item.SourceFingerprint)))
-                throw new InvalidOperationException("Revenue/expense reconciliations must be scoped and fingerprinted against an approved budget version and statement period.");
+                 !item.StatementPeriodEnd.HasValue || string.IsNullOrWhiteSpace(item.StatementEntityScope) ||
+                 string.IsNullOrWhiteSpace(item.SourceFingerprint) || !item.CalculatedAt.HasValue))
+                throw new InvalidOperationException("IPSAS 24 reconciliations must be scoped and fingerprinted against the approved budget version, reporting period and entity before approval.");
             var approvalAmount = Math.Abs(item.RevenueAmount) + Math.Abs(item.ExpenseAmount) +
                 Math.Abs(item.OperatingAmount) + Math.Abs(item.InvestingAmount) + Math.Abs(item.FinancingAmount);
             var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x =>
@@ -459,6 +594,28 @@ namespace ApexERP.Application.Services
                                 ? item.RevenueAmount != candidate.ExpectedAdjustment || item.ExpenseAmount != 0m
                                 : item.ExpenseAmount != candidate.ExpectedAdjustment || item.RevenueAmount != 0m))
                         throw new InvalidOperationException("The source data or calculated reconciliation has changed since preparation. Reject and recreate the reconciliation using the current candidate.");
+                }
+                else if (item.StatementSection is "Operating" or "Investing" or "Financing")
+                {
+                    if (!item.BudgetVersionId.HasValue || !item.StatementPeriodStart.HasValue ||
+                        !item.StatementPeriodEnd.HasValue || string.IsNullOrWhiteSpace(item.StatementEntityScope))
+                        throw new InvalidOperationException("The cash-flow reconciliation lacks its approved budget and reporting scope.");
+                    var candidate = await GetAutomaticCashFlowBudgetReconciliationCandidateAsync(
+                        companyId, item.FinancialYear, item.BudgetVersionId.Value, item.StatementSection, token);
+                    var amountMatches = item.StatementSection switch
+                    {
+                        "Operating" => item.OperatingAmount == candidate.ExpectedAdjustment &&
+                            item.InvestingAmount == 0m && item.FinancingAmount == 0m,
+                        "Investing" => item.InvestingAmount == candidate.ExpectedAdjustment &&
+                            item.OperatingAmount == 0m && item.FinancingAmount == 0m,
+                        "Financing" => item.FinancingAmount == candidate.ExpectedAdjustment &&
+                            item.OperatingAmount == 0m && item.InvestingAmount == 0m,
+                        _ => false
+                    };
+                    if (!string.Equals(item.SourceFingerprint, candidate.SourceFingerprint, StringComparison.Ordinal) ||
+                        item.Type != candidate.Type ||
+                        (item.IsNoDifferenceAttestation ? candidate.ExpectedAdjustment != 0m : !amountMatches))
+                        throw new InvalidOperationException("The cash-flow source data or calculated adjustment has changed since preparation. Reject and recreate the reconciliation using the current candidate.");
                 }
                 item.Status = PublicSectorBudgetReconciliationStatus.Approved;
                 item.ApprovedBy = actorId;
