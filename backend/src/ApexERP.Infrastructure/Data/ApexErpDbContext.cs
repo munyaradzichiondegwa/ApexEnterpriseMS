@@ -501,6 +501,7 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<PublicSectorBudgetVersion>(modelBuilder);
             ApplyTenantFilter<PublicSectorBudgetVersionLine>(modelBuilder);
             ApplyTenantFilter<PublicSectorBudgetReconciliation>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetExecutionActual>(modelBuilder);
             ApplyTenantFilter<Commitment>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
