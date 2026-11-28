@@ -17,6 +17,7 @@ export default function PublicSectorPage() {
   const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);
   const [approvedBudgetVersions, setApprovedBudgetVersions] = useState<any[]>([]);
   const [budgetExecutionActuals, setBudgetExecutionActuals] = useState<any[]>([]);
+  const [cashActualReconciliation, setCashActualReconciliation] = useState<any | null>(null);
   const [cashBankTransactions, setCashBankTransactions] = useState<any[]>([]);
   const [cashActualDraft, setCashActualDraft] = useState({ budgetVersionId: "", budgetVersionLineId: "", sourceRecordId: "", eventKind: "CashPayment", effectiveDate: new Date().toISOString().slice(0, 10), cashFlowSection: "Operating" });
   const [budgetDraftId, setBudgetDraftId] = useState<string | null>(null);
@@ -114,6 +115,8 @@ export default function PublicSectorPage() {
       ]);
       setApprovedBudgetVersions(versions.data.filter((v: any) => v.accountingBasis === "Cash"));
       setBudgetExecutionActuals(actuals.data);
+      const reconciliation = await api.get(`/public-sector/budget-execution-actuals/reconciliation?year=${year}`);
+      setCashActualReconciliation(reconciliation.data);
       const accountTransactions = await Promise.all(accounts.data.map((account: any) =>
         api.get(`/cashbank/accounts/${account.id}/transactions`).then((r) => r.data)
       ));
@@ -348,6 +351,35 @@ export default function PublicSectorPage() {
                 </tbody>
               </table>
             </div>
+            {cashActualReconciliation && (
+              <div className="border-t pt-3 space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h4 className="font-semibold">IPSAS 24 reconciliation to Statement of Cash Flows</h4>
+                  <span className={cashActualReconciliation.reconciled ? "text-sm font-medium text-green-700" : "text-sm font-medium text-amber-700"}>
+                    {cashActualReconciliation.reconciled ? "Reconciled" : "Not ready for issue"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Source coverage: {cashActualReconciliation.sourceCoverageComplete ? "complete for posted bank movements" : "incomplete"} ·
+                  Uncaptured/unreconciled posted movements: {cashActualReconciliation.uncapturedOrUnreconciledPostedBankMovements} ·
+                  Draft/pending actuals: {cashActualReconciliation.pendingOrDraftActuals}
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="table-base">
+                    <thead><tr><th>Cash-flow section</th><th className="text-right">Budget-basis actual</th><th className="text-right">Statement of Cash Flows</th><th className="text-right">Required adjustment</th><th className="text-right">Approved adjustment</th><th className="text-right">Unreconciled</th></tr></thead>
+                    <tbody>{cashActualReconciliation.sections.map((section: any) => (
+                      <tr key={section.section}>
+                        <td>{section.section}</td><td className="text-right">{fmt(section.budgetBasisActual)}</td>
+                        <td className="text-right">{fmt(section.statementOfCashFlowsActual)}</td>
+                        <td className="text-right">{fmt(section.requiredAdjustment)}</td>
+                        <td className="text-right">{fmt(section.approvedAdjustment)}</td>
+                        <td className="text-right">{fmt(section.unreconciledDifference)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
           {!budgetComparisonLoading && !budgetComparison && (
             <p className="text-sm text-slate-500">No comparison is available. An approved original budget version is required before the statement can be generated.</p>
