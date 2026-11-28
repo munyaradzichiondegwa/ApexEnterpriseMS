@@ -22,6 +22,49 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.ZimbabweDswtWithholdingRecord", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<string>("PaymentReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("IntermediaryName").IsRequired().HasColumnType("text");
+                    b.Property<string>("SupplierName").IsRequired().HasColumnType("text");
+                    b.Property<string>("SupplierCountryCode").IsRequired().HasColumnType("text");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("GrossPaymentAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("WithholdingRate").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("WithheldAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("SupplierRemittanceAmount").HasColumnType("numeric(20,6)");
+                    b.Property<int>("ServiceKind").HasColumnType("integer");
+                    b.Property<int>("SupplierVatStatus").HasColumnType("integer");
+                    b.Property<int>("PaymentRoute").HasColumnType("integer");
+                    b.Property<bool>("ConsumedInZimbabwe").HasColumnType("boolean");
+                    b.Property<bool>("ZeroRatedOrExempt").HasColumnType("boolean");
+                    b.Property<bool>("RecipientAlreadySelfAccountedVat").HasColumnType("boolean");
+                    b.Property<DateTime>("WithheldAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("TaxPeriodYear").HasColumnType("integer");
+                    b.Property<int>("TaxPeriodMonth").HasColumnType("integer");
+                    b.Property<string>("CertificateNumber").HasColumnType("text");
+                    b.Property<DateTime?>("CertificateIssuedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("RemittedToZimraAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("EvidenceReference").HasColumnType("text");
+                    b.Property<Guid?>("ApPaymentId").HasColumnType("uuid");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "PaymentReference").IsUnique();
+                    b.HasIndex("CompanyId", "TaxPeriodYear", "TaxPeriodMonth", "Status");
+                    b.ToTable("ZimbabweDswtWithholdingRecords", t =>
+                        {
+                            t.HasCheckConstraint("CK_ZimbabweDswtWithholdingRecords_Amounts", "\"GrossPaymentAmount\" > 0 AND \"WithholdingRate\" > 0 AND \"WithheldAmount\" > 0 AND \"SupplierRemittanceAmount\" >= 0 AND \"GrossPaymentAmount\" = \"WithheldAmount\" + \"SupplierRemittanceAmount\"");
+                            t.HasCheckConstraint("CK_ZimbabweDswtWithholdingRecords_TaxPeriod", "\"TaxPeriodYear\" BETWEEN 2026 AND 9999 AND \"TaxPeriodMonth\" BETWEEN 1 AND 12");
+                        });
+                });
+
+
             modelBuilder.Entity("ApexERP.Domain.Entities.OrganisationalBranch", b =>
                 {
                     b.Property<Guid>("Id")
