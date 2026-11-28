@@ -768,6 +768,113 @@ namespace ApexERP.Application.Services
         }
 
 
+
+        public async Task<PublicSectorExpectedCashSourceRegisterAttestation?> GetExpectedCashSourceRegisterAttestationAsync(
+            Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
+        {
+            return await _db.PublicSectorExpectedCashSourceRegisterAttestations.FirstOrDefaultAsync(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId, ct);
+        }
+
+        public async Task<PublicSectorExpectedCashSourceRegisterAttestation> CreateExpectedCashSourceRegisterAttestationAsync(
+            Guid companyId, Guid budgetVersionId, int expectedSourceCount, string entityScope,
+            string evidenceReference, Guid actorId, CancellationToken ct = default)
+        {
+            if (expectedSourceCount <= 0 || string.IsNullOrWhiteSpace(entityScope) ||
+                string.IsNullOrWhiteSpace(evidenceReference))
+                throw new InvalidOperationException("A positive source count, reporting entity scope and completeness evidence reference are required.");
+            var version = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
+                x.Id == budgetVersionId && x.CompanyId == companyId &&
+                x.Status == PublicSectorBudgetVersionStatus.Approved &&
+                x.AccountingBasis == AccountingBasis.Cash, ct)
+                ?? throw new InvalidOperationException("An approved cash-basis budget version is required.");
+            if (!string.Equals(entityScope.Trim(), version.EntityScope, StringComparison.Ordinal))
+                throw new InvalidOperationException("The attested reporting entity scope must exactly match the approved budget version.");
+            if (await _db.PublicSectorExpectedCashSourceRegisterAttestations.AnyAsync(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId, ct))
+                throw new InvalidOperationException("A source-register completeness attestation already exists for this budget version.");
+            var sources = await _db.PublicSectorExpectedCashSources.Where(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId).ToListAsync(ct);
+            if (sources.Count != expectedSourceCount || sources.Count == 0 ||
+                sources.Any(x => x.Status != "Approved"))
+                throw new InvalidOperationException("The declared source count must match a non-empty register containing only approved expected sources.");
+            var item = new PublicSectorExpectedCashSourceRegisterAttestation
+            {
+                CompanyId = companyId, BudgetVersionId = budgetVersionId,
+                ExpectedSourceCount = expectedSourceCount, EntityScope = entityScope.Trim(),
+                EvidenceReference = evidenceReference.Trim(), Status = "Draft", CreatedBy = actorId
+            };
+            _db.PublicSectorExpectedCashSourceRegisterAttestations.Add(item);
+            _audit.Record(companyId, actorId, "PublicSectorExpectedCashSourceRegisterAttestation.Created",
+                "PublicSector", nameof(PublicSectorExpectedCashSourceRegisterAttestation), item.Id, null,
+                new { item.BudgetVersionId, item.ExpectedSourceCount, item.EntityScope, item.EvidenceReference });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorExpectedCashSourceRegisterAttestation> SubmitExpectedCashSourceRegisterAttestationAsync(
+            Guid companyId, Guid attestationId, Guid actorId, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorExpectedCashSourceRegisterAttestations.FirstOrDefaultAsync(x =>
+                x.Id == attestationId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Source-register completeness attestation not found.");
+            if (item.Status != "Draft" || item.CreatedBy != actorId)
+                throw new InvalidOperationException("Only the attestation preparer may submit it for independent certification.");
+            var sources = await _db.PublicSectorExpectedCashSources.Where(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == item.BudgetVersionId).ToListAsync(ct);
+            if (sources.Count != item.ExpectedSourceCount || sources.Any(x => x.Status != "Approved"))
+                throw new InvalidOperationException("The approved source register changed or contains unapproved entries; recreate the attestation.");
+            item.Status = "PendingCertification";
+            item.SubmittedBy = actorId;
+            item.SubmittedAt = DateTime.UtcNow;
+            _audit.Record(companyId, actorId, "PublicSectorExpectedCashSourceRegisterAttestation.Submitted",
+                "PublicSector", nameof(PublicSectorExpectedCashSourceRegisterAttestation), item.Id,
+                new { Status = "Draft" }, new { item.Status, item.SubmittedBy, item.SubmittedAt });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorExpectedCashSourceRegisterAttestation> ReviewExpectedCashSourceRegisterAttestationAsync(
+            Guid companyId, Guid attestationId, Guid certifierId, bool accepted,
+            string? reviewNote, CancellationToken ct = default)
+        {
+            return await _db.InTransactionAsync(async token =>
+            {
+                var item = await _db.PublicSectorExpectedCashSourceRegisterAttestations.FirstOrDefaultAsync(x =>
+                    x.Id == attestationId && x.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Source-register completeness attestation not found.");
+                if (item.Status != "PendingCertification")
+                    throw new InvalidOperationException("Only a pending source-register completeness attestation can be certified or rejected.");
+                if (item.CreatedBy == certifierId || item.SubmittedBy == certifierId)
+                    throw new InvalidOperationException("The preparer or submitter cannot certify their own source-register completeness declaration.");
+                if (!accepted && string.IsNullOrWhiteSpace(reviewNote))
+                    throw new InvalidOperationException("A reason is required when rejecting source-register completeness.");
+                var sources = await _db.PublicSectorExpectedCashSources.Where(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == item.BudgetVersionId).ToListAsync(token);
+                if (sources.Count != item.ExpectedSourceCount || sources.Count == 0 ||
+                    sources.Any(x => x.Status != "Approved"))
+                    throw new InvalidOperationException("The expected-source register no longer matches the submitted completeness declaration.");
+                var submissions = await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == item.BudgetVersionId).ToListAsync(token);
+                var everySourceReconciled = sources.All(source => submissions.Any(submission =>
+                    submission.ExpectedCashSourceId == source.Id && submission.Status == "Reviewed" &&
+                    submission.RecordLevelStatus == "Reviewed"));
+                if (accepted && (!everySourceReconciled || submissions.Any(x =>
+                    x.Status != "Reviewed" || x.RecordLevelStatus != "Reviewed")))
+                    throw new InvalidOperationException("Every expected source, including zero-activity sources, must have an independently reviewed source submission and record-level reconciliation before register completeness can be certified.");
+                item.Status = accepted ? "Certified" : "Rejected";
+                item.CertifiedBy = certifierId;
+                item.CertifiedAt = DateTime.UtcNow;
+                item.ReviewNote = string.IsNullOrWhiteSpace(reviewNote) ? null : reviewNote.Trim();
+                _audit.Record(companyId, certifierId, "PublicSectorExpectedCashSourceRegisterAttestation.Reviewed",
+                    "PublicSector", nameof(PublicSectorExpectedCashSourceRegisterAttestation), item.Id,
+                    new { Status = "PendingCertification" },
+                    new { item.Status, item.CertifiedBy, item.CertifiedAt, item.ReviewNote });
+                await _db.SaveChangesAsync(token);
+                return item;
+            }, ct);
+        }
+
         public async Task<BudgetComparisonReport> GetBudgetComparisonAsync(Guid companyId, int financialYear,
             CancellationToken ct = default)
         {
