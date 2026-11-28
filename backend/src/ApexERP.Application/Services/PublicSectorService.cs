@@ -1338,7 +1338,7 @@ namespace ApexERP.Application.Services
                 .OrderBy(x => x.EffectiveDate).ThenBy(x => x.SourceReference).ToListAsync(ct);
         }
 
-        private async Task<bool> IsCertifiedCashActualSourceValidAsync(
+        public async Task<bool> IsCertifiedCashActualSourceValidAsync(
             Guid companyId, PublicSectorBudgetExecutionActual actual, CancellationToken ct)
         {
             var isReceipt = actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt;
