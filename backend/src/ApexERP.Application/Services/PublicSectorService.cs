@@ -845,11 +845,49 @@ namespace ApexERP.Application.Services
                 var rows = await _db.BankTransactions.Where(x =>
                     x.CompanyId == companyId && x.BankAccountId == sourceId &&
                     x.TransactionDate >= periodStart && x.TransactionDate < periodEnd)
-                    .Select(x => new { x.Id, x.Debit, x.Credit, x.Reference, x.TransactionDate, x.JournalEntryId, x.IsReconciled })
+                    .Select(x => new { x.Id, x.Debit, x.Credit, x.Reference, x.TransactionDate,
+                        x.JournalEntryId, x.IsReconciled, x.MatchedStatementLineHash })
                     .ToListAsync(ct);
                 if (rows.Any(x => x.Debit < 0m || x.Credit < 0m ||
                     (x.Debit > 0m && x.Credit > 0m) || Math.Max(x.Debit, x.Credit) <= 0m))
                     throw new InvalidOperationException($"Bank source {expected.SourceCode} contains a transaction with invalid debit/credit amounts.");
+
+                var statementBatches = await _db.BankStatementImportBatches.Where(x =>
+                    x.CompanyId == companyId && x.BankAccountId == sourceId &&
+                    x.PeriodStart == periodStart && x.PeriodEnd == periodEnd).ToListAsync(ct);
+                if (rows.Count > 0)
+                {
+                    if (statementBatches.Count != 1 ||
+                        statementBatches[0].Status != BankStatementImportStatus.Certified ||
+                        statementBatches[0].AuthenticationMethod != BankStatementOriginAuthenticationMethod.IndependentBankConfirmation ||
+                        !statementBatches[0].AuthenticatedBy.HasValue ||
+                        !statementBatches[0].CompletenessCertifiedBy.HasValue ||
+                        statementBatches[0].UploadedBy == statementBatches[0].AuthenticatedBy ||
+                        statementBatches[0].UploadedBy == statementBatches[0].CompletenessCertifiedBy ||
+                        statementBatches[0].AuthenticatedBy == statementBatches[0].CompletenessCertifiedBy)
+                        throw new InvalidOperationException($"Bank source {expected.SourceCode} requires one independently authenticated and completeness-certified original statement for the exact reporting period.");
+                    var batch = statementBatches[0];
+                    var statementRows = await _db.BankStatementImportedTransactions.Where(x =>
+                        x.CompanyId == companyId && x.ImportBatchId == batch.Id).ToListAsync(ct);
+                    if (statementRows.Count != batch.TransactionCount ||
+                        statementRows.Any(x => x.Status != BankStatementImportedTransactionStatus.Matched ||
+                            !x.MatchedBankTransactionId.HasValue))
+                        throw new InvalidOperationException($"Bank source {expected.SourceCode} contains unmatched or excluded statement rows; complete source-register exclusion review before certification.");
+                    var matched = statementRows.ToDictionary(x => x.Id, x => x.MatchedBankTransactionId!.Value);
+                    if (rows.Any(x => !x.IsReconciled || !x.MatchedStatementLineHash.HasValue ||
+                        !matched.TryGetValue(x.MatchedStatementLineHash.Value, out var bankTransactionId) ||
+                        bankTransactionId != x.Id) || matched.Count != rows.Count)
+                        throw new InvalidOperationException($"Bank source {expected.SourceCode} statement rows do not match the complete live bank-transaction population.");
+                    if (batch.TotalDebits != rows.Sum(x => x.Debit) ||
+                        batch.TotalCredits != rows.Sum(x => x.Credit) ||
+                        batch.TransactionCount != rows.Count ||
+                        !string.Equals(batch.Sha256, batch.Sha256.Trim(), StringComparison.Ordinal) ||
+                        !string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Bank source {expected.SourceCode} statement totals, transaction count or currency no longer agree with the live bank population.");
+                }
+                else if (statementBatches.Any(x => x.Status != BankStatementImportStatus.Certified ||
+                    x.TransactionCount != 0))
+                    throw new InvalidOperationException($"Bank source {expected.SourceCode} has an incomplete statement batch despite having no matched bank transactions.");
                 var records = rows.ToDictionary(x => x.Id, x => new ExpectedCashSourceRecord(
                     Math.Max(x.Debit, x.Credit),
                     string.IsNullOrWhiteSpace(x.Reference) ? x.Id.ToString("N") : x.Reference!,
