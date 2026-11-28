@@ -246,6 +246,14 @@ namespace ApexERP.Domain.Common
         Cancelled
     }
 
+    public enum PublicSectorBudgetAllocationStatus
+    {
+        Draft,
+        PendingApproval,
+        Approved,
+        Rejected
+    }
+
     public enum GrantStatus
     {
         Active,
