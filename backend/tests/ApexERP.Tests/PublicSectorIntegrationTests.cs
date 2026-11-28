@@ -1249,13 +1249,6 @@ namespace ApexERP.Tests
                     JournalEntryId = journalId, GlAccountId = accountId, FundCentreId = fundCentreId,
                     Debit = 75m, Credit = 0m, BaseDebit = 75m, BaseCredit = 0m
                 });
-                seed.SettlementComponentAllocations.AddRange(
-                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AR", SettlementAllocationId = arReceiptAllocation1Id, InvoiceId = arInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = arLine1Id, AmountApplied = 60m },
-                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AR", SettlementAllocationId = arReceiptAllocation1Id, InvoiceId = arInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = arLine2Id, AmountApplied = 40m },
-                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AR", SettlementAllocationId = arReceiptAllocation2Id, InvoiceId = arInvoice2Id, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = arInvoice2LineId, AmountApplied = 30m },
-                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = apPaymentAllocation1Id, InvoiceId = apInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = apLine1Id, AmountApplied = 120m },
-                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = apPaymentAllocation1Id, InvoiceId = apInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = apLine2Id, AmountApplied = 80m },
-                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = apPaymentAllocation2Id, InvoiceId = apInvoice2Id, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = apInvoice2LineId, AmountApplied = 60m });
                 var version = new PublicSectorBudgetVersion
                 {
                     Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
@@ -1789,6 +1782,13 @@ namespace ApexERP.Tests
                         new() { Id = apPaymentAllocation2Id, ApPaymentId = apPaymentId, ApInvoiceId = apInvoice2Id, AmountApplied = 60m }
                     }
                 });
+                seed.SettlementComponentAllocations.AddRange(
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AR", SettlementAllocationId = arReceiptAllocation1Id, InvoiceId = arInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = arLine1Id, AmountApplied = 60m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AR", SettlementAllocationId = arReceiptAllocation1Id, InvoiceId = arInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = arLine2Id, AmountApplied = 40m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AR", SettlementAllocationId = arReceiptAllocation2Id, InvoiceId = arInvoice2Id, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = arInvoice2LineId, AmountApplied = 30m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = apPaymentAllocation1Id, InvoiceId = apInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = apLine1Id, AmountApplied = 120m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = apPaymentAllocation1Id, InvoiceId = apInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = apLine2Id, AmountApplied = 80m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = apPaymentAllocation2Id, InvoiceId = apInvoice2Id, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = apInvoice2LineId, AmountApplied = 60m });
                 var version = new PublicSectorBudgetVersion
                 {
                     Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
