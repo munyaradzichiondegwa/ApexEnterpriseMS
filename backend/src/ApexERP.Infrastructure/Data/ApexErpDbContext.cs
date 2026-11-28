@@ -662,6 +662,8 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.ExchangeRateToBudgetCurrency).HasColumnType("numeric(20,10)");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasOne<PublicSectorBudgetVersionLine>().WithMany().HasForeignKey(x => x.BudgetVersionLineId).OnDelete(DeleteBehavior.Restrict);
