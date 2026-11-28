@@ -611,6 +611,7 @@ namespace ApexERP.Application.Services
 
             decimal sourceAmount;
             DateTime sourceDate;
+            string sourceCurrency;
             if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
             {
                 var source = await _db.BankTransactions.FirstOrDefaultAsync(x =>
@@ -618,6 +619,9 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("The bank transaction does not exist in this company.");
                 sourceAmount = Math.Max(source.Debit, source.Credit);
                 sourceDate = source.TransactionDate;
+                sourceCurrency = await _db.BankAccounts.Where(x => x.Id == source.BankAccountId && x.CompanyId == companyId)
+                    .Select(x => x.Currency).SingleOrDefaultAsync(ct)
+                    ?? throw new InvalidOperationException("The bank account currency is unavailable.");
                 if (source.Debit > 0m && source.Credit > 0m || sourceAmount <= 0m)
                     throw new InvalidOperationException("The bank transaction must contain one positive debit or credit amount.");
                 if (Guid.TryParse(expected.SourceIdentifier, out var bankAccountId) && source.BankAccountId != bankAccountId)
@@ -630,6 +634,7 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("The AR receipt does not exist in this company.");
                 sourceAmount = source.Amount;
                 sourceDate = source.ReceiptDate;
+                sourceCurrency = source.Currency;
             }
             else
             {
@@ -638,10 +643,13 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("The AP payment does not exist in this company.");
                 sourceAmount = source.Amount;
                 sourceDate = source.PaymentDate;
+                sourceCurrency = source.Currency;
             }
 
             if (sourceDate < submission.PeriodStart || sourceDate >= submission.PeriodEnd)
                 throw new InvalidOperationException("The source record falls outside the submitted reporting period.");
+            if (!string.Equals(sourceCurrency, submission.Currency, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The source record currency must match the reviewed source submission currency; no implicit FX conversion is permitted.");
             if (isExcluded)
             {
                 if (actualId.HasValue || string.IsNullOrWhiteSpace(exclusionReason))
@@ -662,7 +670,8 @@ namespace ApexERP.Application.Services
                     actual.BudgetVersionId != submission.BudgetVersionId ||
                     actual.SourceKind != sourceKind || actual.SourceRecordId != sourceRecordId ||
                     actual.EffectiveDate < submission.PeriodStart || actual.EffectiveDate >= submission.PeriodEnd ||
-                    actual.Currency != submission.Currency || actual.Amount <= 0m)
+                    actual.Currency != submission.Currency || actual.Amount <= 0m ||
+                    !string.Equals(actual.SourceReference, sourceReference.Trim(), StringComparison.Ordinal))
                     throw new InvalidOperationException("The actual must be certified, belong to this budget version and source record, and match the source period and currency.");
                 if (await _db.PublicSectorCashSourceReconciliationLines.AnyAsync(x =>
                     x.CompanyId == companyId && x.BudgetExecutionActualId == actual.Id, ct))
