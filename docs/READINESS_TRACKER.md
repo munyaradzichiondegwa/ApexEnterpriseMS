@@ -8,7 +8,7 @@ Maps every section of *APEXERP: Enterprise Readiness and Accounting Controls Enh
 | 🟢 **Built** | Implemented, wired into the API/UI, and type-checked against the real entity model. It runs for the first time on your machine (`dotnet build`, `dotnet test`, then use). It was **not executed** against EF Core and PostgreSQL here |
 | ⛔ **Needs input** | Cannot be completed from here: it depends on something only you or a third party holds |
 
-## Current branch verification (27 November 2026)
+## Current branch verification (28 November 2026)
 
 The following evidence supersedes older historical statements in this tracker where they conflict.
 
