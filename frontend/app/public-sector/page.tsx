@@ -38,7 +38,7 @@ export default function PublicSectorPage() {
   const [varianceDraft, setVarianceDraft] = useState({ budgetVersionLineId: "", explanation: "", evidenceReference: "" });
   const [budgetReconciliations, setBudgetReconciliations] = useState<any[]>([]);
   const [budgetReconciliationDraft, setBudgetReconciliationDraft] = useState({
-    type: "Basis", description: "", statementSection: "Revenue",
+    type: "Basis", description: "", statementSection: "Operating",
     revenueAmount: 0, expenseAmount: 0, operatingAmount: 0,
     investingAmount: 0, financingAmount: 0, supportingReference: "",
   });
