@@ -90,6 +90,10 @@ API routes:
 - `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/submit`
 - `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/review`
 
+### Accrual Fund Centre and cost-centre coverage — implemented
+
+For accrual-basis comparisons, the service now inspects posted/reversed GL lines on accounts included in the approved final budget. If any such actual has no Fund Centre or its Fund Centre/cost-centre combination does not match an approved final-budget dimension, comparable actuals are withheld and the report identifies the count of unmapped lines. This prevents untagged actuals from silently disappearing from the comparison. The check is scoped to GL accounts present in the approved budget; an independently approved full chart-of-accounts and reporting-entity scope inventory remains a governance requirement.
+
 ### Final-budget-to-actual variance explanations — implemented
 
 The comparison API now identifies the final budget line behind each comparison row and stores an evidence-backed explanation for each non-zero comparable final-budget-to-actual variance. Explanations are prepared, submitted and independently reviewed. At submission and approval, ApexERP recalculates the current comparison and requires the recorded variance amount to remain exact. PostgreSQL prevents edits or deletion after approval/rejection; a changed actual variance can receive a new explanation while retaining the earlier explanation as audit history.
