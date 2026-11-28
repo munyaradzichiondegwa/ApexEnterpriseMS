@@ -546,6 +546,101 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
+        public async Task Dimensional_budget_variance_uses_only_approved_account_and_cost_centre_allocations()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var expenseAccountId = Guid.NewGuid();
+            var secondExpenseAccountId = Guid.NewGuid();
+            var costCentreId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
+            var actorId = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Dimensional Budget MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-DIM",
+                    Name = "Dimensional Vote", Level = FundCentreLevel.Vote,
+                    FinancialYear = 2026, AppropriationAmount = 1000m
+                });
+                seed.GlAccounts.AddRange(
+                    new GlAccount { Id = expenseAccountId, CompanyId = companyId, Code = "5100", Name = "Travel", Type = GlAccountType.Expense, Currency = "USD" },
+                    new GlAccount { Id = secondExpenseAccountId, CompanyId = companyId, Code = "5200", Name = "Training", Type = GlAccountType.Expense, Currency = "USD" });
+                seed.CostCentres.Add(new CostCentre
+                {
+                    Id = costCentreId, CompanyId = companyId, Code = "CC-OPS", Name = "Operations", IsActive = true
+                });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 3,
+                    StartDate = new DateTime(2026, 3, 1), EndDate = new DateTime(2026, 4, 1),
+                    Status = PeriodStatus.Open
+                });
+                var journal = new JournalEntry
+                {
+                    CompanyId = companyId, EntryNo = "JE-DIMENSIONAL-BUDGET",
+                    Description = "Operations travel expense", EntryDate = new DateTime(2026, 3, 15),
+                    PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                };
+                seed.JournalEntries.Add(journal);
+                seed.JournalLines.AddRange(
+                    new JournalLine
+                    {
+                        JournalEntryId = journal.Id, GlAccountId = expenseAccountId,
+                        Debit = 25m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                        BaseDebit = 25m, BaseCredit = 0m, FundCentreId = fundCentreId, CostCentreId = costCentreId
+                    },
+                    new JournalLine
+                    {
+                        JournalEntryId = journal.Id, GlAccountId = expenseAccountId,
+                        Debit = 10m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                        BaseDebit = 10m, BaseCredit = 0m, FundCentreId = fundCentreId
+                    });
+                seed.PublicSectorBudgetAllocations.AddRange(
+                    new PublicSectorBudgetAllocation
+                    {
+                        CompanyId = companyId, FundCentreId = fundCentreId, GlAccountId = expenseAccountId,
+                        CostCentreId = costCentreId, FinancialYear = 2026, Amount = 80m,
+                        Status = PublicSectorBudgetAllocationStatus.Approved,
+                        ApprovedBy = actorId, ApprovedAt = DateTime.UtcNow
+                    },
+                    new PublicSectorBudgetAllocation
+                    {
+                        CompanyId = companyId, FundCentreId = fundCentreId, GlAccountId = secondExpenseAccountId,
+                        FinancialYear = 2026, Amount = 120m,
+                        Status = PublicSectorBudgetAllocationStatus.PendingApproval
+                    });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var report = await service.GetBudgetVarianceReportAsync(companyId, 2026, fundCentreId);
+            var line = Assert.Single(report);
+            Assert.Equal("5100", line.AccountCode);
+            Assert.Equal("CC-OPS", line.CostCentreCode);
+            Assert.Equal(80m, line.ApprovedBudget);
+            Assert.Equal(25m, line.PostedActuals);
+            Assert.Equal(55m, line.Variance);
+            Assert.Equal(68.75m, line.VariancePercent);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.FinaliseBudgetAllocationApprovalAsync(companyId,
+                    (await ctx.PublicSectorBudgetAllocations.SingleAsync(x => x.GlAccountId == secondExpenseAccountId)).Id,
+                    Guid.NewGuid()));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CreateBudgetAllocationAsync(companyId, fundCentreId, Guid.NewGuid(),
+                    null, 2026, 10m, actorId));
+        }
+
+        [PostgresFact]
         public async Task Year_end_lapse_records_unexpended_appropriation_and_prevents_a_second_close()
         {
             await using var db = await TestDb.CreateAsync();
