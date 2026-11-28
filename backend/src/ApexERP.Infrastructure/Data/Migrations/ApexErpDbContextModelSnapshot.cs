@@ -7706,24 +7706,28 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .WithMany()
                         .HasForeignKey("BudgetVersionId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BudgetActual_BudgetVersion")
                         .IsRequired();
 
                     b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", null)
                         .WithMany()
                         .HasForeignKey("BudgetVersionLineId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BudgetActual_BudgetLine")
                         .IsRequired();
 
                     b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
                         .WithMany()
                         .HasForeignKey("FundCentreId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BudgetActual_FundCentre")
                         .IsRequired();
 
                     b.HasOne("ApexERP.Domain.Entities.GlAccount", null)
                         .WithMany()
                         .HasForeignKey("GlAccountId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BudgetActual_GlAccount")
                         .IsRequired();
                 });
 
