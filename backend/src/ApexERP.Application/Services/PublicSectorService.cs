@@ -290,6 +290,13 @@ namespace ApexERP.Application.Services
                 x.Status == PublicSectorBudgetVersionStatus.Approved &&
                 x.AccountingBasis == AccountingBasis.Cash, ct)
                 ?? throw new InvalidOperationException("An approved cash-basis budget version is required.");
+            var latestApprovedVersionId = await _db.PublicSectorBudgetVersions.Where(x =>
+                    x.CompanyId == companyId && x.FinancialYear == version.FinancialYear &&
+                    x.Status == PublicSectorBudgetVersionStatus.Approved && x.AccountingBasis == AccountingBasis.Cash)
+                .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber)
+                .Select(x => x.Id).FirstAsync(ct);
+            if (latestApprovedVersionId != version.Id)
+                throw new InvalidOperationException("The zero-activity attestation must reference the latest approved cash budget version.");
             var counts = await GetCashPeriodSourceCountsAsync(companyId, version.PeriodStart, version.PeriodEnd, ct);
             if (counts.Bank + counts.Ar + counts.Ap != 0)
                 throw new InvalidOperationException($"Zero-activity attestation is not permitted: source records exist (bank {counts.Bank}, AR receipts {counts.Ar}, AP payments {counts.Ap}). Capture and certify the actual source events instead.");
