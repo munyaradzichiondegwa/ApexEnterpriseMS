@@ -745,7 +745,13 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.SourceAmount).HasColumnType("numeric(20,6)");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .Property(x => x.ExchangeRateToBudgetCurrency).HasColumnType("numeric(20,10)");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.ExchangeRateSource).HasMaxLength(100);
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.ExchangeRateSourceReference).HasMaxLength(500);
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .Property(x => x.ReversalReason).HasMaxLength(2000);
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
