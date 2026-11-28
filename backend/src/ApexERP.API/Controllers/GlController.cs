@@ -366,7 +366,7 @@ namespace ApexERP.API.Controllers
                     current.UpdatedBy = UserId;
                     current.UpdatedAt = DateTime.UtcNow;
                     _audit.Record(CompanyId, UserId, "FxRate.Approved", "GL", nameof(ExchangeRate), current.Id,
-                        new { current.ApprovedBy, current.ApprovedAt },
+                        new { ApprovedBy = (Guid?)null, ApprovedAt = (DateTime?)null },
                         new { current.ApprovedBy, current.ApprovedAt, current.Rate, current.RateSource, current.SourceReference });
                     await _db.SaveChangesAsync(token);
                 });
