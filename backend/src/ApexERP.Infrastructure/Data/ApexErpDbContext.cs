@@ -652,6 +652,23 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorBudgetReconciliation>()
                 .HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
                     "\"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasIndex(x => new { x.CompanyId, x.SourceKind, x.SourceRecordId }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_Source");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasIndex(x => new { x.BudgetVersionId, x.EffectiveDate });
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_Amount", "\"Amount\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasOne<PublicSectorBudgetVersionLine>().WithMany().HasForeignKey(x => x.BudgetVersionLineId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
                 .HasOne<FundCentre>().WithMany().HasForeignKey(a => a.FundCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
