@@ -228,6 +228,11 @@ namespace ApexERP.Application.Services
             if (financialYear < 2000 || financialYear > 2200 || string.IsNullOrWhiteSpace(description) ||
                 string.IsNullOrWhiteSpace(statementSection) || string.IsNullOrWhiteSpace(supportingReference))
                 throw new InvalidOperationException("A valid year, description, statement section and supporting reference are required.");
+            statementSection = statementSection.Trim();
+            if (new[] { "Revenue", "Expense", "Operating", "Investing", "Financing" }
+                .Contains(statementSection, StringComparer.OrdinalIgnoreCase))
+                statementSection = new[] { "Revenue", "Expense", "Operating", "Investing", "Financing" }
+                    .First(x => string.Equals(x, statementSection, StringComparison.OrdinalIgnoreCase));
             var approvedBudget = await _db.PublicSectorBudgetVersions.Where(x =>
                     x.CompanyId == companyId && x.FinancialYear == financialYear &&
                     x.Status == PublicSectorBudgetVersionStatus.Approved)
