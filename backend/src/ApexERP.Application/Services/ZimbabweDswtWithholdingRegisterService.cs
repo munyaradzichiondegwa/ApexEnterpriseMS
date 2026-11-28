@@ -428,3 +428,173 @@ public static class ZimbabweTaxpayerTinValidator
         return tin.Length <= 40 && !tin.Any(char.IsControl);
     }
 }
+
+
+public sealed record ZimbabweDswtFilingPreparationRequest(int TaxYear, int TaxPeriod, int ReturnVersion, string TaxpayerTin);
+public sealed record ZimbabweDswtFilingSubmissionRequest(DateTime SubmittedAt, string SubmissionReference, string EvidenceReference);
+public sealed record ZimbabweDswtFilingAcknowledgementRequest(DateTime AcknowledgedAt, bool Accepted, string AcknowledgementReference, string EvidenceReference);
+public sealed record ZimbabweDswtFilingPaymentRequest(DateTime PaidAt, string PaymentReference, decimal Amount, string Currency, string EvidenceReference);
+
+/// <summary>
+/// Controlled manual TaRMS filing workflow. The service stores an immutable payload snapshot,
+/// records evidence supplied by an authorised operator, and never transmits to TaRMS.
+/// </summary>
+public sealed class ZimbabweDswtFilingWorkflowService
+{
+    private readonly ApexErpDbContext _db;
+    private readonly ZimbabweDswtWithholdingRegisterService _register;
+    private readonly AuditService _audit;
+
+    public ZimbabweDswtFilingWorkflowService(
+        ApexErpDbContext db, ZimbabweDswtWithholdingRegisterService register, AuditService audit)
+    {
+        _db = db;
+        _register = register;
+        _audit = audit;
+    }
+
+    public Task<ZimbabweDswtFiling> PrepareAsync(
+        Guid companyId, ZimbabweDswtFilingPreparationRequest request, CancellationToken ct = default)
+    {
+        if (companyId == Guid.Empty) throw new ArgumentException("A company is required.", nameof(companyId));
+        if (request.ReturnVersion < 1) throw new ArgumentOutOfRangeException(nameof(request.ReturnVersion));
+        return _db.InTransactionAsync(async token =>
+        {
+            await _db.AcquireTransactionLockAsync(
+                $"dswt-filing:{companyId:N}:{request.TaxYear}:{request.TaxPeriod}:{request.ReturnVersion}", token);
+            var summary = await _register.GenerateMonthlyReturnSummaryAsync(
+                companyId, request.TaxYear, request.TaxPeriod, request.TaxpayerTin, token);
+            var payload = System.Text.Json.JsonSerializer.Serialize(summary);
+            var payloadHash = Sha256(payload);
+            var idempotencyKey = Sha256(
+                $"{companyId:N}|{request.TaxYear}|{request.TaxPeriod}|{request.ReturnVersion}|{payloadHash}");
+
+            var existing = await _db.ZimbabweDswtFilings.FirstOrDefaultAsync(x =>
+                x.CompanyId == companyId && x.TaxYear == request.TaxYear &&
+                x.TaxPeriod == request.TaxPeriod && x.ReturnVersion == request.ReturnVersion, token);
+            if (existing != null)
+            {
+                if (!string.Equals(existing.PayloadSha256, payloadHash, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        "This return version already has a different immutable snapshot. Prepare a new return version after reviewing the changed source register.");
+                return existing;
+            }
+
+            var filing = new ZimbabweDswtFiling
+            {
+                CompanyId = companyId,
+                TaxYear = request.TaxYear,
+                TaxPeriod = request.TaxPeriod,
+                ReturnVersion = request.ReturnVersion,
+                TaxpayerTin = summary.TaxpayerTin,
+                TaxpayerName = summary.TaxpayerName,
+                Currency = summary.CurrencyOfDeclaration,
+                TaxableIncome = summary.TaxableIncome,
+                TaxAmount = summary.CalculatedTaxAmount,
+                PaymentCount = summary.PaymentCount,
+                PayloadJson = payload,
+                PayloadSha256 = payloadHash,
+                IdempotencyKey = idempotencyKey,
+                Status = ZimbabweDswtFilingStatus.Prepared,
+                SubmissionChannel = "ManualTaRMS"
+            };
+            _db.ZimbabweDswtFilings.Add(filing);
+            _audit.Record(companyId, _db.CurrentUserId, "Dswt.FilingPrepared", "Tax",
+                nameof(ZimbabweDswtFiling), filing.Id, null,
+                new { filing.TaxYear, filing.TaxPeriod, filing.ReturnVersion, filing.PayloadSha256, filing.IdempotencyKey });
+            await _db.SaveChangesAsync(token);
+            return filing;
+        }, ct);
+    }
+
+    public async Task<ZimbabweDswtFiling> MarkSubmittedAsync(
+        Guid companyId, Guid filingId, ZimbabweDswtFilingSubmissionRequest request, CancellationToken ct = default)
+    {
+        if (request.SubmittedAt == default || string.IsNullOrWhiteSpace(request.SubmissionReference) ||
+            string.IsNullOrWhiteSpace(request.EvidenceReference))
+            throw new ArgumentException("A submission date, TaRMS reference and evidence reference are required.");
+        var filing = await FindAsync(companyId, filingId, ct);
+        if (filing.Status != ZimbabweDswtFilingStatus.Prepared)
+            throw new InvalidOperationException("Only a prepared filing can be marked as submitted.");
+        var reference = request.SubmissionReference.Trim();
+        if (await _db.ZimbabweDswtFilings.AnyAsync(x =>
+            x.CompanyId == companyId && x.Id != filingId && x.SubmissionReference == reference, ct))
+            throw new InvalidOperationException("The TaRMS submission reference is already recorded for this company.");
+        filing.SubmittedAt = request.SubmittedAt;
+        filing.SubmittedBy = _db.CurrentUserId;
+        filing.SubmissionReference = reference;
+        filing.SubmissionEvidenceReference = request.EvidenceReference.Trim();
+        filing.Status = ZimbabweDswtFilingStatus.Submitted;
+        _audit.Record(companyId, _db.CurrentUserId, "Dswt.FilingSubmittedManually", "Tax",
+            nameof(ZimbabweDswtFiling), filing.Id, null,
+            new { filing.SubmittedAt, filing.SubmissionReference, filing.SubmissionEvidenceReference, filing.SubmissionChannel });
+        await _db.SaveChangesAsync(ct);
+        return filing;
+    }
+
+    public async Task<ZimbabweDswtFiling> RecordAcknowledgementAsync(
+        Guid companyId, Guid filingId, ZimbabweDswtFilingAcknowledgementRequest request, CancellationToken ct = default)
+    {
+        if (request.AcknowledgedAt == default || string.IsNullOrWhiteSpace(request.AcknowledgementReference) ||
+            string.IsNullOrWhiteSpace(request.EvidenceReference))
+            throw new ArgumentException("An acknowledgement date, reference and evidence reference are required.");
+        var filing = await FindAsync(companyId, filingId, ct);
+        if (filing.Status != ZimbabweDswtFilingStatus.Submitted)
+            throw new InvalidOperationException("Only a manually submitted filing can receive a TaRMS acknowledgement.");
+        if (filing.SubmittedAt.HasValue && request.AcknowledgedAt < filing.SubmittedAt.Value)
+            throw new InvalidOperationException("The acknowledgement cannot precede submission.");
+        filing.AcknowledgedAt = request.AcknowledgedAt;
+        filing.AcknowledgementReference = request.AcknowledgementReference.Trim();
+        filing.AcknowledgementEvidenceReference = request.EvidenceReference.Trim();
+        filing.Status = request.Accepted
+            ? ZimbabweDswtFilingStatus.Acknowledged
+            : ZimbabweDswtFilingStatus.Rejected;
+        _audit.Record(companyId, _db.CurrentUserId,
+            request.Accepted ? "Dswt.FilingAcknowledged" : "Dswt.FilingRejected", "Tax",
+            nameof(ZimbabweDswtFiling), filing.Id, null,
+            new { filing.AcknowledgedAt, request.Accepted, filing.AcknowledgementReference, filing.AcknowledgementEvidenceReference });
+        await _db.SaveChangesAsync(ct);
+        return filing;
+    }
+
+    public async Task<ZimbabweDswtFiling> ConfirmPaymentAsync(
+        Guid companyId, Guid filingId, ZimbabweDswtFilingPaymentRequest request, CancellationToken ct = default)
+    {
+        if (request.PaidAt == default || string.IsNullOrWhiteSpace(request.PaymentReference) ||
+            string.IsNullOrWhiteSpace(request.EvidenceReference))
+            throw new ArgumentException("A payment date, bank/ZIMRA payment reference and evidence reference are required.");
+        var filing = await FindAsync(companyId, filingId, ct);
+        if (filing.Status != ZimbabweDswtFilingStatus.Acknowledged)
+            throw new InvalidOperationException("Payment can only be confirmed for an acknowledged return.");
+        if (filing.TaxAmount <= 0 || request.Amount <= 0 || request.Amount != filing.TaxAmount)
+            throw new InvalidOperationException("The evidenced payment amount must exactly equal the DSWT return tax amount.");
+        if (!string.Equals(request.Currency?.Trim(), filing.Currency, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The payment currency must match the declared return currency.");
+        if (filing.AcknowledgedAt.HasValue && request.PaidAt < filing.AcknowledgedAt.Value)
+            throw new InvalidOperationException("The payment date cannot precede the TaRMS acknowledgement.");
+        filing.PaymentConfirmedAt = request.PaidAt;
+        filing.PaymentReference = request.PaymentReference.Trim();
+        filing.PaymentAmount = request.Amount;
+        filing.PaymentCurrency = request.Currency.Trim().ToUpperInvariant();
+        filing.PaymentEvidenceReference = request.EvidenceReference.Trim();
+        filing.Status = ZimbabweDswtFilingStatus.PaymentConfirmed;
+        _audit.Record(companyId, _db.CurrentUserId, "Dswt.FilingPaymentConfirmed", "Tax",
+            nameof(ZimbabweDswtFiling), filing.Id, null,
+            new { filing.PaymentConfirmedAt, filing.PaymentReference, filing.PaymentAmount, filing.PaymentCurrency, filing.PaymentEvidenceReference });
+        await _db.SaveChangesAsync(ct);
+        return filing;
+    }
+
+    public Task<ZimbabweDswtFiling?> GetAsync(Guid companyId, Guid filingId, CancellationToken ct = default) =>
+        _db.ZimbabweDswtFilings.AsNoTracking().FirstOrDefaultAsync(
+            x => x.CompanyId == companyId && x.Id == filingId, ct);
+
+    private Task<ZimbabweDswtFiling> FindAsync(Guid companyId, Guid filingId, CancellationToken ct) =>
+        _db.ZimbabweDswtFilings.FirstOrDefaultAsync(
+            x => x.CompanyId == companyId && x.Id == filingId, ct)
+        ?? throw new InvalidOperationException("DSWT filing was not found in this company.");
+
+    private static string Sha256(string value) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+}
