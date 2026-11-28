@@ -48,6 +48,15 @@ public sealed class ZimbabweDigitalServicesTaxEvaluatorTests
     }
 
     [Fact]
+    public void Other_nonresident_payment_categories_are_not_misclassified_as_dswt()
+    {
+        var result = ZimbabweDigitalServicesTaxEvaluator.Evaluate(
+            Eligible() with { ServiceKind = ZimbabweDigitalServiceKind.OtherNonResidentPayment });
+        Assert.False(result.WithholdingRequired);
+        Assert.Contains("separate non-resident income-tax withholding", result.Reason);
+    }
+
+    [Fact]
     public void Excludes_zero_rated_or_exempt_services()
     {
         var result = ZimbabweDigitalServicesTaxEvaluator.Evaluate(Eligible() with { ZeroRatedOrExempt = true });
