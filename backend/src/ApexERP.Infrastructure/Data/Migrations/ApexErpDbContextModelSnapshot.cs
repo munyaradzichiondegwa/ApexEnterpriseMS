@@ -3815,6 +3815,34 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSourceRegisterAttestation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<int>("ExpectedSourceCount").HasColumnType("integer");
+                    b.Property<string>("EntityScope").IsRequired().HasColumnType("text");
+                    b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ReviewNote").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId").HasDatabaseName("IX_ExpectedCashSourceRegisterAttestations_BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId").IsUnique()
+                        .HasDatabaseName("UX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
+                    b.ToTable("PublicSectorExpectedCashSourceRegisterAttestations", t =>
+                        {
+                            t.HasCheckConstraint("CK_ExpectedCashSourceRegisterAttestation_Count", "\"ExpectedSourceCount\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
@@ -3908,6 +3936,16 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("BudgetExecutionActualId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_CashSourceReconciliationLine_Actual");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSourceRegisterAttestation", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ExpectedCashSourceRegisterAttestation_BudgetVersion")
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
