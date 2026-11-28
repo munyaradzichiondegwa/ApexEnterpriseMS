@@ -376,6 +376,8 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.PaymentReference }).IsUnique();
             modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.ApPaymentId })
                 .IsUnique().HasFilter("\"ApPaymentId\" IS NOT NULL");
+            modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.BankStatementTransactionId })
+                .IsUnique().HasFilter("\"BankStatementTransactionId\" IS NOT NULL");
             modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().ToTable(t =>
             {
                 t.HasCheckConstraint("CK_ZimbabweDswtWithholdingRecords_Amounts",
