@@ -17,16 +17,15 @@
 - Added GET endpoint at /api/v1/public-sector/budget-versions/comparison?year={year} and an IPSAS 24 statement view in Public Sector & Government.
 - Comparison selects the approved original and latest approved revised version, includes dimensions introduced or removed by the final budget, and computes expense/income actuals from posted/reversed ledger lines with the appropriate normal-balance sign.
 - Accrual GL actuals are labelled comparable only when the original and revised budget metadata agree on basis, reporting period, currency, classification basis and entity scope. Cash-basis budgets do not reuse accrual GL amounts as if they were comparable.
-- Added a tenant-scoped reconciliation persistence table for basis, timing, entity and presentation adjustments. The statement currently displays approved reconciliation rows only.
+- Added tenant-scoped reconciliation records for basis, timing, entity and presentation adjustments, with preparer capture, independent approval workflow, supporting reference and statement cash-flow section amounts. The statement displays approved reconciliation rows only.
 
 ## Explicit remaining controls
 
-1. A controlled data-entry and independent approval workflow for reconciliation rows must be completed before the reconciliation table can be treated as operational.
-2. For cash/modified-cash budgets, comparable actuals must be sourced from the budgetary ledger/cash and commitment records, independently certified and reconciled to the statement of cash flows. Accrual GL postings are deliberately not substituted.
-3. The current actual calculation is based on tagged posted GL journal lines. Completeness of Fund Centre tagging, entity scope and any omitted budget entities must be certified before statutory issue.
-4. Material variance explanations require preparer/reviewer sign-off and a configurable materiality threshold; an amendment reason alone is not a full statutory variance explanation.
-5. The official Zimbabwe budget classification dictionary, current Treasury template version, reporting period conventions and approved entity scope must be configured from authoritative government sources.
-6. The current statement is a functional first implementation slice, not a claim of full IPSAS compliance, Treasury certification or audit acceptance.
+1. For cash/modified-cash budgets, comparable actuals must be sourced from the budgetary ledger/cash and commitment records, independently certified and reconciled to the statement of cash flows. Accrual GL postings are deliberately not substituted.
+2. The current actual calculation is based on tagged posted GL journal lines. Completeness of Fund Centre tagging, entity scope and any omitted budget entities must be certified before statutory issue.
+3. Material variance explanations require preparer/reviewer sign-off and a configurable materiality threshold; an amendment reason alone is not a full statutory variance explanation.
+4. The official Zimbabwe budget classification dictionary, current Treasury template version, reporting period conventions and approved entity scope must be configured from authoritative government sources.
+5. The current statement is a functional first implementation slice, not a claim of full IPSAS compliance, Treasury certification or audit acceptance.
 
 ## Data integrity
 
