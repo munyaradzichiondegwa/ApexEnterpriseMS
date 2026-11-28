@@ -159,7 +159,7 @@ public sealed class ConsolidationIntercompanyIntegrationTests
     }
 
     [PostgresFact]
-    public async Task Reciprocal_intercompany_balances_are_eliminated_when_equal_and_opposite()
+    public async Task Unregistered_reciprocal_intercompany_journals_are_reported_and_not_eliminated()
     {
         await using var db = await TestDb.CreateAsync();
         var group = await SeedGroupAsync(db, 100m);
@@ -168,8 +168,11 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
         var result = await service.ConsolidateAsync(group.ParentId, new DateTime(2026, 1, 31));
 
-        Assert.Empty(result.IntercompanyExceptions);
-        Assert.Equal(100m, result.TotalEliminations);
+        var orphanExceptions = result.IntercompanyExceptions
+            .Where(x => x.AccountCode.StartsWith("IC-ORPHAN-")).ToList();
+        Assert.Equal(2, orphanExceptions.Count);
+        Assert.All(orphanExceptions, x => Assert.Contains("no IntercompanyTransaction", x.Reason));
+        Assert.Equal(0m, result.TotalEliminations);
         var intercompanyLine = Assert.Single(result.Lines, x => x.Code == "IC-100");
         Assert.Equal(0m, intercompanyLine.ConsolidatedAmount);
         Assert.All(result.PeriodEvidence, x => Assert.True(x.IsGroupPeriodAligned));
@@ -244,8 +247,8 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
         var result = await service.ConsolidateAsync(group.ParentId, new DateTime(2026, 1, 31));
 
-        var exception = Assert.Single(result.IntercompanyExceptions);
-        Assert.Equal("IC-100", exception.AccountCode);
+        var exception = Assert.Single(result.IntercompanyExceptions, x => x.AccountCode == "IC-100");
+        Assert.Equal(2, result.IntercompanyExceptions.Count(x => x.AccountCode.StartsWith("IC-ORPHAN-")));
         if (exception.CompanyAId == group.CompanyAId)
         {
             Assert.Equal(100m, exception.CompanyABalance);
@@ -329,7 +332,8 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         Assert.Equal(2, transactionExceptions.Count);
         Assert.Contains(transactionExceptions, x => x.Reason.Contains("unmatched"));
         Assert.Contains(transactionExceptions, x => x.Reason.Contains("missing its source/mirror"));
-        Assert.Equal(100m, result.TotalEliminations);
+        Assert.Equal(0m, result.TotalEliminations);
+        Assert.Equal(2, result.IntercompanyExceptions.Count(x => x.AccountCode.StartsWith("IC-ORPHAN-")));
     }
 
 }
