@@ -301,6 +301,9 @@ namespace ApexERP.Application.Services
                     x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id &&
                     x.EffectiveDate >= actualVersion.PeriodStart && x.EffectiveDate < actualVersion.PeriodEnd)
                     .ToListAsync(ct);
+                if (cashActuals.Count == 0)
+                    comparabilityIssues.Add("No source-backed cash actuals or explicit zero-activity certification are available. Load and approve actuals on the budget basis before presenting comparable amounts.");
+
                 var capturedSourceIds = cashActuals.Select(x => x.SourceRecordId).Distinct().ToArray();
                 // Every bank-statement movement in the budget period must be accounted for.
                 // Unreconciled, unlinked and unposted movements are exceptions too; filtering
