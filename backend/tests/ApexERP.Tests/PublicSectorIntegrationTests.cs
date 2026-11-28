@@ -20,6 +20,33 @@ namespace ApexERP.Tests
     /// </summary>
     public sealed class PublicSectorIntegrationTests
     {
+        private static BankStatementImportBatch ZeroActivityStatement(
+            Guid companyId, Guid bankAccountId, string accountNo, DateTime periodStart,
+            DateTime periodEnd, decimal balance, Guid uploaderId, Guid authenticatorId,
+            Guid completenessCertifierId, string statementReference)
+        {
+            var bytes = Encoding.UTF8.GetBytes(
+                "ExternalTransactionId,TransactionDate,Description,Reference,Debit,Credit,Currency");
+            return new BankStatementImportBatch
+            {
+                CompanyId = companyId, BankAccountId = bankAccountId,
+                SourceInstitution = "Test Bank", SourceAccountReference = accountNo,
+                StatementReference = statementReference, PeriodStart = periodStart, PeriodEnd = periodEnd,
+                OpeningBalance = balance, ClosingBalance = balance,
+                TotalDebits = 0m, TotalCredits = 0m, TransactionCount = 0,
+                OriginalFileName = "zero-activity.csv", MediaType = "text/csv",
+                ParserVersion = BankStatementCsvParser.ParserVersion,
+                Sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+                ByteLength = bytes.Length, OriginalBytes = bytes,
+                UploadedBy = uploaderId, UploadedAt = DateTime.UtcNow,
+                AuthenticationMethod = BankStatementOriginAuthenticationMethod.IndependentBankConfirmation,
+                AuthenticationEvidenceReference = "BANK-CONFIRM-" + statementReference,
+                AuthenticatedBy = authenticatorId, AuthenticatedAt = DateTime.UtcNow,
+                Status = BankStatementImportStatus.Certified,
+                CompletenessCertifiedBy = completenessCertifierId,
+                CompletenessCertifiedAt = DateTime.UtcNow, CreatedBy = uploaderId
+            };
+        }
         [PostgresFact]
         public async Task Fund_hierarchy_enforces_vote_program_subprogram_and_financial_year()
         {
@@ -2057,6 +2084,9 @@ namespace ApexERP.Tests
                     AccountNo = "ZERO-OPERATING-01", BankName = "Test Bank",
                     Currency = "USD", GlAccountId = bankGlId
                 });
+                seed.BankStatementImportBatches.Add(ZeroActivityStatement(
+                    companyId, bankAccountId, "ZERO-OPERATING-01", periodStart, periodEnd,
+                    1000m, preparerId, Guid.NewGuid(), Guid.NewGuid(), "ZERO-STATEMENT-2026"));
                 seed.GlAccounts.AddRange(
                     new GlAccount { Id = expenseGlId, CompanyId = companyId, Code = "6000",
                         Name = "Accrued operating expense", Type = GlAccountType.Expense,
@@ -2322,6 +2352,9 @@ namespace ApexERP.Tests
                     AccountNo = "BANK-OPERATING-01", BankName = "Test Bank",
                     Currency = "USD", GlAccountId = bankGlId
                 });
+                seed.BankStatementImportBatches.Add(ZeroActivityStatement(
+                    companyId, bankAccountId, "BANK-OPERATING-01", periodStart, periodEnd,
+                    1000m, preparerId, Guid.NewGuid(), Guid.NewGuid(), "BANK-STATEMENT-2026"));
                 seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
                 {
                     Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
