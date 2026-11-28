@@ -1701,9 +1701,25 @@ namespace ApexERP.Tests
             Assert.Single(register);
             Assert.Equal("BANK-OPERATING-01", register[0].SourceCode);
 
-            // The database trigger, not merely the application service, protects approved register history.
-            approved.SourceName = "Silently altered account";
+            var submission = await service.CreateCashSourceSubmissionAsync(companyId, approved.Id,
+                12, 4500m, 1000m, 5500m, "USD", "Bank statement and reconciliation pack", preparerId);
+            Assert.Equal("Draft", submission.Status);
+            await service.SubmitCashSourceSubmissionAsync(companyId, submission.Id, preparerId);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ReviewCashSourceSubmissionAsync(companyId, submission.Id, preparerId, true, null));
+            var reviewed = await service.ReviewCashSourceSubmissionAsync(companyId, submission.Id,
+                approverId, true, "Statement control totals agreed.");
+            Assert.Equal("Reviewed", reviewed.Status);
+            Assert.Equal(approverId, reviewed.ReviewedBy);
+
+            // Database triggers protect both approved register history and independently reviewed controls.
+            reviewed.ControlTotal = 999999m;
             await Assert.ThrowsAsync<DbUpdateException>(() => ctx.SaveChangesAsync());
+
+            await using var immutableContext = db.NewContext(companyId);
+            var immutableSource = await immutableContext.PublicSectorExpectedCashSources.SingleAsync(x => x.Id == approved.Id);
+            immutableSource.SourceName = "Silently altered account";
+            await Assert.ThrowsAsync<DbUpdateException>(() => immutableContext.SaveChangesAsync());
         }
     }
 }
