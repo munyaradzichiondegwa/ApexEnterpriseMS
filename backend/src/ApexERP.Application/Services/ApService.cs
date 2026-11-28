@@ -183,6 +183,16 @@ namespace ApexERP.Application.Services
                     if (taxableLines.Sum(x => x.LineVat) != invoice.VatAmount ||
                         invoice.Lines.Sum(x => x.LineSubtotal) != invoice.Subtotal)
                         throw new InvalidOperationException("AP invoice line tax and subtotal amounts must reconcile exactly to the invoice header.");
+                    var mappings = await _db.TaxAccountMappings.Where(x =>
+                        x.CompanyId == companyId && x.Purpose == "AP-VAT-INPUT" &&
+                        x.TaxCodeId.HasValue && taxCodeIds.Contains(x.TaxCodeId.Value) &&
+                        x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
+                        (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
+                        .ToListAsync(token);
+                    if (mappings.Count != taxCodeIds.Length ||
+                        mappings.Select(x => x.TaxCodeId).Distinct().Count() != taxCodeIds.Length ||
+                        mappings.Any(x => x.GlAccountId != vatInputAccountId))
+                        throw new InvalidOperationException("Each AP VAT tax code requires one approved, effective AP-VAT-INPUT account mapping matching the requested control account.");
                     var taxAccount = await _db.GlAccounts.SingleOrDefaultAsync(x =>
                         x.Id == vatInputAccountId && x.CompanyId == companyId && x.IsActive && x.IsPostable, token);
                     if (taxAccount == null || taxAccount.Type != GlAccountType.Asset)
@@ -191,6 +201,13 @@ namespace ApexERP.Application.Services
                 }
                 if (invoice.WhtAmount > 0m)
                 {
+                    var mapping = await _db.TaxAccountMappings.Where(x =>
+                        x.CompanyId == companyId && x.Purpose == "AP-WHT-PAYABLE" && x.TaxType == TaxType.WHT &&
+                        !x.TaxCodeId.HasValue && x.Status == TaxConfigurationStatus.Approved &&
+                        x.EffectiveFrom <= invoice.InvoiceDate && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
+                        .SingleOrDefaultAsync(token);
+                    if (mapping == null || mapping.GlAccountId != whtPayableAccountId)
+                        throw new InvalidOperationException("AP withholding requires one approved, effective AP-WHT-PAYABLE mapping matching the requested control account.");
                     var taxAccount = await _db.GlAccounts.SingleOrDefaultAsync(x =>
                         x.Id == whtPayableAccountId && x.CompanyId == companyId && x.IsActive && x.IsPostable, token);
                     if (taxAccount == null || taxAccount.Type != GlAccountType.Liability)
@@ -227,14 +244,68 @@ namespace ApexERP.Application.Services
                     glLines.Add(new GlLineRequest(group.Key.GlAccountId, group.Sum(l => l.LineSubtotal), 0, invoice.Currency,
                         invoice.ExchangeRate, group.Key.CostCentreId, "Purchase expense/asset", invoice.FundCentreId, invoice.GrantId));
                 if (invoice.VatAmount > 0)
-                    glLines.Add(new GlLineRequest(vatInputAccountId, invoice.VatAmount, 0, invoice.Currency, invoice.ExchangeRate, null, "VAT input"));
+                {
+                    foreach (var taxCodeId in invoice.Lines.Where(x => x.LineVat > 0m).Select(x => x.TaxCodeId!.Value).Distinct())
+                    {
+                        var taxAmount = invoice.Lines.Where(x => x.TaxCodeId == taxCodeId).Sum(x => x.LineVat);
+                        glLines.Add(new GlLineRequest(vatInputAccountId, taxAmount, 0, invoice.Currency,
+                            invoice.ExchangeRate, null, "VAT input", invoice.FundCentreId, invoice.GrantId, taxCodeId));
+                    }
+                }
                 if (invoice.WhtAmount > 0)
-                    glLines.Add(new GlLineRequest(whtPayableAccountId, 0, invoice.WhtAmount, invoice.Currency, invoice.ExchangeRate, null, "WHT withheld, payable to ZIMRA"));
+                    glLines.Add(new GlLineRequest(whtPayableAccountId, 0, invoice.WhtAmount, invoice.Currency,
+                        invoice.ExchangeRate, null, "WHT withheld, payable to ZIMRA", invoice.FundCentreId, invoice.GrantId));
                 glLines.Add(new GlLineRequest(apControlAccountId, 0, invoice.Total - invoice.WhtAmount, invoice.Currency, invoice.ExchangeRate, null, $"AP: {invoice.InvoiceNo}"));
 
                 var journal = await _gl.PostAsync(companyId, invoice.InvoiceDate, JournalSource.AP,
                     $"AP Invoice {invoice.InvoiceNo}", invoice.InvoiceNo, glLines, token);
                 invoice.JournalEntryId = journal.Id;
+                if (invoice.VatAmount > 0m)
+                {
+                    foreach (var taxCodeId in invoice.Lines.Where(x => x.LineVat > 0m).Select(x => x.TaxCodeId!.Value).Distinct())
+                    {
+                        var mapping = await _db.TaxAccountMappings.Where(x =>
+                            x.CompanyId == companyId && x.Purpose == "AP-VAT-INPUT" && x.TaxCodeId == taxCodeId &&
+                            x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
+                            (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
+                            .SingleAsync(token);
+                        var journalLine = journal.Lines.Single(x => x.TaxCodeId == taxCodeId &&
+                            x.GlAccountId == mapping.GlAccountId && x.Debit ==
+                            invoice.Lines.Where(l => l.TaxCodeId == taxCodeId).Sum(l => l.LineVat));
+                        foreach (var invoiceLine in invoice.Lines.Where(x => x.TaxCodeId == taxCodeId && x.LineVat > 0m))
+                        {
+                            _db.InvoiceTaxComponents.Add(new InvoiceTaxComponent
+                            {
+                                CompanyId = companyId, InvoiceKind = "AP", InvoiceId = invoice.Id,
+                                InvoiceLineId = invoiceLine.Id, TaxCodeId = taxCodeId, TaxType = TaxType.VAT,
+                                TaxableBase = invoiceLine.LineSubtotal,
+                                Rate = invoiceLine.LineSubtotal == 0m ? 0m : invoiceLine.LineVat / invoiceLine.LineSubtotal,
+                                Amount = invoiceLine.LineVat, GlAccountId = mapping.GlAccountId,
+                                TaxAccountMappingId = mapping.Id, MappingVersionNumber = mapping.VersionNumber,
+                                JournalEntryId = journal.Id, JournalLineId = journalLine.Id
+                            });
+                        }
+                    }
+                }
+                if (invoice.WhtAmount > 0m)
+                {
+                    var mapping = await _db.TaxAccountMappings.Where(x =>
+                        x.CompanyId == companyId && x.Purpose == "AP-WHT-PAYABLE" && x.TaxType == TaxType.WHT &&
+                        !x.TaxCodeId.HasValue && x.Status == TaxConfigurationStatus.Approved &&
+                        x.EffectiveFrom <= invoice.InvoiceDate && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
+                        .SingleAsync(token);
+                    var journalLine = journal.Lines.Single(x => x.GlAccountId == mapping.GlAccountId &&
+                        x.Credit == invoice.WhtAmount && x.TaxCodeId == null);
+                    var rate = invoice.Subtotal == 0m ? 0m : invoice.WhtAmount / invoice.Subtotal;
+                    _db.InvoiceTaxComponents.Add(new InvoiceTaxComponent
+                    {
+                        CompanyId = companyId, InvoiceKind = "AP", InvoiceId = invoice.Id,
+                        TaxType = TaxType.WHT, TaxableBase = invoice.Subtotal, Rate = rate,
+                        Amount = invoice.WhtAmount, GlAccountId = mapping.GlAccountId,
+                        TaxAccountMappingId = mapping.Id, MappingVersionNumber = mapping.VersionNumber,
+                        JournalEntryId = journal.Id, JournalLineId = journalLine.Id
+                    });
+                }
                 invoice.Status = InvoiceStatus.Posted;
                 await _db.SaveChangesAsync(token);
 
