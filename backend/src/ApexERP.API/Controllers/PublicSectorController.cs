@@ -578,16 +578,41 @@ namespace ApexERP.API.Controllers
             // whose bank, AR and AP source populations are still empty at read time.
             var certifiedZeroActivity = noSourceBackedCashActuals &&
                 await _publicSector.HasValidCertifiedZeroActivityAttestationAsync(CompanyId, version.Id, ct);
+            // A source-backed cash bridge also requires every required entry in the approved
+            // expected-source register to have an independently reviewed period submission.
+            // This checks the registered population only; it does not certify that the register
+            // itself is complete. That separate control remains a release blocker.
+            var expectedSources = await _db.PublicSectorExpectedCashSources.Where(x =>
+                x.CompanyId == CompanyId && x.BudgetVersionId == version.Id).ToListAsync(ct);
+            var sourceSubmissions = await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                x.CompanyId == CompanyId && x.BudgetVersionId == version.Id).ToListAsync(ct);
+            var expectedSourceRegisterPresent = expectedSources.Count > 0;
+            var expectedSourceRegisterApproved = expectedSourceRegisterPresent &&
+                expectedSources.All(x => x.Status == "Approved");
+            var requiredExpectedSources = expectedSources.Where(x => x.IsRequired).ToList();
+            var requiredSourceSubmissionsReviewed = requiredExpectedSources.All(source =>
+                sourceSubmissions.Any(submission => submission.ExpectedCashSourceId == source.Id &&
+                    submission.Status == "Reviewed"));
+            var noUnreviewedSourceSubmissions = sourceSubmissions.All(x => x.Status == "Reviewed");
+            var registeredSourceSubmissionCoverageComplete = expectedSourceRegisterPresent &&
+                expectedSourceRegisterApproved && requiredSourceSubmissionsReviewed &&
+                noUnreviewedSourceSubmissions;
+
             var sourceCoverageComplete = (noSourceBackedCashActuals
                     ? certifiedZeroActivity
                     : true) &&
                 uncapturedPostedMovements == 0 && missingArSettlementCoverage == 0 &&
-                missingApSettlementCoverage == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0;
+                missingApSettlementCoverage == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0 &&
+                registeredSourceSubmissionCoverageComplete;
             var operatingBridgeDifference = operatingDifference - operatingAdjustment;
             var investingBridgeDifference = investingDifference - investingAdjustment;
             var financingBridgeDifference = financingDifference - financingAdjustment;
-            var reconciled = sourceCoverageComplete && operatingBridgeDifference == 0m &&
-                investingBridgeDifference == 0m && financingBridgeDifference == 0m;
+            // Do not call the period reconciled until the expected-source register itself has
+            // an independently approved completeness certification. No such workflow exists yet.
+            const bool expectedSourceRegisterCompletenessCertified = false;
+            var reconciled = sourceCoverageComplete && expectedSourceRegisterCompletenessCertified &&
+                operatingBridgeDifference == 0m && investingBridgeDifference == 0m &&
+                financingBridgeDifference == 0m;
 
             return Ok(new
             {
@@ -595,6 +620,13 @@ namespace ApexERP.API.Controllers
                 SourceCoverageComplete = sourceCoverageComplete,
                 NoSourceBackedCashActuals = noSourceBackedCashActuals,
                 CertifiedZeroActivityAttestationValid = certifiedZeroActivity,
+                ExpectedSourceRegisterPresent = expectedSourceRegisterPresent,
+                ExpectedSourceRegisterApproved = expectedSourceRegisterApproved,
+                RequiredExpectedSources = requiredExpectedSources.Count,
+                RequiredSourceSubmissionsReviewed = requiredExpectedSources.Count(x =>
+                    sourceSubmissions.Any(s => s.ExpectedCashSourceId == x.Id && s.Status == "Reviewed")),
+                RegisteredSourceSubmissionCoverageComplete = registeredSourceSubmissionCoverageComplete,
+                ExpectedSourceRegisterCompletenessCertified = expectedSourceRegisterCompletenessCertified,
                 UncapturedOrUnreconciledPostedBankMovements = uncapturedPostedMovements,
                 MissingPostedArSettlementCoverage = missingArSettlementCoverage,
                 MissingPostedApSettlementCoverage = missingApSettlementCoverage,
