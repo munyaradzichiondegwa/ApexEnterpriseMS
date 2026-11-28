@@ -466,7 +466,9 @@ export default function PublicSectorPage() {
             <button className="btn-secondary" onClick={loadBudgetComparison} disabled={budgetComparisonLoading}>
               {budgetComparisonLoading ? "Loading…" : "Refresh statement"}
             </button>
-            {budgetComparison && <button className="btn-secondary" onClick={exportBudgetComparison}>Export CSV</button>}
+            {budgetComparison && <button className="btn-secondary" onClick={exportBudgetComparison}
+              disabled={!budgetComparison.comparableActualsAvailable || !budgetComparison.varianceExplanationsComplete}
+              title={!budgetComparison.comparableActualsAvailable ? "Comparable actuals are not available." : !budgetComparison.varianceExplanationsComplete ? "Approve all non-zero variance explanations before export." : "Export the reconciled IPSAS 24 comparison."}>Export CSV</button>}
           </div>
           {budgetComparisonLoading && <p className="text-sm text-slate-500">Loading approved budget versions and ledger actuals…</p>}
           <form onSubmit={createBudgetVersion} className="rounded-lg border p-4 space-y-3">
