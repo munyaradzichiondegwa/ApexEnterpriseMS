@@ -698,11 +698,10 @@ namespace ApexERP.API.Controllers
                 registerAttestation.EntityScope == version.EntityScope &&
                 expectedSourceRegisterApproved && allExpectedSourceSubmissionsReviewed;
 
-            // Record-level matching of every external statement row to one or more actual
-            // allocations (or an independently approved exclusion) is not implemented yet.
-            // Keep this explicit false gate so a control-total submission is never mistaken for
-            // transaction-level completeness.
-            const bool recordLevelSourceReconciliationComplete = false;
+            // A source is record-complete only after every registered population has a reviewed
+            // transaction-level reconciliation, including zero-record submissions.
+            var recordLevelSourceReconciliationComplete = expectedSourceRegisterPresent &&
+                allExpectedSourceSubmissionsReviewed && noUnreviewedSourceSubmissions;
             var sourceCoverageComplete = (noSourceBackedCashActuals
                     ? certifiedZeroActivity
                     : true) &&
