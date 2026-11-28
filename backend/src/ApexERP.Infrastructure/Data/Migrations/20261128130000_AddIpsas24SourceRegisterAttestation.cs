@@ -43,9 +43,9 @@ public sealed class AddIpsas24SourceRegisterAttestation : Migration
                     onDelete: ReferentialAction.Restrict);
             });
 
-        migrationBuilder.CreateIndex("UX_ExpectedCashSourceRegisterAttestation_BudgetVersion",
+        migrationBuilder.CreateIndex("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion",
             "PublicSectorExpectedCashSourceRegisterAttestations",
-            new[] { "CompanyId", "BudgetVersionId" }, unique: true);
+            new[] { "CompanyId", "BudgetVersionId" });
         migrationBuilder.CreateIndex("IX_ExpectedCashSourceRegisterAttestations_BudgetVersionId",
             "PublicSectorExpectedCashSourceRegisterAttestations", "BudgetVersionId");
 
