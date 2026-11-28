@@ -1199,6 +1199,7 @@ namespace ApexERP.Tests
             var excludedStatementLineId = Guid.NewGuid();
             var bankUploaderId = Guid.NewGuid();
             var bankAuthenticatorId = Guid.NewGuid();
+            var bankMatcherId = Guid.NewGuid();
             var bankCompletenessCertifierId = Guid.NewGuid();
             var statementPeriodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var statementPeriodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -1308,7 +1309,7 @@ namespace ApexERP.Tests
                         Reference = "BANK-REF-001", Debit = 75m, Credit = 0m, Currency = "USD",
                         SourceLineNumber = 2, TransactionFingerprint = new string('b', 64),
                         Status = BankStatementImportedTransactionStatus.Matched,
-                        MatchedBankTransactionId = bankTransactionId, MatchedBy = bankAuthenticatorId,
+                        MatchedBankTransactionId = bankTransactionId, MatchedBy = bankMatcherId,
                         MatchedAt = DateTime.UtcNow, CreatedBy = bankUploaderId
                     },
                     new BankStatementImportedTransaction
@@ -1319,7 +1320,7 @@ namespace ApexERP.Tests
                         Reference = "BANK-REF-002", Debit = 25m, Credit = 0m, Currency = "USD",
                         SourceLineNumber = 3, TransactionFingerprint = new string('c', 64),
                         Status = BankStatementImportedTransactionStatus.Matched,
-                        MatchedBankTransactionId = unmappedBankTransactionId, MatchedBy = bankAuthenticatorId,
+                        MatchedBankTransactionId = unmappedBankTransactionId, MatchedBy = bankMatcherId,
                         MatchedAt = DateTime.UtcNow, CreatedBy = bankUploaderId
                     });
                 var version = new PublicSectorBudgetVersion
