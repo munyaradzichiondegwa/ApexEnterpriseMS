@@ -27,6 +27,7 @@ namespace ApexERP.API.Controllers
         string Description, string StatementSection, decimal OperatingAmount, decimal InvestingAmount,
         decimal FinancingAmount, string SupportingReference, decimal RevenueAmount = 0m, decimal ExpenseAmount = 0m,
         bool IsNoDifferenceAttestation = false);
+    public record CreateBudgetExecutionActualReversalRequest(string Reason);
     public record CreateBudgetExecutionActualRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
         PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualSourceKind SourceKind,
         Guid SourceRecordId, DateTime EffectiveDate, CashFlowCategory CashFlowSection);
@@ -888,6 +889,14 @@ namespace ApexERP.API.Controllers
                     req.SourceRecordId, req.EffectiveDate, req.CashFlowSection, UserId, ct);
                 return Ok(actual);
             }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-execution-actuals/{id}/reverse")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> ReverseBudgetExecutionActual(Guid id, CreateBudgetExecutionActualReversalRequest req, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.CreateBudgetExecutionActualReversalAsync(CompanyId, id, req.Reason, UserId, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
