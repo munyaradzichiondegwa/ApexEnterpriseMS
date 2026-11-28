@@ -576,6 +576,189 @@ namespace ApexERP.Application.Services
             return item;
         }
 
+        public async Task<IReadOnlyList<PublicSectorCashSourceReconciliationLine>> GetCashSourceReconciliationLinesAsync(
+            Guid companyId, Guid submissionId, CancellationToken ct = default)
+        {
+            return await _db.PublicSectorCashSourceReconciliationLines
+                .Where(x => x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId)
+                .OrderBy(x => x.SourceRecordId).ThenBy(x => x.BudgetExecutionActualId)
+                .ToListAsync(ct);
+        }
+
+        public async Task<PublicSectorCashSourceReconciliationLine> AddCashSourceReconciliationLineAsync(
+            Guid companyId, Guid submissionId, Guid sourceRecordId, string sourceReference,
+            Guid? actualId, bool isExcluded, string? exclusionReason, Guid actorId,
+            CancellationToken ct = default)
+        {
+            var submission = await _db.PublicSectorCashSourceSubmissions.FirstOrDefaultAsync(x =>
+                x.Id == submissionId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Cash source submission not found.");
+            if (submission.Status != "Reviewed" || submission.RecordLevelStatus != "NotStarted")
+                throw new InvalidOperationException("Transaction mappings can only be added after source controls are reviewed and before record-level reconciliation is submitted.");
+            if (sourceRecordId == Guid.Empty || string.IsNullOrWhiteSpace(sourceReference))
+                throw new InvalidOperationException("A source record identifier and source reference are required.");
+
+            var expected = await _db.PublicSectorExpectedCashSources.FirstOrDefaultAsync(x =>
+                x.Id == submission.ExpectedCashSourceId && x.CompanyId == companyId && x.Status == "Approved", ct)
+                ?? throw new InvalidOperationException("The approved expected source for this submission is unavailable.");
+            var sourceKind = expected.SourceKind switch
+            {
+                "BankAccount" => PublicSectorBudgetActualSourceKind.BankTransaction,
+                "ReceivablesControl" => PublicSectorBudgetActualSourceKind.ArReceipt,
+                "PayablesControl" => PublicSectorBudgetActualSourceKind.ApPayment,
+                _ => throw new InvalidOperationException("Cashbook sources require a separately configured adapter and cannot yet be reconciled to these source types.")
+            };
+
+            decimal sourceAmount;
+            DateTime sourceDate;
+            if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
+            {
+                var source = await _db.BankTransactions.FirstOrDefaultAsync(x =>
+                    x.Id == sourceRecordId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The bank transaction does not exist in this company.");
+                sourceAmount = Math.Max(source.Debit, source.Credit);
+                sourceDate = source.TransactionDate;
+                if (source.Debit > 0m && source.Credit > 0m || sourceAmount <= 0m)
+                    throw new InvalidOperationException("The bank transaction must contain one positive debit or credit amount.");
+                if (Guid.TryParse(expected.SourceIdentifier, out var bankAccountId) && source.BankAccountId != bankAccountId)
+                    throw new InvalidOperationException("The bank transaction belongs to a different bank account than the registered expected source.");
+            }
+            else if (sourceKind == PublicSectorBudgetActualSourceKind.ArReceipt)
+            {
+                var source = await _db.ArReceipts.FirstOrDefaultAsync(x =>
+                    x.Id == sourceRecordId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The AR receipt does not exist in this company.");
+                sourceAmount = source.Amount;
+                sourceDate = source.ReceiptDate;
+            }
+            else
+            {
+                var source = await _db.ApPayments.FirstOrDefaultAsync(x =>
+                    x.Id == sourceRecordId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The AP payment does not exist in this company.");
+                sourceAmount = source.Amount;
+                sourceDate = source.PaymentDate;
+            }
+
+            if (sourceDate < submission.PeriodStart || sourceDate >= submission.PeriodEnd)
+                throw new InvalidOperationException("The source record falls outside the submitted reporting period.");
+            if (isExcluded)
+            {
+                if (actualId.HasValue || string.IsNullOrWhiteSpace(exclusionReason))
+                    throw new InvalidOperationException("An exclusion must not reference a budget actual and must include a reason.");
+                if (await _db.PublicSectorCashSourceReconciliationLines.AnyAsync(x =>
+                    x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId &&
+                    x.SourceRecordId == sourceRecordId, ct))
+                    throw new InvalidOperationException("A source record already has an allocation or exclusion.");
+            }
+            else
+            {
+                if (!actualId.HasValue || !string.IsNullOrWhiteSpace(exclusionReason))
+                    throw new InvalidOperationException("An allocated source record must reference a certified actual and cannot carry an exclusion reason.");
+                var actual = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
+                    x.Id == actualId.Value && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The budget execution actual does not exist in this company.");
+                if (actual.Status != PublicSectorBudgetActualStatus.Certified ||
+                    actual.BudgetVersionId != submission.BudgetVersionId ||
+                    actual.SourceKind != sourceKind || actual.SourceRecordId != sourceRecordId ||
+                    actual.EffectiveDate < submission.PeriodStart || actual.EffectiveDate >= submission.PeriodEnd ||
+                    actual.Currency != submission.Currency || actual.Amount <= 0m)
+                    throw new InvalidOperationException("The actual must be certified, belong to this budget version and source record, and match the source period and currency.");
+                if (await _db.PublicSectorCashSourceReconciliationLines.AnyAsync(x =>
+                    x.CompanyId == companyId && x.BudgetExecutionActualId == actual.Id, ct))
+                    throw new InvalidOperationException("A certified budget actual cannot be reconciled more than once.");
+                var existing = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
+                    x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId &&
+                    x.SourceRecordId == sourceRecordId).ToListAsync(ct);
+                if (existing.Any(x => x.IsExcluded) ||
+                    existing.Any(x => x.SourceAmount != sourceAmount))
+                    throw new InvalidOperationException("A source record cannot mix exclusions with allocations, and its source amount must be consistent across split allocations.");
+                if (existing.Any(x => x.BudgetExecutionActualId == actual.Id))
+                    throw new InvalidOperationException("This actual is already allocated to the source record.");
+            }
+
+            var line = new PublicSectorCashSourceReconciliationLine
+            {
+                CompanyId = companyId, CashSourceSubmissionId = submissionId,
+                SourceRecordId = sourceRecordId, SourceReference = sourceReference.Trim(),
+                SourceAmount = sourceAmount, BudgetExecutionActualId = actualId,
+                AllocatedAmount = actualId.HasValue
+                    ? await _db.PublicSectorBudgetExecutionActuals.Where(x => x.Id == actualId.Value && x.CompanyId == companyId)
+                        .Select(x => x.Amount).SingleAsync(ct)
+                    : 0m,
+                IsExcluded = isExcluded,
+                ExclusionReason = isExcluded ? exclusionReason!.Trim() : null,
+                CreatedBy = actorId
+            };
+            _db.PublicSectorCashSourceReconciliationLines.Add(line);
+            _audit.Record(companyId, actorId, "PublicSectorCashSourceReconciliationLine.Created", "PublicSector",
+                nameof(PublicSectorCashSourceReconciliationLine), line.Id, null,
+                new { line.CashSourceSubmissionId, line.SourceRecordId, line.SourceReference,
+                    line.SourceAmount, line.BudgetExecutionActualId, line.AllocatedAmount,
+                    line.IsExcluded, line.ExclusionReason });
+            await _db.SaveChangesAsync(ct);
+            return line;
+        }
+
+        public async Task<PublicSectorCashSourceSubmission> SubmitCashSourceRecordReconciliationAsync(
+            Guid companyId, Guid submissionId, Guid actorId, CancellationToken ct = default)
+        {
+            var submission = await _db.PublicSectorCashSourceSubmissions.FirstOrDefaultAsync(x =>
+                x.Id == submissionId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Cash source submission not found.");
+            if (submission.Status != "Reviewed" || submission.RecordLevelStatus != "NotStarted" ||
+                submission.ReviewedBy == actorId || submission.CreatedBy == actorId)
+                throw new InvalidOperationException("Only an independent record-reconciliation preparer may submit a reviewed source population.");
+            var lines = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
+                x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId).ToListAsync(ct);
+            var groups = lines.GroupBy(x => x.SourceRecordId).ToList();
+            if (groups.Count != submission.RecordCount)
+                throw new InvalidOperationException($"Record-level reconciliation has {groups.Count} distinct source records; the submitted control count is {submission.RecordCount}.");
+            if (groups.Any(g => g.Select(x => x.SourceAmount).Distinct().Count() != 1 ||
+                (g.Any(x => x.IsExcluded) && (g.Count() != 1 || g.Any(x => !x.IsExcluded))) ||
+                (!g.Any(x => x.IsExcluded) && g.Sum(x => x.AllocatedAmount) != g.First().SourceAmount)))
+                throw new InvalidOperationException("Each source record must be fully allocated across certified actuals or recorded once as an evidenced exclusion; partial and mixed mappings are not permitted.");
+            if (groups.Sum(g => g.First().SourceAmount) != submission.ControlTotal)
+                throw new InvalidOperationException("The distinct source-record amounts do not agree exactly with the submitted source control total.");
+            if (lines.Any(x => x.IsExcluded && string.IsNullOrWhiteSpace(x.ExclusionReason)))
+                throw new InvalidOperationException("Every excluded source record requires a reason.");
+            submission.RecordLevelStatus = "PendingReview";
+            submission.RecordLevelSubmittedBy = actorId;
+            submission.RecordLevelSubmittedAt = DateTime.UtcNow;
+            _audit.Record(companyId, actorId, "PublicSectorCashSourceSubmission.RecordReconciliationSubmitted", "PublicSector",
+                nameof(PublicSectorCashSourceSubmission), submission.Id, new { RecordLevelStatus = "NotStarted" },
+                new { submission.RecordLevelStatus, submission.RecordLevelSubmittedBy, submission.RecordLevelSubmittedAt,
+                    DistinctSourceRecordCount = groups.Count, ReconciledControlTotal = groups.Sum(g => g.First().SourceAmount) });
+            await _db.SaveChangesAsync(ct);
+            return submission;
+        }
+
+        public async Task<PublicSectorCashSourceSubmission> ReviewCashSourceRecordReconciliationAsync(
+            Guid companyId, Guid submissionId, Guid reviewerId, bool accepted,
+            string? reviewNote, CancellationToken ct = default)
+        {
+            var submission = await _db.PublicSectorCashSourceSubmissions.FirstOrDefaultAsync(x =>
+                x.Id == submissionId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Cash source submission not found.");
+            if (submission.Status != "Reviewed" || submission.RecordLevelStatus != "PendingReview" ||
+                submission.CreatedBy == reviewerId || submission.RecordLevelSubmittedBy == reviewerId ||
+                submission.ReviewedBy == reviewerId)
+                throw new InvalidOperationException("Record-level reconciliation requires a reviewer independent of the source preparer, source reviewer and reconciliation submitter.");
+            if (!accepted && string.IsNullOrWhiteSpace(reviewNote))
+                throw new InvalidOperationException("A reason is required when rejecting record-level reconciliation.");
+            submission.RecordLevelStatus = accepted ? "Reviewed" : "Rejected";
+            submission.RecordLevelReviewedBy = reviewerId;
+            submission.RecordLevelReviewedAt = DateTime.UtcNow;
+            submission.RecordLevelReviewNote = string.IsNullOrWhiteSpace(reviewNote) ? null : reviewNote.Trim();
+            _audit.Record(companyId, reviewerId, "PublicSectorCashSourceSubmission.RecordReconciliationReviewed", "PublicSector",
+                nameof(PublicSectorCashSourceSubmission), submission.Id, new { RecordLevelStatus = "PendingReview" },
+                new { submission.RecordLevelStatus, submission.RecordLevelReviewedBy, submission.RecordLevelReviewedAt,
+                    submission.RecordLevelReviewNote });
+            await _db.SaveChangesAsync(ct);
+            return submission;
+        }
+
+
         public async Task<BudgetComparisonReport> GetBudgetComparisonAsync(Guid companyId, int financialYear,
             CancellationToken ct = default)
         {
