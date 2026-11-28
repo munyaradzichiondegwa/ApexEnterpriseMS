@@ -403,7 +403,7 @@ namespace ApexERP.API.Controllers
         [HasPermission(Permissions.PublicSectorBudgetOverride)]
         public async Task<IActionResult> SubmitBudgetExecutionActual(Guid id, CancellationToken ct)
         {
-            try { return Ok(await _publicSector.SubmitBudgetExecutionActualAsync(CompanyId, id, ct)); }
+            try { return Ok(await _publicSector.SubmitBudgetExecutionActualAsync(CompanyId, id, UserId, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
