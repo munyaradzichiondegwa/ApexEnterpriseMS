@@ -74,7 +74,7 @@ public sealed class AddIpsas24BudgetExecutionActuals : Migration
 CREATE OR REPLACE FUNCTION apex_guard_budget_execution_actual() RETURNS trigger AS $ipsas_actual$
 BEGIN
     IF TG_OP = 'DELETE' THEN
-        RAISE EXCEPTION 'Budget execution actual evidence is immutable; use a reversal event.' USING ERRCODE = 'restrict_violation';
+        RAISE EXCEPTION 'Budget execution actual evidence is immutable; a controlled reversal workflow is required.' USING ERRCODE = 'restrict_violation';
     END IF;
     IF NEW."Status" = OLD."Status" THEN
         IF (to_jsonb(NEW) - 'UpdatedAt' - 'UpdatedBy') IS DISTINCT FROM
