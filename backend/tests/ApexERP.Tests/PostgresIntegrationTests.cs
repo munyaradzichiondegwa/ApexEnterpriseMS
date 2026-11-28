@@ -1146,16 +1146,27 @@ namespace ApexERP.Tests
         public async Task Dswt_monthly_return_requires_company_tin_and_rejects_a_mismatched_tin()
         {
             await using var db = await TestDb.CreateAsync();
+            var tenantId = Guid.NewGuid();
             var company = new Company
             {
+                TenantId = tenantId,
                 Name = "DSWT TIN test company",
                 BaseCurrency = "USD",
                 FunctionalCurrency = "USD"
             };
 
-            await using var ctx = db.NewContext(company.Id);
-            ctx.Companies.Add(company);
-            await ctx.SaveChangesAsync();
+            await using (var seed = db.NewContext(null))
+            {
+                seed.CustomerOrganisations.Add(new CustomerOrganisation
+                {
+                    Id = tenantId,
+                    Name = "DSWT TIN test tenant"
+                });
+                seed.Companies.Add(company);
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(company.Id, tenantId: tenantId);
 
             var service = new ZimbabweDswtWithholdingRegisterService(ctx, new AuditService(ctx));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
