@@ -152,6 +152,11 @@ public static class BankStatementCsvParser
                 else field.Append(ch);
                 continue;
             }
+
+            if (quoteClosed && ch != ',' && ch != '\r' && ch != '\n' && !char.IsWhiteSpace(ch))
+                throw new InvalidOperationException("Malformed CSV quoting: unexpected character after closing quote.");
+            if (quoteClosed && char.IsWhiteSpace(ch)) continue;
+
             if (ch == '"')
             {
                 if (fieldStarted || field.Length != 0)
@@ -164,6 +169,7 @@ public static class BankStatementCsvParser
                 record.Add(field.ToString());
                 field.Clear();
                 fieldStarted = false;
+                quoteClosed = false;
             }
             else if (ch == '\r' || ch == '\n')
             {
@@ -171,6 +177,7 @@ public static class BankStatementCsvParser
                 record.Add(field.ToString());
                 field.Clear();
                 fieldStarted = false;
+                quoteClosed = false;
                 if (record.Any(x => x.Length != 0)) records.Add(record);
                 record = new List<string>();
             }
