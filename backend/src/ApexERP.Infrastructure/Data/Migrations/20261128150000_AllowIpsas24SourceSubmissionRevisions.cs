@@ -16,6 +16,10 @@ public sealed class AllowIpsas24SourceSubmissionRevisions : Migration
         migrationBuilder.AddColumn<int>(
             name: "SubmissionRevision", table: "PublicSectorCashSourceSubmissions",
             type: "integer", nullable: false, defaultValue: 1);
+        migrationBuilder.AddCheckConstraint(
+            name: "CK_PublicSectorCashSourceSubmission_Revision",
+            table: "PublicSectorCashSourceSubmissions",
+            sql: "\"SubmissionRevision\" >= 1");
 
         migrationBuilder.DropIndex(
             name: "UX_PublicSectorCashSourceSubmission_Source",
@@ -57,6 +61,9 @@ public sealed class AllowIpsas24SourceSubmissionRevisions : Migration
             table: "PublicSectorCashSourceSubmissions",
             columns: new[] { "CompanyId", "ExpectedCashSourceId" },
             unique: true);
+        migrationBuilder.DropCheckConstraint(
+            name: "CK_PublicSectorCashSourceSubmission_Revision",
+            table: "PublicSectorCashSourceSubmissions");
         migrationBuilder.DropColumn(
             name: "SubmissionRevision", table: "PublicSectorCashSourceSubmissions");
     }
