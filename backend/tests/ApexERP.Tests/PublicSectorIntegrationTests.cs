@@ -1908,7 +1908,8 @@ namespace ApexERP.Tests
             // A rejected record-level reconciliation remains immutable history, but a new
             // source submission revision can be prepared and independently reviewed.
             var revisedSubmission = await service.CreateCashSourceSubmissionAsync(companyId, source.Id,
-                0, 0m, 1000m, 1000m, "USD", "Corrected signed bank statement nil-activity evidence", preparerId);
+                0, 0m, 1000m, 1000m, "USD", "Corrected signed bank statement nil-activity evidence", preparerId,
+                default, "The initial record-level pack was rejected because signed bank confirmation was missing.");
             Assert.Equal(2, revisedSubmission.SubmissionRevision);
             await service.SubmitCashSourceSubmissionAsync(companyId, revisedSubmission.Id, preparerId);
             await service.ReviewCashSourceSubmissionAsync(companyId, revisedSubmission.Id, sourceReviewerId,
