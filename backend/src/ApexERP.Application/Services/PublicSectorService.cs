@@ -1239,11 +1239,13 @@ namespace ApexERP.Application.Services
                 if (!registerCompletenessCertified)
                     comparabilityIssues.Add("Independent expected-source register completeness certification is missing, stale or inconsistent with the approved budget scope.");
 
+                var liveSourceRegisterComplete = await HasCompleteCashSourceRegisterAsync(
+                    companyId, actualVersion.Id, ct);
                 var cashSourceControlsComplete = sourceRegisterApproved && everyExpectedSourceReviewed &&
                     noOrphanOrUnreviewedSubmissions && liveSourcePopulationsComplete &&
-                    registerCompletenessCertified;
-                if (!liveSourcePopulationsComplete)
-                    comparabilityIssues.Add("The live source record population, control total or currency no longer agrees with the independently reviewed record-level reconciliation.");
+                    registerCompletenessCertified && liveSourceRegisterComplete;
+                if (!liveSourcePopulationsComplete || !liveSourceRegisterComplete)
+                    comparabilityIssues.Add("The live source record population, control total, currency or independent certification no longer agrees with the reviewed source reconciliation.");
                 if (uncapturedMovements == 0 && missingArSettlementCoverage == 0 &&
                     missingApSettlementCoverage == 0 && pendingCashActuals == 0 &&
                     invalidCertifiedCashActuals == 0 && cashSourceControlsComplete)
