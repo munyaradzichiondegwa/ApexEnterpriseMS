@@ -3757,6 +3757,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("ReviewedBy").HasColumnType("uuid");
                     b.Property<DateTime?>("ReviewedAt").HasColumnType("timestamp with time zone");
                     b.Property<string>("ReviewNote").HasColumnType("text");
+                    b.Property<string>("RecordLevelStatus").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("RecordLevelSubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("RecordLevelSubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("RecordLevelReviewedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("RecordLevelReviewedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("RecordLevelReviewNote").HasColumnType("text");
                     b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
                     b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
                     b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
@@ -3772,6 +3778,40 @@ namespace ApexERP.Infrastructure.Data.Migrations
                             t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Period", "\"PeriodEnd\" > \"PeriodStart\"");
                             t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_RecordCount", "\"RecordCount\" >= 0");
                             t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Currency", "char_length(\"Currency\") = 3");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashSourceReconciliationLine", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("CashSourceSubmissionId").HasColumnType("uuid");
+                    b.Property<Guid>("SourceRecordId").HasColumnType("uuid");
+                    b.Property<string>("SourceReference").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("SourceAmount").HasColumnType("numeric(20,6)");
+                    b.Property<Guid?>("BudgetExecutionActualId").HasColumnType("uuid");
+                    b.Property<decimal>("AllocatedAmount").HasColumnType("numeric(20,6)");
+                    b.Property<bool>("IsExcluded").HasColumnType("boolean");
+                    b.Property<string>("ExclusionReason").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CashSourceSubmissionId").HasDatabaseName("IX_CashSourceReconciliationLines_Submission");
+                    b.HasIndex("BudgetExecutionActualId").IsUnique()
+                        .HasFilter("\\"BudgetExecutionActualId\\" IS NOT NULL")
+                        .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
+                    b.HasIndex("CompanyId", "CashSourceSubmissionId", "SourceRecordId", "BudgetExecutionActualId")
+                        .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
+                    b.HasIndex("CompanyId", "CashSourceSubmissionId", "SourceRecordId")
+                        .IsUnique().HasFilter("\\"IsExcluded\\" = TRUE")
+                        .HasDatabaseName("UX_CashSourceReconciliationLine_Exclusion");
+                    b.ToTable("PublicSectorCashSourceReconciliationLines", t =>
+                        {
+                            t.HasCheckConstraint("CK_CashSourceReconciliationLine_SourceAmount", "\\"SourceAmount\\" > 0");
+                            t.HasCheckConstraint("CK_CashSourceReconciliationLine_Amounts",
+                                "(\\"IsExcluded\\" = TRUE AND \\"BudgetExecutionActualId\\" IS NULL AND \\"AllocatedAmount\\" = 0 AND length(trim(\\"ExclusionReason\\")) > 0) OR (\\"IsExcluded\\" = FALSE AND \\"BudgetExecutionActualId\\" IS NOT NULL AND \\"AllocatedAmount\\" > 0 AND \\"ExclusionReason\\" IS NULL)");
                         });
                 });
 
@@ -3853,6 +3893,21 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_CashSourceSubmission_BudgetVersion")
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashSourceReconciliationLine", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorCashSourceSubmission", null)
+                        .WithMany()
+                        .HasForeignKey("CashSourceSubmissionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashSourceReconciliationLine_Submission")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetExecutionActualId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashSourceReconciliationLine_Actual");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
