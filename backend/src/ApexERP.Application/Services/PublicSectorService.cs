@@ -616,8 +616,8 @@ namespace ApexERP.Application.Services
                     if (actual == null || actual.Status != PublicSectorBudgetActualStatus.Certified ||
                         actual.BudgetVersionId != submission.BudgetVersionId ||
                         actual.SourceKind != expectedActualSourceKind.Value ||
-                        actual.SourceRecordId != group.Key || actual.Amount != line.AllocatedAmount ||
-                        actual.Amount <= 0m || actual.SourceDate.Date != source.EffectiveDate.Date ||
+                        actual.SourceRecordId != group.Key || actual.SourceAmount != line.AllocatedAmount ||
+                        actual.SourceAmount <= 0m || actual.SourceDate.Date != source.EffectiveDate.Date ||
                         actual.EffectiveDate.Date != source.EffectiveDate.Date ||
                         !string.Equals(actual.SourceReference, source.Reference, StringComparison.Ordinal) ||
                         !string.Equals(actual.Currency, source.Currency, StringComparison.OrdinalIgnoreCase) ||
@@ -1047,7 +1047,7 @@ namespace ApexERP.Application.Services
                     actual.BudgetVersionId != submission.BudgetVersionId ||
                     actual.SourceKind != sourceKind || actual.SourceRecordId != sourceRecordId ||
                     actual.EffectiveDate < submission.PeriodStart || actual.EffectiveDate >= submission.PeriodEnd ||
-                    actual.Currency != submission.Currency || actual.Amount <= 0m ||
+                    actual.Currency != submission.Currency || actual.SourceAmount <= 0m ||
                     !string.Equals(actual.SourceReference, sourceReference.Trim(), StringComparison.Ordinal))
                     throw new InvalidOperationException("The actual must be certified, belong to this budget version and source record, and match the source period and currency.");
                 if (await _db.PublicSectorCashSourceReconciliationLines.AnyAsync(line =>
@@ -1077,7 +1077,7 @@ namespace ApexERP.Application.Services
                 SourceAmount = sourceAmount, BudgetExecutionActualId = actualId,
                 AllocatedAmount = actualId.HasValue
                     ? await _db.PublicSectorBudgetExecutionActuals.Where(x => x.Id == actualId.Value && x.CompanyId == companyId)
-                        .Select(x => x.Amount).SingleAsync(ct)
+                        .Select(x => x.SourceAmount).SingleAsync(ct)
                     : 0m,
                 IsExcluded = isExcluded,
                 ExclusionReason = isExcluded ? exclusionReason!.Trim() : null,
@@ -2738,8 +2738,48 @@ namespace ApexERP.Application.Services
 
             if (effectiveDate.Date != sourceDate.Date)
                 throw new InvalidOperationException("The budget effective date must match the reconciled bank transaction date. Report timing differences through the separately approved IPSAS 24 reconciliation workflow.");
-            if (amount <= 0m || !string.Equals(currency, version.Currency, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("The source amount must be positive and its currency must match the approved budget currency. Foreign-currency conversion requires approved rate provenance and is not enabled in this phase.");
+            if (amount <= 0m)
+                throw new InvalidOperationException("The source amount must be positive.");
+
+            // Translate at the source effective/value date using the most recent controlled
+            // direct or inverse company rate. Foreign-currency capture fails closed unless
+            // the selected rate has a named source and immutable source reference.
+            var sourceCurrency = currency.Trim().ToUpperInvariant();
+            var budgetCurrency = version.Currency.Trim().ToUpperInvariant();
+            decimal rateToBudget = 1m;
+            DateTime rateDate = sourceDate.Date;
+            string rateSource = "IDENTITY";
+            string rateSourceReference = "Source and budget currencies are identical; no conversion applied.";
+            var inverseRate = false;
+            if (!string.Equals(sourceCurrency, budgetCurrency, StringComparison.Ordinal))
+            {
+                var directRates = await _db.ExchangeRates.Where(x =>
+                    x.CompanyId == companyId && x.FromCurrency.ToUpper() == sourceCurrency &&
+                    x.ToCurrency.ToUpper() == budgetCurrency && x.RateDate <= sourceDate && x.Rate > 0m)
+                    .ToListAsync(ct);
+                var inverseRates = await _db.ExchangeRates.Where(x =>
+                    x.CompanyId == companyId && x.FromCurrency.ToUpper() == budgetCurrency &&
+                    x.ToCurrency.ToUpper() == sourceCurrency && x.RateDate <= sourceDate && x.Rate > 0m)
+                    .ToListAsync(ct);
+                var selected = ExchangeRateResolver.SelectEffectiveRate(directRates, inverseRates, sourceDate);
+                if (selected == null)
+                    throw new InvalidOperationException($"No effective exchange rate exists for {sourceCurrency}/{budgetCurrency} on {sourceDate:yyyy-MM-dd}.");
+                if (string.IsNullOrWhiteSpace(selected.Rate.RateSource) ||
+                    string.Equals(selected.Rate.RateSource.Trim(), "Unspecified", StringComparison.OrdinalIgnoreCase) ||
+                    string.IsNullOrWhiteSpace(selected.Rate.SourceReference))
+                    throw new InvalidOperationException("The selected exchange rate must carry a named rate source and source-document reference before IPSAS 24 capture.");
+                inverseRate = selected.IsInverse;
+                rateToBudget = inverseRate ? 1m / selected.Rate.Rate : selected.Rate.Rate;
+                if (rateToBudget <= 0m)
+                    throw new InvalidOperationException("The selected exchange rate does not produce a positive budget-currency conversion rate.");
+                rateDate = selected.Rate.RateDate.Date;
+                rateSource = selected.Rate.RateSource.Trim();
+                rateSourceReference = selected.Rate.SourceReference.Trim();
+            }
+            var budgetAmount = decimal.Round(amount * rateToBudget, 6, MidpointRounding.AwayFromZero);
+            if (budgetAmount <= 0m)
+                throw new InvalidOperationException("The translated budget-currency amount rounds to zero at the ledger precision.");
+
             var actual = new PublicSectorBudgetExecutionActual
             {
                 CompanyId = companyId, FinancialYear = version.FinancialYear,
@@ -2747,7 +2787,10 @@ namespace ApexERP.Application.Services
                 FundCentreId = line.FundCentreId, GlAccountId = line.GlAccountId, CostCentreId = line.CostCentreId,
                 EventKind = eventKind, SourceKind = sourceKind, SourceRecordId = sourceRecordId,
                 SourceReference = sourceReference, SourceDate = sourceDate, EffectiveDate = effectiveDate,
-                Currency = currency.ToUpperInvariant(), Amount = amount, ExchangeRateToBudgetCurrency = 1m,
+                Currency = sourceCurrency, SourceAmount = amount, Amount = budgetAmount,
+                ExchangeRateToBudgetCurrency = rateToBudget, ExchangeRateDate = rateDate,
+                ExchangeRateSource = rateSource, ExchangeRateSourceReference = rateSourceReference,
+                ExchangeRateIsInverse = inverseRate,
                 CashFlowSection = cashFlowSection, Status = PublicSectorBudgetActualStatus.Draft,
                 CreatedBy = actorId
             };
@@ -2756,7 +2799,9 @@ namespace ApexERP.Application.Services
                 nameof(PublicSectorBudgetExecutionActual), actual.Id, null,
                 new { actual.FinancialYear, actual.BudgetVersionId, actual.BudgetVersionLineId,
                     actual.EventKind, actual.SourceKind, actual.SourceRecordId, actual.SourceReference,
-                    actual.SourceDate, actual.EffectiveDate, actual.Currency, actual.Amount, actual.CashFlowSection });
+                    actual.SourceDate, actual.EffectiveDate, actual.Currency, actual.SourceAmount, actual.Amount,
+                    actual.ExchangeRateToBudgetCurrency, actual.ExchangeRateDate, actual.ExchangeRateSource,
+                    actual.ExchangeRateSourceReference, actual.ExchangeRateIsInverse, actual.CashFlowSection });
             await _db.SaveChangesAsync(ct);
             return actual;
         }
@@ -2803,8 +2848,13 @@ namespace ApexERP.Application.Services
                     SourceDate = original.SourceDate,
                     EffectiveDate = original.EffectiveDate,
                     Currency = original.Currency,
+                    SourceAmount = original.SourceAmount,
                     Amount = original.Amount,
                     ExchangeRateToBudgetCurrency = original.ExchangeRateToBudgetCurrency,
+                    ExchangeRateDate = original.ExchangeRateDate,
+                    ExchangeRateSource = original.ExchangeRateSource,
+                    ExchangeRateSourceReference = original.ExchangeRateSourceReference,
+                    ExchangeRateIsInverse = original.ExchangeRateIsInverse,
                     CashFlowSection = original.CashFlowSection,
                     ReversalOfId = original.Id,
                     ReversalReason = reason.Trim(),
@@ -2884,7 +2934,7 @@ namespace ApexERP.Application.Services
                             .Select(x => (decimal?)x.Amount).FirstOrDefaultAsync(token)
                         : await _db.ApPayments.Where(x => x.Id == actual.SourceRecordId && x.CompanyId == companyId)
                             .Select(x => (decimal?)x.Amount).FirstOrDefaultAsync(token);
-                    if (!sourceAmount.HasValue || sourceAllocations.Sum(x => x.Amount) != sourceAmount.Value)
+                    if (!sourceAmount.HasValue || sourceAllocations.Sum(x => x.SourceAmount) != sourceAmount.Value)
                         throw new InvalidOperationException("All invoice-line allocations for this receipt/payment must be captured and reconcile exactly to the source cash amount before any allocation can be certified.");
                 }
                 actual.Status = PublicSectorBudgetActualStatus.Certified;
@@ -2936,8 +2986,8 @@ namespace ApexERP.Application.Services
                     x.Id == source.BankAccountId && x.CompanyId == companyId &&
                     x.Currency == actual.Currency, ct);
                 if (!bank || (isReceipt
-                    ? source.Credit != actual.Amount || source.Debit != 0m
-                    : source.Debit != actual.Amount || source.Credit != 0m)) return false;
+                    ? source.Credit != actual.SourceAmount || source.Debit != 0m
+                    : source.Debit != actual.SourceAmount || source.Credit != 0m)) return false;
                 var posted = await _db.JournalEntries.AnyAsync(x =>
                     x.Id == source.JournalEntryId.Value && x.CompanyId == companyId &&
                     x.Status == JournalStatus.Posted, ct);
@@ -2947,7 +2997,7 @@ namespace ApexERP.Application.Services
                     x.FundCentreId == actual.FundCentreId && x.CostCentreId == actual.CostCentreId)
                     .SumAsync(x => isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
                 var bankReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
-                return mapped == actual.Amount && source.TransactionDate.Date == actual.SourceDate.Date &&
+                return mapped == actual.SourceAmount && source.TransactionDate.Date == actual.SourceDate.Date &&
                     actual.EffectiveDate.Date == source.TransactionDate.Date &&
                     string.Equals(actual.SourceReference, bankReference, StringComparison.Ordinal);
             }
@@ -3001,7 +3051,7 @@ namespace ApexERP.Application.Services
                     if (revenue != postedLineAmount) return false;
                     expectedAllocation += lineAmount;
                 }
-                if (expectedAllocation != actual.Amount || actual.CostCentreId.HasValue) return false;
+                if (expectedAllocation != actual.SourceAmount || actual.CostCentreId.HasValue) return false;
                 var receiptBankCandidates = await _db.BankAccounts.Where(x =>
                     x.CompanyId == companyId && x.Currency == actual.Currency &&
                     _db.JournalLines.Any(j => j.JournalEntryId == receipt.JournalEntryId.Value &&
