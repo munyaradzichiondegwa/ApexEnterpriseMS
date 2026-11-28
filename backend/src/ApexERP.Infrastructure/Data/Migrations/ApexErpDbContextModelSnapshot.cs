@@ -3737,6 +3737,37 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<string>("SourceKind").IsRequired().HasColumnType("text");
+                    b.Property<string>("SourceCode").IsRequired().HasColumnType("text");
+                    b.Property<string>("SourceName").IsRequired().HasColumnType("text");
+                    b.Property<string>("SourceIdentifier").HasColumnType("text");
+                    b.Property<bool>("IsRequired").HasColumnType("boolean");
+                    b.Property<DateTime>("EffectiveFrom").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("EffectiveTo").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "SourceKind", "SourceCode")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorExpectedCashSource_Key");
+                    b.ToTable("PublicSectorExpectedCashSources", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorExpectedCashSource_Period", "\"EffectiveTo\" > \"EffectiveFrom\"");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashPeriodAttestation", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
@@ -3768,6 +3799,16 @@ namespace ApexERP.Infrastructure.Data.Migrations
                             t.HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Counts",
                                 "\"ObservedBankTransactionCount\" >= 0 AND \"ObservedArReceiptCount\" >= 0 AND \"ObservedApPaymentCount\" >= 0");
                         });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ExpectedCashSource_BudgetVersion")
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashPeriodAttestation", b =>
