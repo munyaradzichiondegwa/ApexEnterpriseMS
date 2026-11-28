@@ -19,7 +19,7 @@ The following evidence supersedes older historical statements in this tracker wh
 | EF Core migration drift, clean database install, hardening scripts and RLS runtime boot | **Pass** on workflow #46046590970. No manual migration generation is required for the current committed model. |
 | PostgreSQL integration scenarios | **Executed in CI** against real PostgreSQL, including organisation hierarchy, public-sector fund/commitment scenarios, payment webhook concurrency and tenant evidence boundaries. |
 | Dashboard operations-count change | **Pass** on workflow [#46046778338](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46046778338). |
-| Current code verification | **Pass** on commit `e573ce9b80f1a0f62bcaffcccd45de3f5cbbbdfc`, workflow [#46103706091](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46103706091): backend build and **322/322 unit/PostgreSQL integration tests**, frontend type-check/tests/production build, EF migration drift, clean PostgreSQL install, hardening scripts, least-privilege RLS runtime boot and backup/restore checks all passed. This run includes the dimensional public-sector budget allocation schema and variance-report regression test, in addition to the 321-test tenant/evidence/scheduled-job coverage. |
+| Current code verification | **Pass** on commit `1ed8c17646b8409861ef5d9338ec66754442fdff`, workflow [#46104593988](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46104593988): backend build and **323/323 unit/PostgreSQL integration tests**, frontend type-check/tests/production build, EF migration drift, clean PostgreSQL install, hardening scripts, least-privilege RLS runtime boot and backup/restore checks all passed. This run includes evidence attachment, listing and download isolation between companies, alongside the approved dimensional public-sector allocation and scheduled-job tenant/company context regressions. |
 | Production Vercel deployment | **Not verified**. The earlier deployment attempt was rate-limited by the provider; retry is required after the provider limit expires. |
 | Production backup, isolated restore, encryption/key custody and measured RPO/RTO | **Not verified**. CI restore checks are not evidence of the production environment's recovery objectives. |
 | Live payment provider certification | **Not verified**. Provider-neutral signed webhook processing is implemented; provider-specific protocols, credentials and sandbox certification remain external prerequisites. |
@@ -64,7 +64,7 @@ The following evidence supersedes older historical statements in this tracker wh
 | 11 | HttpOnly refresh cookie, access token in memory only, no tokens in localStorage, CSRF header, silent renewal | 🟢 API; ✔ frontend tests |
 | 11 | Rate limiting (sign-in, webhooks, global) and security headers (API and web) | ✔ pattern verified; 🟢 wired |
 | 12 | Audit append-only at database level; client IP on every row; correlation id | ✔ triggers; 🟢 IP and correlation id |
-| 12.3 | Evidence: upload with SHA-256, tamper warning on download, no delete | 🟢 `EvidenceService` |
+| 12.3 | Evidence: upload with SHA-256, tamper warning on download, no delete; cross-company attach/list/download isolation exercised against PostgreSQL | ✔ workflow #46104593988 | `EvidenceService` |
 | 13.4 | Statement-to-source drill-down (account postings, journal, source document, audit trail, evidence) | 🟢 Audit workspace |
 
 ## Part V: Reporting and intelligence
@@ -98,8 +98,8 @@ The following evidence supersedes older historical statements in this tracker wh
 |---|---|---|
 | 22.3 | Correlation ids and structured request logging; API versioned (`/api/v1`) | 🟢 |
 | 23.2 | Database constraints, append-only triggers, optional RLS | ✔ SQL |
-| 23.3 | New entities and schema migrations | ✔ EF model snapshot, migration drift check and clean PostgreSQL install pass in CI; public-sector dimensional budget allocation migration `20261128020000_AddPublicSectorBudgetAllocations` is included and applied in workflow #46103706091 |
-| 23.4 | Migration policy | 🟢 CI: drift check, clean install, hardening scripts twice, boot, backup round-trip. Stale `schema.sql` removed; `export-schema.sh` generates it |
+| 23.3 | New entities and schema migrations | ✔ EF model snapshot, migration drift check and clean PostgreSQL install pass in CI; public-sector dimensional budget allocation migration `20261128020000_AddPublicSectorBudgetAllocations` is included and applied in workflow #46104593988 |
+| 23.4 | Migration policy | 🟢 CI: drift check, clean install, hardening scripts twice, least-privilege RLS boot, backup round-trip; latest workflow #46104593988. Stale `schema.sql` removed; `export-schema.sh` generates it |
 | 26 | Background jobs | 🟢 `ScheduledJobs` (once per company per run key; retry ×3) |
 | 27 | Pagination | 🟢 journals, AP and AR invoices (`page`/`pageSize`, old behaviour without them) |
 
