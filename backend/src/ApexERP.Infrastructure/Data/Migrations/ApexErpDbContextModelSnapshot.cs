@@ -22,6 +22,53 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.ZimbabweDswtFiling", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("TaxYear").HasColumnType("integer");
+                    b.Property<int>("TaxPeriod").HasColumnType("integer");
+                    b.Property<int>("ReturnVersion").HasColumnType("integer");
+                    b.Property<string>("TaxpayerTin").IsRequired().HasColumnType("text");
+                    b.Property<string>("TaxpayerName").IsRequired().HasColumnType("text");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("TaxableIncome").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("TaxAmount").HasColumnType("numeric(20,6)");
+                    b.Property<int>("PaymentCount").HasColumnType("integer");
+                    b.Property<string>("PayloadJson").IsRequired().HasColumnType("text");
+                    b.Property<string>("PayloadSha256").IsRequired().HasColumnType("text");
+                    b.Property<string>("IdempotencyKey").IsRequired().HasColumnType("text");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<string>("SubmissionChannel").IsRequired().HasColumnType("text");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<string>("SubmissionReference").HasColumnType("text");
+                    b.Property<string>("SubmissionEvidenceReference").HasColumnType("text");
+                    b.Property<DateTime?>("AcknowledgedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("AcknowledgementReference").HasColumnType("text");
+                    b.Property<string>("AcknowledgementEvidenceReference").HasColumnType("text");
+                    b.Property<DateTime?>("PaymentConfirmedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("PaymentReference").HasColumnType("text");
+                    b.Property<decimal?>("PaymentAmount").HasColumnType("numeric(20,6)");
+                    b.Property<string>("PaymentCurrency").HasColumnType("text");
+                    b.Property<string>("PaymentEvidenceReference").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "TaxYear", "TaxPeriod", "ReturnVersion").IsUnique();
+                    b.HasIndex("CompanyId", "IdempotencyKey").IsUnique();
+                    b.HasIndex("CompanyId", "SubmissionReference").IsUnique()
+                        .HasFilter("\"SubmissionReference\" IS NOT NULL");
+                    b.ToTable("ZimbabweDswtFilings", t =>
+                        {
+                            t.HasCheckConstraint("CK_ZimbabweDswtFilings_Period", "\"TaxYear\" >= 2026 AND \"TaxPeriod\" BETWEEN 1 AND 12 AND \"ReturnVersion\" >= 1");
+                            t.HasCheckConstraint("CK_ZimbabweDswtFilings_Amounts", "\"TaxableIncome\" >= 0 AND \"TaxAmount\" >= 0 AND \"PaymentCount\" >= 0");
+                            t.HasCheckConstraint("CK_ZimbabweDswtFilings_Hash", "char_length(\"PayloadSha256\") = 64 AND char_length(\"IdempotencyKey\") = 64");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.ZimbabweDswtWithholdingRecord", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
