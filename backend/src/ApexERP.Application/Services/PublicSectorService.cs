@@ -898,26 +898,31 @@ namespace ApexERP.Application.Services
                 var statementRows = await _db.BankStatementImportedTransactions.Where(x =>
                     x.CompanyId == companyId && batchIds.Contains(x.ImportBatchId)).ToListAsync(ct);
                 var statementBatchById = statementBatches.ToDictionary(x => x.Id);
-                if (statementRows.Count != statementBatches.Sum(x => x.TransactionCount) ||
-                    statementRows.Any(x =>
-                    {
-                        var sourceBatch = statementBatchById[x.ImportBatchId];
-                        return
-                            (x.Status == BankStatementImportedTransactionStatus.Matched &&
-                                (!x.MatchedBankTransactionId.HasValue || !x.MatchedBy.HasValue || !x.MatchedAt.HasValue ||
-                                 x.MatchedBy == sourceBatch.UploadedBy ||
-                                 x.MatchedBy == sourceBatch.AuthenticatedBy ||
-                                 x.MatchedBy == sourceBatch.CompletenessCertifiedBy)) ||
-                            (x.Status == BankStatementImportedTransactionStatus.Excluded &&
-                                (!x.ExcludedBy.HasValue || !x.ExcludedAt.HasValue ||
-                                 string.IsNullOrWhiteSpace(x.ExclusionReason) ||
-                                 x.ExcludedBy == sourceBatch.UploadedBy ||
-                                 x.ExcludedBy == sourceBatch.AuthenticatedBy ||
-                                 x.ExcludedBy == sourceBatch.CompletenessCertifiedBy)) ||
-                            (x.Status != BankStatementImportedTransactionStatus.Matched &&
-                             x.Status != BankStatementImportedTransactionStatus.Excluded);
-                    }))
-                    throw new InvalidOperationException($"Bank source {expected.SourceCode} contains unmatched statement rows or exclusions without independent review evidence.");
+                if (statementRows.Count != statementBatches.Sum(x => x.TransactionCount))
+                    throw new InvalidOperationException($"Bank source {expected.SourceCode} imported row count does not match the immutable statement batch count.");
+                var invalidStatementRow = statementRows.FirstOrDefault(x =>
+                {
+                    var sourceBatch = statementBatchById[x.ImportBatchId];
+                    return
+                        (x.Status == BankStatementImportedTransactionStatus.Matched &&
+                            (!x.MatchedBankTransactionId.HasValue || !x.MatchedBy.HasValue || !x.MatchedAt.HasValue ||
+                             x.MatchedBy == sourceBatch.UploadedBy ||
+                             x.MatchedBy == sourceBatch.AuthenticatedBy ||
+                             x.MatchedBy == sourceBatch.CompletenessCertifiedBy)) ||
+                        (x.Status == BankStatementImportedTransactionStatus.Excluded &&
+                            (!x.ExcludedBy.HasValue || !x.ExcludedAt.HasValue ||
+                             string.IsNullOrWhiteSpace(x.ExclusionReason) ||
+                             x.ExcludedBy == sourceBatch.UploadedBy ||
+                             x.ExcludedBy == sourceBatch.AuthenticatedBy ||
+                             x.ExcludedBy == sourceBatch.CompletenessCertifiedBy)) ||
+                        (x.Status != BankStatementImportedTransactionStatus.Matched &&
+                         x.Status != BankStatementImportedTransactionStatus.Excluded);
+                });
+                if (invalidStatementRow != null)
+                {
+                    var sourceBatch = statementBatchById[invalidStatementRow.ImportBatchId];
+                    throw new InvalidOperationException($"Bank source {expected.SourceCode} statement row {invalidStatementRow.Id} has status {invalidStatementRow.Status}; matchedBy={invalidStatementRow.MatchedBy}, excludedBy={invalidStatementRow.ExcludedBy}, uploader={sourceBatch.UploadedBy}, authenticator={sourceBatch.AuthenticatedBy}, completenessCertifier={sourceBatch.CompletenessCertifiedBy}.");
+                }
                 var matched = statementRows.Where(x => x.Status == BankStatementImportedTransactionStatus.Matched)
                     .ToDictionary(x => x.Id, x => x.MatchedBankTransactionId!.Value);
                 if (rows.Any(x => !x.IsReconciled || !x.MatchedStatementLineHash.HasValue ||
