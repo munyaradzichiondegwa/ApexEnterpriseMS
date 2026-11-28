@@ -270,6 +270,30 @@ namespace ApexERP.Application.Services
                 operatingAmount == 0m && investingAmount == 0m && financingAmount == 0m;
             if (allAmountsZero != isNoDifferenceAttestation)
                 throw new InvalidOperationException("A zero-value reconciliation must be explicitly recorded as a no-difference attestation; a normal reconciliation must contain a signed adjustment.");
+            if (!Enum.IsDefined(type))
+                throw new InvalidOperationException("A valid IPSAS 24 reconciliation category is required.");
+            string? sourceFingerprint = null;
+            DateTime? calculatedAt = null;
+            if (statementSection is "Revenue" or "Expense")
+            {
+                var comparison = await GetBudgetComparisonAsync(companyId, financialYear, ct,
+                    reconciliationPeriodStart, reconciliationPeriodEnd, reconciliationEntityScope);
+                if (!comparison.ComparableActualsAvailable)
+                    throw new InvalidOperationException("Reconciliation candidates require complete comparable actuals and current source evidence.");
+                var candidate = comparison.AutomaticReconciliationCandidates.SingleOrDefault(x =>
+                    x.Type == type && x.StatementSection == statementSection)
+                    ?? throw new InvalidOperationException("No automated reconciliation candidate exists for this category and statement section.");
+                var expected = candidate.ExpectedAdjustment;
+                var amountsMatch = statementSection == "Revenue"
+                    ? revenueAmount == expected && expenseAmount == 0m &&
+                        operatingAmount == 0m && investingAmount == 0m && financingAmount == 0m
+                    : expenseAmount == expected && revenueAmount == 0m &&
+                        operatingAmount == 0m && investingAmount == 0m && financingAmount == 0m;
+                if (isNoDifferenceAttestation ? expected != 0m : !amountsMatch)
+                    throw new InvalidOperationException($"The proposed {type}/{statementSection} reconciliation does not match the system-calculated adjustment of {expected}.");
+                sourceFingerprint = candidate.SourceFingerprint;
+                calculatedAt = candidate.CalculatedAt;
+            }
             if (isNoDifferenceAttestation &&
                 !new[] { "Revenue", "Expense" }.Contains(statementSection.Trim(), StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException("A no-difference attestation must explicitly cover Revenue or Expense.");
@@ -283,10 +307,8 @@ namespace ApexERP.Application.Services
                     x.StatementEntityScope == reconciliationEntityScope &&
                     x.Type == type && x.StatementSection == statementSection.Trim() &&
                     x.Status != PublicSectorBudgetReconciliationStatus.Rejected).ToListAsync(ct);
-                if (isNoDifferenceAttestation && existingSectionRows.Count > 0)
-                    throw new InvalidOperationException("A no-difference attestation cannot coexist with another active reconciliation for the same financial-statement section.");
-                if (!isNoDifferenceAttestation && existingSectionRows.Any(x => x.IsNoDifferenceAttestation))
-                    throw new InvalidOperationException("An active no-difference attestation already covers this section; reject it before recording an adjustment.");
+                if (existingSectionRows.Count > 0)
+                    throw new InvalidOperationException("Only one reconciliation row per budget version, statement period, entity, category and section is permitted. Reject the existing row before replacing it.");
             }
             // Cash-budget actuals are on the budget's cash basis. Revenue/expense adjustments
             // reconcile those comparable amounts to accrual financial-statement actuals;
@@ -295,7 +317,8 @@ namespace ApexERP.Application.Services
             {
                 CompanyId = companyId, FinancialYear = financialYear, BudgetVersionId = approvedBudget.Id,
                 StatementPeriodStart = reconciliationPeriodStart, StatementPeriodEnd = reconciliationPeriodEnd,
-                StatementEntityScope = reconciliationEntityScope, Type = type,
+                StatementEntityScope = reconciliationEntityScope, SourceFingerprint = sourceFingerprint,
+                CalculatedAt = calculatedAt, Type = type,
                 Description = description.Trim(), StatementSection = statementSection.Trim(),
                 RevenueAmount = revenueAmount, ExpenseAmount = expenseAmount,
                 OperatingAmount = operatingAmount, InvestingAmount = investingAmount,
