@@ -468,6 +468,60 @@ namespace ApexERP.Application.Services
             throw new InvalidOperationException($"Source kind {expected.SourceKind} has no configured source adapter.");
         }
 
+        public async Task<bool> HasCompleteCashSourceRegisterAsync(
+            Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
+        {
+            var version = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
+                x.Id == budgetVersionId && x.CompanyId == companyId &&
+                x.Status == PublicSectorBudgetVersionStatus.Approved &&
+                x.AccountingBasis == AccountingBasis.Cash, ct);
+            if (version == null) return false;
+
+            var sources = await _db.PublicSectorExpectedCashSources.Where(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId).ToListAsync(ct);
+            if (sources.Count == 0 || sources.Any(x => x.Status != "Approved" ||
+                !x.ApprovedBy.HasValue || !x.ApprovedAt.HasValue)) return false;
+
+            var submissions = await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId).ToListAsync(ct);
+            if (submissions.Count != sources.Count || submissions.Any(x =>
+                x.Status != "Reviewed" || !x.ReviewedBy.HasValue || !x.ReviewedAt.HasValue ||
+                x.RecordLevelStatus != "Reviewed" || !x.RecordLevelReviewedBy.HasValue ||
+                !x.RecordLevelReviewedAt.HasValue || !x.RecordLevelSubmittedBy.HasValue ||
+                !x.RecordLevelSubmittedAt.HasValue)) return false;
+
+            var attestation = await _db.PublicSectorExpectedCashSourceRegisterAttestations
+                .Where(x => x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId)
+                .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+            if (attestation == null || attestation.Status != "Certified" ||
+                !attestation.CertifiedBy.HasValue || !attestation.CertifiedAt.HasValue ||
+                !attestation.SubmittedBy.HasValue || !attestation.SubmittedAt.HasValue ||
+                attestation.ExpectedSourceCount != sources.Count ||
+                attestation.EntityScope != version.EntityScope) return false;
+
+            foreach (var source in sources)
+            {
+                var submission = submissions.SingleOrDefault(x => x.ExpectedCashSourceId == source.Id);
+                if (submission == null) return false;
+                try
+                {
+                    var population = await GetExpectedCashSourcePopulationAsync(companyId, source,
+                        submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
+                    var mappedIds = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
+                        x.CompanyId == companyId && x.CashSourceSubmissionId == submission.Id)
+                        .Select(x => x.SourceRecordId).Distinct().ToListAsync(ct);
+                    if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
+                        population.ControlTotal != submission.ControlTotal ||
+                        !population.RecordIds.SetEquals(mappedIds)) return false;
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         public async Task<IReadOnlyList<PublicSectorExpectedCashSource>> GetExpectedCashSourcesAsync(
             Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
         {
