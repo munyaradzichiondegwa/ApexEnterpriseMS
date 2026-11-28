@@ -31,7 +31,8 @@ namespace ApexERP.API.Controllers
     public record CreateCashPeriodAttestationRequest(Guid BudgetVersionId, string EvidenceReference);
     public record CreateExpectedCashSourceRequest(Guid BudgetVersionId, string SourceKind, string SourceCode, string SourceName, string? SourceIdentifier, bool IsRequired, DateTime EffectiveFrom, DateTime EffectiveTo);
     public record CreateCashSourceSubmissionRequest(Guid ExpectedCashSourceId, int RecordCount,
-        decimal ControlTotal, decimal OpeningBalance, decimal ClosingBalance, string Currency, string EvidenceReference);
+        decimal ControlTotal, decimal OpeningBalance, decimal ClosingBalance, string Currency,
+        string EvidenceReference, string? RevisionReason);
     public record ReviewCashSourceSubmissionRequest(bool Accepted, string? ReviewNote);
     public record CreateCashSourceReconciliationLineRequest(Guid SourceRecordId, string SourceReference,
         Guid? BudgetExecutionActualId, bool IsExcluded, string? ExclusionReason);
@@ -507,7 +508,7 @@ namespace ApexERP.API.Controllers
             {
                 var item = await _publicSector.CreateCashSourceSubmissionAsync(CompanyId, req.ExpectedCashSourceId,
                     req.RecordCount, req.ControlTotal, req.OpeningBalance, req.ClosingBalance,
-                    req.Currency, req.EvidenceReference, UserId, ct);
+                    req.Currency, req.EvidenceReference, UserId, ct, req.RevisionReason);
                 return Ok(item);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
