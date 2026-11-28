@@ -56,6 +56,7 @@ namespace ApexERP.Domain.Entities
         public int LineNumber { get; set; }
         public string Description { get; set; } = string.Empty;
         public string ClassificationCode { get; set; } = string.Empty;
+        public string? NoteReference { get; set; }
         public decimal Amount { get; set; }
     }
 
@@ -176,6 +177,7 @@ namespace ApexERP.Domain.Entities
         public decimal VarianceAmount { get; set; }
         public string Explanation { get; set; } = string.Empty;
         public string EvidenceReference { get; set; } = string.Empty;
+        public string? CommentReference { get; set; }
         public string Status { get; set; } = "Draft";
         public Guid? SubmittedBy { get; set; }
         public DateTime? SubmittedAt { get; set; }
