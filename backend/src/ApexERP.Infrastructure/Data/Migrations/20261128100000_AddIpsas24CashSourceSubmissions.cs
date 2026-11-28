@@ -52,6 +52,8 @@ public sealed class AddIpsas24CashSourceSubmissions : Migration
                     x => x.BudgetVersionId, "PublicSectorBudgetVersions", "Id", onDelete: ReferentialAction.Restrict);
             });
 
+        migrationBuilder.CreateIndex("IX_PublicSectorCashSourceSubmissions_ExpectedCashSourceId",
+            "PublicSectorCashSourceSubmissions", "ExpectedCashSourceId");
         migrationBuilder.CreateIndex("UX_PublicSectorCashSourceSubmission_Source",
             "PublicSectorCashSourceSubmissions", new[] { "CompanyId", "ExpectedCashSourceId" }, unique: true);
         migrationBuilder.CreateIndex("IX_PublicSectorCashSourceSubmissions_BudgetVersionId",
