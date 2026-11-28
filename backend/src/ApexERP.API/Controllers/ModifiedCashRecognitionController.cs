@@ -301,6 +301,8 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                     x.Id == ledger.PolicyId && x.CompanyId == CompanyId &&
                     x.Status == ModifiedCashRecognitionPolicyStatus.Approved, token)
                     ?? throw new InvalidOperationException("The recognition policy is no longer approved.");
+                if (ledger.EventKind != ModifiedCashLedgerEventKind.Recognition)
+                    throw new InvalidOperationException("Only GoodsReceived recognition events are enabled. Liquidation and reversal events require dedicated source adapters and are fail-closed.");
                 if (ledger.EventKind == ModifiedCashLedgerEventKind.Recognition)
                 {
                     var commitment = await _db.Commitments.SingleOrDefaultAsync(x =>
