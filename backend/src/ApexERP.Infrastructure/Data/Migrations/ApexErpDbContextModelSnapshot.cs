@@ -4025,7 +4025,6 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
                     b.HasIndex("BankAccountId");
                     b.HasIndex("ImportBatchId");
-                    b.HasIndex("MatchedBankTransactionId");
                     b.HasIndex("CompanyId", "ImportBatchId", "Status")
                         .HasDatabaseName("IX_BankStatementTransaction_BatchStatus");
                     b.HasIndex("CompanyId", "BankAccountId", "ExternalTransactionId").IsUnique()
