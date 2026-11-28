@@ -1464,24 +1464,29 @@ namespace ApexERP.Tests
                 await service.FinaliseBudgetReconciliationApprovalAsync(companyId, item.Id, reconciliationReviewerId);
             }
 
-            var revenueAdjustment = await service.CreateBudgetReconciliationAsync(companyId, 2026,
-                PublicSectorBudgetReconciliationType.Basis, "Cash-to-accrual revenue reconciliation",
-                "Revenue", 0m, 0m, 0m, "WP-IPSAS24-REVENUE-BASIS", reconciliationPreparerId,
-                default, 5m, 0m);
-            await ApproveFinancialStatementReconciliationAsync(revenueAdjustment, 5m);
-            var expenseNoDifference = await service.CreateBudgetReconciliationAsync(companyId, 2026,
-                PublicSectorBudgetReconciliationType.Basis, "No difference in expense reconciliation",
-                "Expense", 0m, 0m, 0m, "WP-IPSAS24-EXPENSE-NIL", reconciliationPreparerId,
-                default, 0m, 0m, true);
-            await ApproveFinancialStatementReconciliationAsync(expenseNoDifference, 0m);
+            foreach (var candidate in revisedComparison.AutomaticReconciliationCandidates)
+            {
+                var automaticRow = await service.CreateAutomaticBudgetReconciliationAsync(companyId, 2026,
+                    revisedComparison.FinalBudgetVersionId!.Value, candidate.Type, candidate.StatementSection,
+                    candidate.Explanation,
+                    $"AUTO-IPSAS24-{candidate.Type}-{candidate.StatementSection}-{candidate.SourceFingerprint[..12]}",
+                    revisedComparison.StatementPeriodStart, revisedComparison.StatementPeriodEnd,
+                    revisedComparison.FinancialStatementEntityScope, reconciliationPreparerId);
+                var workflowAmount = Math.Abs(automaticRow.RevenueAmount) + Math.Abs(automaticRow.ExpenseAmount);
+                await ApproveFinancialStatementReconciliationAsync(automaticRow, workflowAmount);
+            }
 
             var reconciledComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(reconciledComparison.FinancialStatementReconciliation.Complete,
                 reconciledComparison.FinancialStatementReconciliation.Message);
-            Assert.Equal(revisedComparison.FinancialStatementReconciliation.ComparableRevenueActual!.Value + 5m,
-                reconciledComparison.FinancialStatementReconciliation.FinancialStatementRevenueActual);
-            Assert.Equal(revisedComparison.FinancialStatementReconciliation.ComparableExpenseActual,
-                reconciledComparison.FinancialStatementReconciliation.FinancialStatementExpenseActual);
+            var expectedRevenueAdjustment = revisedComparison.AutomaticReconciliationCandidates
+                .Where(x => x.StatementSection == "Revenue").Sum(x => x.ExpectedAdjustment);
+            var expectedExpenseAdjustment = revisedComparison.AutomaticReconciliationCandidates
+                .Where(x => x.StatementSection == "Expense").Sum(x => x.ExpectedAdjustment);
+            Assert.Equal(revisedComparison.FinancialStatementReconciliation.ComparableRevenueActual!.Value +
+                expectedRevenueAdjustment, reconciledComparison.FinancialStatementReconciliation.FinancialStatementRevenueActual);
+            Assert.Equal(revisedComparison.FinancialStatementReconciliation.ComparableExpenseActual!.Value +
+                expectedExpenseAdjustment, reconciledComparison.FinancialStatementReconciliation.FinancialStatementExpenseActual);
             
             // Reconciliation must also revalidate each record, not just the aggregate
             // count and control total. A changed reference on an excluded record is stale.
