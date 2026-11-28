@@ -391,6 +391,17 @@ namespace ApexERP.Tests
             var awarded = await service.AwardAsync(companyId, tenderId, vendorId, "Highest evaluated compliant bid.");
             Assert.Equal(TenderStatus.Awarded, awarded.Status);
             Assert.Equal(vendorId, awarded.AwardedVendorId);
+
+            var tenderAudit = await ctx.AuditLogs.Where(x => x.CompanyId == companyId &&
+                x.EntityId == tenderId && x.Action.StartsWith("Tender.")).Select(x => x.Action).ToListAsync();
+            Assert.Contains("Tender.EvaluationStarted", tenderAudit);
+            Assert.Contains("Tender.Awarded", tenderAudit);
+            var bidAudit = await ctx.AuditLogs.Where(x => x.CompanyId == companyId &&
+                (x.EntityId == bidId || x.EntityId == secondBidId) && x.Action == "Tender.BidScored")
+                .ToListAsync();
+            Assert.Equal(2, bidAudit.Count);
+            Assert.All(bidAudit, entry => Assert.False(string.IsNullOrWhiteSpace(entry.BeforeValueJson)) &&
+                Assert.False(string.IsNullOrWhiteSpace(entry.AfterValueJson)));
         }
 
         [PostgresFact]
@@ -421,6 +432,9 @@ namespace ApexERP.Tests
             Assert.True(bid.IsLateRejected);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 tenderService.ScoreBidAsync(companyId, bid.Id, 80m, 90m, 70m, 0.4m, 0.4m, 0.2m));
+            var bidSubmissionAudit = await ctx.AuditLogs.Where(x => x.CompanyId == companyId &&
+                x.EntityId == bid.Id && x.Action == "Tender.BidSubmitted").SingleAsync();
+            Assert.Contains("true", bidSubmissionAudit.AfterValueJson!, StringComparison.OrdinalIgnoreCase);
         }
 
         [PostgresFact]
