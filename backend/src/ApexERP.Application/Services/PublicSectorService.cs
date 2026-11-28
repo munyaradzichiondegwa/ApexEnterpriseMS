@@ -276,7 +276,9 @@ namespace ApexERP.Application.Services
                     x.Kind == PublicSectorBudgetVersionKind.Revised && x.Status == PublicSectorBudgetVersionStatus.Approved)
                 .OrderByDescending(x => x.VersionNumber).FirstOrDefaultAsync(ct);
 
-            var companyProfile = await _db.Companies.Where(x => x.Id == companyId)
+            // Company is tenant-filtered by CurrentTenantId. Resolve the selected company explicitly
+            // because this service already receives the authenticated CompanyId; PostgreSQL RLS remains active.
+            var companyProfile = await _db.Companies.IgnoreQueryFilters().Where(x => x.Id == companyId)
                 .Select(x => new { x.Name, x.FunctionalCurrency }).FirstOrDefaultAsync(ct);
             var comparabilityIssues = new List<string>();
             if (original.AccountingBasis != AccountingBasis.Accrual)
