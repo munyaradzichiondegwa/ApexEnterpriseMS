@@ -1,6 +1,6 @@
 # Zimbabwe Digital Services Withholding Tax (DSWT) — implementation basis
 
-**Status:** Rules evaluator and company-scoped withholding evidence register implemented. GL posting, AP cash-settlement integration, return export/submission and ZIMRA confirmation remain release gates.
+**Status (28 November 2026):** The statutory evaluator, company-scoped withholding register, certificate/remittance evidence, AP gross-payment reconciliation, authenticated bank-statement reconciliation, USD monthly return preparation/CSV, and evidence-backed manual TaRMS filing workflow are implemented. The AP payment remains posted at the gross amount (Dr AP / Cr Bank); no duplicate DSWT expense or payable is created because the intermediary's withholding is deducted from the same gross remittance. Direct TaRMS API transmission is not implemented and must remain disabled until ZIMRA supplies an authorised interface specification and credentials. Legal/tax review, actual contract/gross-up evidence and taxpayer-specific TaRMS registration remain operational acceptance gates.
 
 ## Authoritative sources reviewed
 
