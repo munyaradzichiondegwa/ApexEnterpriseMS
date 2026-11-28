@@ -176,6 +176,65 @@ namespace ApexERP.Application.Services
             return result.OrderBy(x => x.FundCentreCode).ThenBy(x => x.AccountCode).ThenBy(x => x.CostCentreCode).ToList();
         }
 
+        public sealed record PublicSectorClassificationLine(
+            string ProgrammeCode, string ProgrammeName, string EconomicClassificationCode,
+            string EconomicClassificationName, string? ObjectiveCode, string? ObjectiveName,
+            decimal ApprovedBudget, decimal PostedActuals, decimal Variance, decimal VariancePercent);
+
+        /// <summary>
+        /// Government expenditure schedule across the dimensions already maintained by the ledger:
+        /// fund-centre hierarchy (programme), GL account SubType (economic classification), and
+        /// cost centre (administrative/objective dimension). Classification codes are tenant-defined;
+        /// no national statutory code set is assumed or fabricated.
+        /// </summary>
+        public async Task<List<PublicSectorClassificationLine>> GetClassificationScheduleAsync(
+            Guid companyId, int financialYear, Guid? fundCentreId = null, CancellationToken ct = default)
+        {
+            if (financialYear < 2000 || financialYear > 2200)
+                throw new InvalidOperationException("A valid financial year is required.");
+
+            var approved = await _db.PublicSectorBudgetAllocations
+                .Where(a => a.CompanyId == companyId && a.FinancialYear == financialYear &&
+                    a.Status == PublicSectorBudgetAllocationStatus.Approved &&
+                    (!fundCentreId.HasValue || a.FundCentreId == fundCentreId.Value))
+                .Join(_db.FundCentres, a => a.FundCentreId, f => f.Id,
+                    (a, f) => new { Allocation = a, FundCentre = f })
+                .Join(_db.GlAccounts, x => x.Allocation.GlAccountId, g => g.Id,
+                    (x, g) => new { x.Allocation, x.FundCentre, Account = g })
+                .GroupJoin(_db.CostCentres, x => x.Allocation.CostCentreId, cc => (Guid?)cc.Id,
+                    (x, costCentres) => new { x.Allocation, x.FundCentre, x.Account, CostCentre = costCentres.FirstOrDefault() })
+                .ToListAsync(ct);
+
+            var fiscalStartMonth = await _db.Companies.Where(x => x.Id == companyId)
+                .Select(x => x.FiscalYearStartMonth).FirstOrDefaultAsync(ct);
+            var periodStart = FiscalCalendar.FiscalYearStart(new DateTime(financialYear, 12, 31), fiscalStartMonth);
+            var periodEnd = periodStart.AddYears(1);
+
+            var lines = new List<PublicSectorClassificationLine>(approved.Count);
+            foreach (var item in approved)
+            {
+                var actuals = await _db.JournalLines
+                    .Where(l => l.GlAccountId == item.Allocation.GlAccountId &&
+                        l.FundCentreId == item.Allocation.FundCentreId &&
+                        l.CostCentreId == item.Allocation.CostCentreId &&
+                        l.JournalEntry!.CompanyId == companyId &&
+                        l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate < periodEnd &&
+                        (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
+                    .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
+                var code = string.IsNullOrWhiteSpace(item.Account.SubType) ? "UNCLASSIFIED" : item.Account.SubType.Trim();
+                var variance = item.Allocation.Amount - actuals;
+                lines.Add(new PublicSectorClassificationLine(
+                    item.FundCentre.Code, item.FundCentre.Name, code, code,
+                    item.CostCentre?.Code, item.CostCentre?.Name,
+                    item.Allocation.Amount, actuals, variance,
+                    item.Allocation.Amount == 0m ? 0m : Math.Round(variance / item.Allocation.Amount * 100m, 2)));
+            }
+
+            return lines.OrderBy(x => x.ProgrammeCode)
+                .ThenBy(x => x.EconomicClassificationCode).ThenBy(x => x.ObjectiveCode)
+                .ToList();
+        }
+
         public async Task<FundCentre> CreateFundCentreAsync(Guid companyId, string code, string name, FundCentreLevel level,
             Guid? parentId, int financialYear, decimal appropriationAmount, decimal carriedForward, CancellationToken ct = default)
         {
