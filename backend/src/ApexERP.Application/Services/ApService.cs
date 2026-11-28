@@ -162,6 +162,8 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("Invoice not found.");
                 if (invoice.Status != InvoiceStatus.Draft)
                     throw new InvalidOperationException("Only draft invoices can be posted.");
+                var approvedVatMappings = new List<TaxAccountMapping>();
+                TaxAccountMapping? approvedWhtMapping = null;
 
                 if (invoice.VatAmount > 0m)
                 {
@@ -191,6 +193,7 @@ namespace ApexERP.Application.Services
                         .ToListAsync(token);
                     var mappings = mappingCandidates.GroupBy(x => x.TaxCodeId)
                         .Select(g => g.OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).First()).ToList();
+                    approvedVatMappings = mappings;
                     if (mappings.Count != taxCodeIds.Length ||
                         mappings.Select(x => x.TaxCodeId).Distinct().Count() != taxCodeIds.Length ||
                         mappings.Any(x => x.GlAccountId != vatInputAccountId))
@@ -203,12 +206,12 @@ namespace ApexERP.Application.Services
                 }
                 if (invoice.WhtAmount > 0m)
                 {
-                    var mapping = await _db.TaxAccountMappings.Where(x =>
+                    approvedWhtMapping = await _db.TaxAccountMappings.Where(x =>
                         x.CompanyId == companyId && x.Purpose == "AP-WHT-PAYABLE" && x.TaxType == TaxType.WHT &&
                         !x.TaxCodeId.HasValue && x.Status == TaxConfigurationStatus.Approved &&
                         x.EffectiveFrom <= invoice.InvoiceDate && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
                         .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstOrDefaultAsync(token);
-                    if (mapping == null || mapping.GlAccountId != whtPayableAccountId)
+                    if (approvedWhtMapping == null || approvedWhtMapping.GlAccountId != whtPayableAccountId)
                         throw new InvalidOperationException("AP withholding requires one approved, effective AP-WHT-PAYABLE mapping matching the requested control account.");
                     var taxAccount = await _db.GlAccounts.SingleOrDefaultAsync(x =>
                         x.Id == whtPayableAccountId && x.CompanyId == companyId && x.IsActive && x.IsPostable, token);
@@ -271,6 +274,7 @@ namespace ApexERP.Application.Services
                             x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
                             (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
                             .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstAsync(token);
+                        var mapping = approvedVatMappings.Single(x => x.TaxCodeId == taxCodeId);
                         var journalLine = journal.Lines.Single(x => x.TaxCodeId == taxCodeId &&
                             x.GlAccountId == mapping.GlAccountId && x.Debit ==
                             invoice.Lines.Where(l => l.TaxCodeId == taxCodeId).Sum(l => l.LineVat));
@@ -291,11 +295,7 @@ namespace ApexERP.Application.Services
                 }
                 if (invoice.WhtAmount > 0m)
                 {
-                    var mapping = await _db.TaxAccountMappings.Where(x =>
-                        x.CompanyId == companyId && x.Purpose == "AP-WHT-PAYABLE" && x.TaxType == TaxType.WHT &&
-                        !x.TaxCodeId.HasValue && x.Status == TaxConfigurationStatus.Approved &&
-                        x.EffectiveFrom <= invoice.InvoiceDate && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
-                        .SingleAsync(token);
+                    var mapping = approvedWhtMapping ?? throw new InvalidOperationException("The approved WHT mapping changed before posting.");
                     var journalLine = journal.Lines.Single(x => x.GlAccountId == mapping.GlAccountId &&
                         x.Credit == invoice.WhtAmount && x.TaxCodeId == null);
                     var rate = await _db.Suppliers.Where(x => x.Id == invoice.SupplierId && x.CompanyId == companyId).Select(x => x.WhtRate).SingleAsync(token);
