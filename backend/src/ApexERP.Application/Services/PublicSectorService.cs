@@ -1369,8 +1369,10 @@ namespace ApexERP.Application.Services
                     x.JournalEntryId == source.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId &&
                     x.FundCentreId == actual.FundCentreId && x.CostCentreId == actual.CostCentreId)
                     .SumAsync(x => isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
+                var bankReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
                 return mapped == actual.Amount && source.TransactionDate.Date == actual.SourceDate.Date &&
-                    actual.EffectiveDate.Date == source.TransactionDate.Date;
+                    actual.EffectiveDate.Date == source.TransactionDate.Date &&
+                    string.Equals(actual.SourceReference, bankReference, StringComparison.Ordinal);
             }
 
             if (actual.SourceKind == PublicSectorBudgetActualSourceKind.ArReceipt && isReceipt)
@@ -1411,7 +1413,9 @@ namespace ApexERP.Application.Services
                 var bankLeg = await _db.JournalLines.Where(x =>
                     x.JournalEntryId == receipt.JournalEntryId.Value && x.GlAccountId == bank.GlAccountId)
                     .SumAsync(x => x.Debit - x.Credit, ct);
-                return revenue == actual.Amount && bankLeg == actual.Amount;
+                var receiptReference = string.IsNullOrWhiteSpace(receipt.ReceiptNo) ? receipt.Id.ToString("N") : receipt.ReceiptNo;
+                return revenue == actual.Amount && bankLeg == actual.Amount &&
+                    string.Equals(actual.SourceReference, receiptReference, StringComparison.Ordinal);
             }
 
             if (actual.SourceKind == PublicSectorBudgetActualSourceKind.ApPayment && !isReceipt)
@@ -1453,7 +1457,9 @@ namespace ApexERP.Application.Services
                 var bankLeg = await _db.JournalLines.Where(x =>
                     x.JournalEntryId == payment.JournalEntryId.Value && x.GlAccountId == bank.GlAccountId)
                     .SumAsync(x => x.Credit - x.Debit, ct);
-                return expense == actual.Amount && bankLeg == actual.Amount;
+                var paymentReference = string.IsNullOrWhiteSpace(payment.PaymentNo) ? payment.Id.ToString("N") : payment.PaymentNo;
+                return expense == actual.Amount && bankLeg == actual.Amount &&
+                    string.Equals(actual.SourceReference, paymentReference, StringComparison.Ordinal);
             }
 
             return false;
