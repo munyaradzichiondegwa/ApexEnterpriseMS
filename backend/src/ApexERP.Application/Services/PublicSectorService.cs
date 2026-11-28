@@ -822,7 +822,6 @@ namespace ApexERP.Application.Services
             PublicSectorExpectedCashSource expected, decimal openingBalance, decimal closingBalance,
             ExpectedCashSourcePopulation population)
         {
-            if (expected.SourceKind == "BankAccount") return true;
             return population.OpeningGlBalance.HasValue && population.ClosingGlBalance.HasValue &&
                 CloseEnough(openingBalance, population.OpeningGlBalance.Value) &&
                 CloseEnough(closingBalance, population.ClosingGlBalance.Value);
@@ -917,7 +916,8 @@ namespace ApexERP.Application.Services
                 return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
                     rows.Sum(x => Math.Max(x.Debit, x.Credit)),
                     string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase),
-                    rows.Sum(x => x.Credit - x.Debit), null, null);
+                    rows.Sum(x => x.Credit - x.Debit),
+                    statementBatches[0].OpeningBalance, statementBatches[^1].ClosingBalance);
             }
 
             if (expected.SourceKind == "ReceivablesControl")
