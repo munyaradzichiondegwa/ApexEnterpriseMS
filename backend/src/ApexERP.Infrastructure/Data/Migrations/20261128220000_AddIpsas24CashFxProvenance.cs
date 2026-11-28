@@ -71,6 +71,11 @@ public sealed class AddIpsas24CashFxProvenance : Migration
             oldClrType: typeof(bool),
             oldType: "boolean",
             oldDefaultValue: false);
+
+        migrationBuilder.AddCheckConstraint(
+            name: "CK_PublicSectorBudgetExecutionActual_SourceAmount",
+            table: "PublicSectorBudgetExecutionActuals",
+            sql: "\"SourceAmount\" > 0");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
