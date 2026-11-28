@@ -36,6 +36,12 @@ The first supported transport should be a versioned UTF-8 CSV package with an im
 
 A later API adapter may implement the same logical contract. The transport must not change the accounting or evidence semantics.
 
+## 3A. Current parser implementation boundary
+
+A strict parser implementation now exists as `ExternalCashbookCsvParser` (`apex-ipsas24-cashbook-v1`). It validates UTF-8, a fixed header, row identity, transaction/posting dates, currency consistency, debit/credit exclusivity, reversal references, duplicate IDs/fingerprints, declared row count, debit/credit totals and opening/closing balance. Its upload limit is 20 MB.
+
+The parser is a pure validation component. It does **not** persist the original file or parsed rows, authenticate the source owner, register source systems/accounts, enforce cross-import idempotency, map source records to budget actuals, detect cross-source bank/AR/AP duplicates, or certify completeness. Those require the remaining persisted adapter and review workflow. Parser success alone is not evidence of an authenticated or complete source population.
+
 ## 4. Required transaction columns
 
 Each transaction row must include:
