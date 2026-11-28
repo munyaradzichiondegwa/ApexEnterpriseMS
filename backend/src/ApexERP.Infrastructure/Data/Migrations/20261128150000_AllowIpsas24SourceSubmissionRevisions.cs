@@ -30,9 +30,8 @@ public sealed class AllowIpsas24SourceSubmissionRevisions : Migration
             columns: new[] { "CompanyId", "ExpectedCashSourceId", "SubmissionRevision" },
             unique: true);
 
-        migrationBuilder.DropIndex(
-            name: "IX_PublicSectorCashSourceReconciliationLines_BudgetExecutionActualId",
-            table: "PublicSectorCashSourceReconciliationLines");
+        // The non-unique FK index is introduced by migration 20261128180000.
+        // It does not exist at this point in the migration chain and must not be dropped here.
         migrationBuilder.DropIndex(
             name: "UX_CashSourceReconciliationLine_Actual",
             table: "PublicSectorCashSourceReconciliationLines");
@@ -42,10 +41,6 @@ public sealed class AllowIpsas24SourceSubmissionRevisions : Migration
             columns: new[] { "CompanyId", "CashSourceSubmissionId", "BudgetExecutionActualId" },
             unique: true,
             filter: "\"BudgetExecutionActualId\" IS NOT NULL");
-        migrationBuilder.CreateIndex(
-            name: "IX_PublicSectorCashSourceReconciliationLines_BudgetExecutionActualId",
-            table: "PublicSectorCashSourceReconciliationLines",
-            column: "BudgetExecutionActualId");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
