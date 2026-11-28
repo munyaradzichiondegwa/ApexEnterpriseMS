@@ -1513,6 +1513,7 @@ namespace ApexERP.Tests
             var companyId = Guid.NewGuid();
             var preparerId = Guid.NewGuid();
             var certifierId = Guid.NewGuid();
+            var customerId = Guid.NewGuid();
             var budgetVersionId = Guid.NewGuid();
             var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -1534,6 +1535,11 @@ namespace ApexERP.Tests
                     EntityScope = "Zero Activity MDA", PeriodStart = periodStart, PeriodEnd = periodEnd,
                     AuthorityReference = "Appropriation Act 2026", ApprovedBy = certifierId,
                     ApprovedAt = DateTime.UtcNow, CreatedBy = preparerId
+                });
+                seed.Customers.Add(new Customer
+                {
+                    Id = customerId, CompanyId = companyId, Code = "ZERO-TEST-CUST",
+                    Name = "Zero Activity Test Customer", Currency = "USD"
                 });
                 await seed.SaveChangesAsync();
             }
@@ -1560,6 +1566,25 @@ namespace ApexERP.Tests
 
             var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
+
+            // Certification is not a permanent assertion that later source activity cannot occur.
+            // The bridge and comparison must re-count source populations on every read.
+            await using (var lateActivity = db.NewContext(companyId))
+            {
+                lateActivity.ArReceipts.Add(new ArReceipt
+                {
+                    Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customerId,
+                    ReceiptNo = "POST-CERT-NIL-001",
+                    ReceiptDate = new DateTime(2026, 8, 10, 0, 0, 0, DateTimeKind.Utc),
+                    Currency = "USD", Amount = 25m
+                });
+                await lateActivity.SaveChangesAsync();
+            }
+
+            Assert.False(await service.HasValidCertifiedZeroActivityAttestationAsync(companyId, budgetVersionId));
+            var staleComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.False(staleComparison.ComparableActualsAvailable);
+            Assert.Contains("zero-activity attestation", staleComparison.ComparabilityMessage, StringComparison.OrdinalIgnoreCase);
         }
 
         [PostgresFact]
