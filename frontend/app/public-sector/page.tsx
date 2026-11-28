@@ -609,8 +609,8 @@ export default function PublicSectorPage() {
               {budgetComparisonLoading ? "Loading…" : "Refresh statement"}
             </button>
             {budgetComparison && <button className="btn-secondary" onClick={exportBudgetComparison}
-              disabled={!budgetComparison.comparableActualsAvailable || !budgetComparison.varianceExplanationsComplete || !budgetComparison.originalToFinalExplanationsComplete || (budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled)}
-              title={!budgetComparison.comparableActualsAvailable ? "Comparable actuals are not available." : !budgetComparison.originalToFinalExplanationsComplete ? "Classify and explain changes from the original to final budget before export." : !budgetComparison.varianceExplanationsComplete ? "Approve all non-zero variance explanations before export." : budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled ? "Complete the independently reviewed Statement of Cash Flows bridge before export." : "Export the reconciled IPSAS 24 comparison."}>Export CSV</button>}
+              disabled={!budgetComparison.comparableActualsAvailable || !budgetComparison.financialStatementReconciliation?.complete || !budgetComparison.varianceExplanationsComplete || !budgetComparison.originalToFinalExplanationsComplete || (budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled)}
+              title={!budgetComparison.comparableActualsAvailable ? "Comparable actuals are not available." : !budgetComparison.financialStatementReconciliation?.complete ? budgetComparison.financialStatementReconciliation?.message ?? "Complete the reconciliation to financial-statement actuals." : !budgetComparison.originalToFinalExplanationsComplete ? "Classify and explain changes from the original to final budget before export." : !budgetComparison.varianceExplanationsComplete ? "Approve all non-zero variance explanations before export." : budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled ? "Complete the independently reviewed Statement of Cash Flows bridge before export." : "Export the reconciled IPSAS 24 comparison."}>Export CSV</button>}
           </div>
           {budgetComparisonLoading && <p className="text-sm text-slate-500">Loading approved budget versions and ledger actuals…</p>}
           <form onSubmit={createBudgetVersion} className="rounded-lg border p-4 space-y-3">
@@ -988,6 +988,36 @@ export default function PublicSectorPage() {
                 </table>
               </div>
 
+              {budgetComparison.financialStatementReconciliation?.required && (
+                <div className="border rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h3 className="font-semibold">Reconciliation to financial-statement actuals</h3>
+                    <span className={budgetComparison.financialStatementReconciliation.complete ? "text-sm text-green-700" : "text-sm text-amber-700"}>
+                      {budgetComparison.financialStatementReconciliation.complete ? "Independently approved reconciliation complete" : "Financial-statement reconciliation outstanding"}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-600">{budgetComparison.financialStatementReconciliation.message}</p>
+                  <div className="overflow-x-auto">
+                    <table className="table-base">
+                      <thead><tr><th>Section</th><th className="text-right">Actual on comparable basis</th><th className="text-right">Approved reconciliation adjustment</th><th className="text-right">Actual in financial statements</th><th>Coverage</th></tr></thead>
+                      <tbody>
+                        <tr><td>Revenue</td>
+                          <td className="text-right">{fmt(budgetComparison.financialStatementReconciliation.comparableRevenueActual ?? 0)}</td>
+                          <td className="text-right">{fmt(budgetComparison.financialStatementReconciliation.revenueAdjustment)}</td>
+                          <td className="text-right">{budgetComparison.financialStatementReconciliation.financialStatementRevenueActual == null ? "—" : fmt(budgetComparison.financialStatementReconciliation.financialStatementRevenueActual)}</td>
+                          <td>{budgetComparison.financialStatementReconciliation.revenueCovered ? "Approved adjustment / nil-difference attestation" : "Missing"}</td>
+                        </tr>
+                        <tr><td>Expense</td>
+                          <td className="text-right">{fmt(budgetComparison.financialStatementReconciliation.comparableExpenseActual ?? 0)}</td>
+                          <td className="text-right">{fmt(budgetComparison.financialStatementReconciliation.expenseAdjustment)}</td>
+                          <td className="text-right">{budgetComparison.financialStatementReconciliation.financialStatementExpenseActual == null ? "—" : fmt(budgetComparison.financialStatementReconciliation.financialStatementExpenseActual)}</td>
+                          <td>{budgetComparison.financialStatementReconciliation.expenseCovered ? "Approved adjustment / nil-difference attestation" : "Missing"}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
               <div className="border rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h3 className="font-semibold">Final budget-to-actual variance explanations</h3>
