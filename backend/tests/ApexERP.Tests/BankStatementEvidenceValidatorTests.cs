@@ -54,6 +54,17 @@ public sealed class BankStatementEvidenceValidatorTests
     }
 
     [Fact]
+    public void ValidateIntegrity_AcceptsUnverifiedUploadForQuarantinedImport()
+    {
+        var result = BankStatementEvidenceValidator.ValidateIntegrity(
+            Envelope(method: BankStatementAuthenticationMethod.UnverifiedUpload, verified: false),
+            new HashSet<Guid>(), new HashSet<string>());
+
+        Assert.True(result.IsValid);
+        Assert.Contains("origin remains unauthenticated", result.Reason);
+    }
+
+    [Fact]
     public void Validate_RejectsHashWithoutBankOriginAuthentication()
     {
         var result = BankStatementEvidenceValidator.Validate(
