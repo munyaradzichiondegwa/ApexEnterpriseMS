@@ -1405,8 +1405,8 @@ namespace ApexERP.Tests
                     new JournalLine { JournalEntryId = apInvoice2JournalId, GlAccountId = expenseGl2Id, FundCentreId = fundCentreId, Debit = 120m, Credit = 0m, BaseDebit = 120m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = apControlGlId, Debit = 260m, Credit = 0m, BaseDebit = 260m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = bankGlId, Debit = 0m, Credit = 260m, BaseDebit = 0m, BaseCredit = 260m });
-                seed.Customers.Add(new Customer { Id = customerId, CompanyId = companyId, Code = "C-SETTLE", Name = "Settlement Customer", Currency = "USD" });
-                seed.Suppliers.Add(new Supplier { Id = supplierId, CompanyId = companyId, Code = "S-SETTLE", Name = "Settlement Supplier", Currency = "USD" });
+                seed.Customers.Add(new Customer { Id = customerId, CompanyId = companyId, Code = "C-SETTLE", Name = "Settlement Customer", Currency = "USD", ArAccountId = arControlGlId });
+                seed.Suppliers.Add(new Supplier { Id = supplierId, CompanyId = companyId, Code = "S-SETTLE", Name = "Settlement Supplier", Currency = "USD", ApAccountId = apControlGlId });
                 seed.ArInvoices.Add(new ArInvoice
                 {
                     Id = arInvoiceId, CompanyId = companyId, InvoiceNo = "AR-SETTLE-001",
@@ -1809,6 +1809,8 @@ namespace ApexERP.Tests
             var preparerId = Guid.NewGuid();
             var approverId = Guid.NewGuid();
             var budgetVersionId = Guid.NewGuid();
+            var bankAccountId = Guid.NewGuid();
+            var bankGlId = Guid.NewGuid();
             var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
@@ -1818,6 +1820,18 @@ namespace ApexERP.Tests
                 {
                     Id = companyId, Name = "Expected Source MDA",
                     BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.GlAccounts.Add(new GlAccount
+                {
+                    Id = bankGlId, CompanyId = companyId, Code = "1000", Name = "Operating Bank",
+                    Type = GlAccountType.Asset, SubType = "BANK", Currency = "USD",
+                    CashFlowCategory = CashFlowCategory.CashAndCashEquivalents
+                });
+                seed.BankAccounts.Add(new BankAccount
+                {
+                    Id = bankAccountId, CompanyId = companyId, Name = "Operating account",
+                    AccountNo = "BANK-OPERATING-01", BankName = "Test Bank",
+                    Currency = "USD", GlAccountId = bankGlId
                 });
                 seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
                 {
@@ -1835,7 +1849,7 @@ namespace ApexERP.Tests
             await using var ctx = db.NewContext(companyId);
             var service = new PublicSectorService(ctx, new AuditService(ctx));
             var source = await service.CreateExpectedCashSourceAsync(companyId, budgetVersionId,
-                "BankAccount", "BANK-OPERATING-01", "Operating account", "BankAccount:001",
+                "BankAccount", "BANK-OPERATING-01", "Operating account", bankAccountId.ToString(),
                 true, periodStart, periodEnd, preparerId);
             Assert.Equal("Draft", source.Status);
 
