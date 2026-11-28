@@ -165,7 +165,33 @@ DROP FUNCTION IF EXISTS apex_guard_cash_source_reconciliation_line();
         migrationBuilder.DropColumn(name: "RecordLevelReviewedAt", table: "PublicSectorCashSourceSubmissions");
         migrationBuilder.DropColumn(name: "RecordLevelReviewNote", table: "PublicSectorCashSourceSubmissions");
         migrationBuilder.Sql("""
-DROP FUNCTION IF EXISTS apex_guard_cash_source_submission();
+CREATE OR REPLACE FUNCTION apex_guard_cash_source_submission() RETURNS trigger AS $ipsas_submission$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'Cash source submissions cannot be deleted.' USING ERRCODE = 'restrict_violation';
+    END IF;
+    IF TG_OP = 'INSERT' THEN
+        IF NEW."Status" <> 'Draft' OR NEW."SubmittedBy" IS NOT NULL OR NEW."SubmittedAt" IS NOT NULL
+           OR NEW."ReviewedBy" IS NOT NULL OR NEW."ReviewedAt" IS NOT NULL THEN
+            RAISE EXCEPTION 'Cash source submissions must begin as unsubmitted drafts.' USING ERRCODE = 'restrict_violation';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF OLD."Status" IN ('Reviewed', 'Rejected') THEN
+        RAISE EXCEPTION 'Reviewed cash source submissions are immutable.' USING ERRCODE = 'restrict_violation';
+    END IF;
+    IF (to_jsonb(NEW) - 'Status' - 'SubmittedBy' - 'SubmittedAt' - 'ReviewedBy' - 'ReviewedAt' - 'ReviewNote' - 'UpdatedAt' - 'UpdatedBy')
+       IS DISTINCT FROM
+       (to_jsonb(OLD) - 'Status' - 'SubmittedBy' - 'SubmittedAt' - 'ReviewedBy' - 'ReviewedAt' - 'ReviewNote' - 'UpdatedAt' - 'UpdatedBy') THEN
+        RAISE EXCEPTION 'Cash source submission scope and control totals are immutable after creation.' USING ERRCODE = 'restrict_violation';
+    END IF;
+    IF NOT ((OLD."Status" = 'Draft' AND NEW."Status" = 'PendingReview') OR
+            (OLD."Status" = 'PendingReview' AND NEW."Status" IN ('Reviewed', 'Rejected'))) THEN
+        RAISE EXCEPTION 'Invalid cash source submission transition from % to %.', OLD."Status", NEW."Status" USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+END;
+$ipsas_submission$ LANGUAGE plpgsql;
 """);
     }
 }
