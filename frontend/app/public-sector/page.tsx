@@ -6,12 +6,12 @@ import { api, extractErrorMessage } from "@/lib/api";
 
 export default function PublicSectorPage() {
   const [tab, setTab] = useState<"funds" | "tenders" | "assets" | "ipsas24">("funds");
-  const [fundCentres, setFundCentres] = useState<any[]>([]);
+  const [fundCentres, setFundCentres] = useState<any[]>([]);\n  const [budgetAccounts, setBudgetAccounts] = useState<any[]>([]);
   const [utilization, setUtilization] = useState<any[]>([]);
   const [tenders, setTenders] = useState<any[]>([]);
   const [batches, setBatches] = useState<any[]>([]);
   const [budgetComparison, setBudgetComparison] = useState<any | null>(null);
-  const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);
+  const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);\n  const [budgetDraftId, setBudgetDraftId] = useState<string | null>(null);\n  const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "" });\n  const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", amount: 0 }]);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [year] = useState(new Date().getFullYear());
@@ -19,7 +19,7 @@ export default function PublicSectorPage() {
   const [newTender, setNewTender] = useState({ title: "", specifications: "", submissionDeadline: "" });
 
   function load() {
-    api.get(`/public-sector/fund-centres?year=${year}`).then((r) => setFundCentres(r.data)).catch((e) => setError(extractErrorMessage(e)));
+    api.get(`/public-sector/fund-centres?year=${year}`).then((r) => setFundCentres(r.data)).catch((e) => setError(extractErrorMessage(e)));\n    api.get("/gl/accounts").then((r) => setBudgetAccounts(r.data.filter((a: any) => a.isActive && (a.type === "Income" || a.type === "Expense")))).catch(() => {});
     api.get(`/public-sector/fund-centres/utilization?year=${year}`).then((r) => setUtilization(r.data)).catch(() => {});
     api.get("/public-sector/tenders").then((r) => setTenders(r.data)).catch(() => {});
     api.get("/public-sector/asset-verification/batches").then((r) => setBatches(r.data)).catch(() => {});
@@ -33,6 +33,35 @@ export default function PublicSectorPage() {
       setMsg("Fund centre created.");
       load();
     } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function createBudgetVersion(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const response = await api.post("/public-sector/budget-versions", {
+        financialYear: year,
+        ...budgetDraft,
+        lines: budgetLines.map((line) => ({ ...line, amount: Number(line.amount) })),
+      });
+      setBudgetDraftId(response.data.id);
+      setMsg(`${budgetDraft.kind} budget draft created. Submit it for independent approval before it appears in the statement.`);
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function submitBudgetVersion() {
+    if (!budgetDraftId) return;
+    setError(null);
+    try {
+      await api.post(`/public-sector/budget-versions/${budgetDraftId}/submit-for-approval`);
+      setMsg("Budget version submitted for independent approval.");
+      setBudgetDraftId(null);
+      loadBudgetComparison();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  function updateBudgetLine(index: number, field: string, value: string | number) {
+    setBudgetLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line));
   }
 
   async function loadBudgetComparison() {
@@ -139,6 +168,39 @@ export default function PublicSectorPage() {
             </button>
           </div>
           {budgetComparisonLoading && <p className="text-sm text-slate-500">Loading approved budget versions and ledger actuals…</p>}
+          <form onSubmit={createBudgetVersion} className="rounded-lg border p-4 space-y-3">
+            <h3 className="font-semibold">Create an original or revised budget version</h3>
+            <p className="text-xs text-slate-500">The draft is not included in the financial statement until an independent approver finalises its approval workflow.</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div><label className="label">Version type</label><select className="input" value={budgetDraft.kind} onChange={(e) => setBudgetDraft({ ...budgetDraft, kind: e.target.value })}><option value="Original">Original</option><option value="Revised">Revised</option></select></div>
+              <div><label className="label">Currency</label><input className="input" maxLength={3} required value={budgetDraft.currency} onChange={(e) => setBudgetDraft({ ...budgetDraft, currency: e.target.value.toUpperCase() })} /></div>
+              <div><label className="label">Budget accounting basis</label><select className="input" value={budgetDraft.accountingBasis} onChange={(e) => setBudgetDraft({ ...budgetDraft, accountingBasis: e.target.value })}><option value="Accrual">Accrual</option><option value="Cash">Cash</option></select></div>
+              <div><label className="label">Classification basis</label><input className="input" required value={budgetDraft.classificationBasis} onChange={(e) => setBudgetDraft({ ...budgetDraft, classificationBasis: e.target.value })} placeholder="Approved Treasury classification" /></div>
+              <div><label className="label">Entity scope</label><input className="input" required value={budgetDraft.entityScope} onChange={(e) => setBudgetDraft({ ...budgetDraft, entityScope: e.target.value })} placeholder="Reporting entity / MDA" /></div>
+              <div><label className="label">Authority reference</label><input className="input" required value={budgetDraft.authorityReference} onChange={(e) => setBudgetDraft({ ...budgetDraft, authorityReference: e.target.value })} placeholder="Appropriation Act / authority" /></div>
+              <div><label className="label">Period start</label><input className="input" type="date" required value={budgetDraft.periodStart.slice(0, 10)} onChange={(e) => setBudgetDraft({ ...budgetDraft, periodStart: `${e.target.value}T00:00:00.000Z` })} /></div>
+              <div><label className="label">Period end (exclusive)</label><input className="input" type="date" required value={budgetDraft.periodEnd.slice(0, 10)} onChange={(e) => setBudgetDraft({ ...budgetDraft, periodEnd: `${e.target.value}T00:00:00.000Z` })} /></div>
+              {budgetDraft.kind === "Revised" && <div className="md:col-span-3"><label className="label">Reason for revision</label><textarea className="input" required value={budgetDraft.amendmentReason} onChange={(e) => setBudgetDraft({ ...budgetDraft, amendmentReason: e.target.value })} /></div>}
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between"><h4 className="font-medium text-sm">Budget lines</h4><button type="button" className="btn-secondary" onClick={() => setBudgetLines((current) => [...current, { fundCentreId: "", glAccountId: "", costCentreId: null, description: "", classificationCode: "", amount: 0 }])}>Add line</button></div>
+              {budgetLines.map((line, index) => (
+                <div key={index} className="grid grid-cols-1 md:grid-cols-6 gap-2 border-t pt-2">
+                  <select className="input" required value={line.fundCentreId} onChange={(e) => updateBudgetLine(index, "fundCentreId", e.target.value)}><option value="">Fund centre</option>{fundCentres.map((f: any) => <option key={f.id} value={f.id}>{f.code} — {f.name}</option>)}</select>
+                  <select className="input" required value={line.glAccountId} onChange={(e) => updateBudgetLine(index, "glAccountId", e.target.value)}><option value="">Income / expense account</option>{budgetAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} — {a.name} ({a.type})</option>)}</select>
+                  <input className="input" required placeholder="Description" value={line.description} onChange={(e) => updateBudgetLine(index, "description", e.target.value)} />
+                  <input className="input" required placeholder="Classification code" value={line.classificationCode} onChange={(e) => updateBudgetLine(index, "classificationCode", e.target.value)} />
+                  <input className="input" type="number" min="0" step="0.01" required placeholder="Amount" value={line.amount} onChange={(e) => updateBudgetLine(index, "amount", Number(e.target.value))} />
+                  <button type="button" className="btn-secondary" disabled={budgetLines.length === 1} onClick={() => setBudgetLines((current) => current.filter((_, i) => i !== index))}>Remove</button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <button className="btn-primary" disabled={budgetAccounts.length === 0 || fundCentres.length === 0}>Save budget draft</button>
+              {budgetDraftId && <button type="button" className="btn-secondary" onClick={submitBudgetVersion}>Submit draft for approval</button>}
+            </div>
+            {budgetAccounts.length === 0 && <p className="text-xs text-amber-700">Configure active income and expense GL accounts before entering budget lines.</p>}
+          </form>
           {!budgetComparisonLoading && !budgetComparison && (
             <p className="text-sm text-slate-500">No comparison is available. An approved original budget version is required before the statement can be generated.</p>
           )}
