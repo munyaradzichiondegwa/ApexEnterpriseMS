@@ -575,8 +575,8 @@ namespace ApexERP.Tests
                     FinancialYear = 2026, AppropriationAmount = 1000m
                 });
                 seed.GlAccounts.AddRange(
-                    new GlAccount { Id = expenseAccountId, CompanyId = companyId, Code = "5100", Name = "Travel", Type = GlAccountType.Expense, Currency = "USD" },
-                    new GlAccount { Id = secondExpenseAccountId, CompanyId = companyId, Code = "5200", Name = "Training", Type = GlAccountType.Expense, Currency = "USD" });
+                    new GlAccount { Id = expenseAccountId, CompanyId = companyId, Code = "5100", Name = "Travel", SubType = "EC-TRAVEL", Type = GlAccountType.Expense, Currency = "USD" },
+                    new GlAccount { Id = secondExpenseAccountId, CompanyId = companyId, Code = "5200", Name = "Training", SubType = "EC-TRAINING", Type = GlAccountType.Expense, Currency = "USD" });
                 seed.CostCentres.Add(new CostCentre
                 {
                     Id = costCentreId, CompanyId = companyId, Code = "CC-OPS", Name = "Operations", IsActive = true
@@ -646,6 +646,15 @@ namespace ApexERP.Tests
             Assert.Equal(25m, line.PostedActuals);
             Assert.Equal(55m, line.Variance);
             Assert.Equal(68.75m, line.VariancePercent);
+
+            var classification = await service.GetClassificationScheduleAsync(companyId, 2026, fundCentreId);
+            var classifiedTravel = Assert.Single(classification);
+            Assert.Equal("VOTE-DIM", classifiedTravel.ProgrammeCode);
+            Assert.Equal("EC-TRAVEL", classifiedTravel.EconomicClassificationCode);
+            Assert.Equal("CC-OPS", classifiedTravel.ObjectiveCode);
+            Assert.Equal(80m, classifiedTravel.ApprovedBudget);
+            Assert.Equal(25m, classifiedTravel.PostedActuals);
+            Assert.Equal(55m, classifiedTravel.Variance);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.FinaliseBudgetAllocationApprovalAsync(companyId, pendingAllocationId, Guid.NewGuid()));
