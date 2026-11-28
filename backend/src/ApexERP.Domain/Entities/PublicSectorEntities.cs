@@ -170,4 +170,32 @@ namespace ApexERP.Domain.Entities
         public string? ConditionNotes { get; set; }
         public DateTime ScannedAt { get; set; } = DateTime.UtcNow;
     }
+
+    /// <summary>
+    /// Immutable source-linked actual captured on the approved budget basis for IPSAS 24.
+    /// Only reconciled bank movements and posted, authorised AR/AP cash transactions qualify.
+    /// </summary>
+    public class PublicSectorBudgetExecutionActual : TenantEntity
+    {
+        public int FinancialYear { get; set; }
+        public Guid BudgetVersionId { get; set; }
+        public Guid BudgetVersionLineId { get; set; }
+        public Guid FundCentreId { get; set; }
+        public Guid GlAccountId { get; set; }
+        public Guid? CostCentreId { get; set; }
+        public PublicSectorBudgetActualEventKind EventKind { get; set; }
+        public PublicSectorBudgetActualSourceKind SourceKind { get; set; }
+        public Guid SourceRecordId { get; set; }
+        public string SourceReference { get; set; } = string.Empty;
+        public DateTime SourceDate { get; set; }
+        public DateTime EffectiveDate { get; set; }
+        public string Currency { get; set; } = "USD";
+        public decimal Amount { get; set; }
+        public decimal ExchangeRateToBudgetCurrency { get; set; } = 1m;
+        public CashFlowCategory CashFlowSection { get; set; }
+        public PublicSectorBudgetActualStatus Status { get; set; } = PublicSectorBudgetActualStatus.Draft;
+        public Guid? ReversalOfId { get; set; }
+        public Guid? CertifiedBy { get; set; }
+        public DateTime? CertifiedAt { get; set; }
+    }
 }
