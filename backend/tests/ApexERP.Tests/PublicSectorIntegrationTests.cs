@@ -1134,6 +1134,55 @@ namespace ApexERP.Tests
                     PublicSectorBudgetActualEventKind.CashPayment,
                     PublicSectorBudgetActualSourceKind.BankTransaction, unmappedBankTransactionId,
                     effectiveDate, CashFlowCategory.Operating, preparerId));
+
+        [PostgresFact]
+        public async Task Ipsas24_cash_budget_allows_investing_asset_classification_lines()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var assetAccountId = Guid.NewGuid();
+            var actorId = Guid.NewGuid();
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "IPSAS Cash Capital MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-CAPEX",
+                    Name = "Capital Programme", Level = FundCentreLevel.Vote, FinancialYear = 2026
+                });
+                seed.GlAccounts.Add(new GlAccount
+                {
+                    Id = assetAccountId, CompanyId = companyId, Code = "1500",
+                    Name = "Property Plant and Equipment", Type = GlAccountType.Asset,
+                    SubType = "CAPEX-01", Currency = "USD",
+                    CashFlowCategory = CashFlowCategory.Investing
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var version = await service.CreateBudgetVersionAsync(companyId, 2026,
+                PublicSectorBudgetVersionKind.Original, "USD", AccountingBasis.Cash,
+                "Treasury cash economic classification", "IPSAS Cash Capital MDA",
+                new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                "Appropriation Act 2026", null,
+                new[]
+                {
+                    new PublicSectorService.BudgetVersionLineInput(
+                        fundCentreId, assetAccountId, null, "Capital asset acquisitions", "CAPEX-01", 250m)
+                }, actorId);
+
+            var line = Assert.Single(version.Lines);
+            Assert.Equal(assetAccountId, line.GlAccountId);
+            Assert.Equal(250m, line.Amount);
+        }
         }
     }
 }
