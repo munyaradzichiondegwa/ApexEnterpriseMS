@@ -54,6 +54,7 @@ public sealed class ModifiedCashRecognitionLedgerEvent : TenantEntity
     public Guid? OriginalEventId { get; set; }
     public decimal Amount { get; set; }
     public DateTime EventDate { get; set; }
+    public DateTime EvidenceAcceptedAt { get; set; }
     public string EvidenceReference { get; set; } = string.Empty;
     public ModifiedCashLedgerEventStatus Status { get; set; } = ModifiedCashLedgerEventStatus.Draft;
     public Guid PreparedBy { get; set; }
