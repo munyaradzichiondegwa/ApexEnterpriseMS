@@ -260,6 +260,14 @@ namespace ApexERP.Domain.Common
         Revised
     }
 
+    /// <summary>Explains the nature of an authorised change from the original to final budget.</summary>
+    public enum PublicSectorBudgetAmendmentNature
+    {
+        ReallocationWithinBudget,
+        OtherAuthorisedFactors,
+        Mixed
+    }
+
     public enum PublicSectorBudgetVersionStatus
     {
         Draft,
