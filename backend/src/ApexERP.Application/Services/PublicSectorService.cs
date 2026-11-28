@@ -1920,6 +1920,15 @@ namespace ApexERP.Application.Services
                     }).ToListAsync(ct);
                 var glRows = rawGlRows.Select(x => (x.Id, x.GlAccountId, x.FundCentreId, x.CostCentreId,
                     x.BaseDebit, x.BaseCredit, x.EntryDate, AccountType: accountTypes[x.GlAccountId])).ToList();
+                var cashActualFingerprintRows = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == final.Id &&
+                    x.EffectiveDate >= original.PeriodStart && x.EffectiveDate < original.PeriodEnd)
+                    .Select(x => new
+                    {
+                        x.Id, x.BudgetVersionLineId, x.SourceKind, x.SourceRecordId, x.SourceReference,
+                        x.SourceDate, x.SourceAmount, x.Amount, x.ExchangeRateToBudgetCurrency,
+                        x.Status, x.ReversalOfId, x.CertifiedBy, x.CertifiedAt
+                    }).ToListAsync(ct);
                 var budgetScopeKeys = final!.Lines.Select(x => (x.FundCentreId, x.CostCentreId)).ToHashSet();
                 var budgetLineKeys = final.Lines.Select(x => (x.FundCentreId, x.GlAccountId, x.CostCentreId)).ToHashSet();
                 var budgetPeriodRows = glRows.Where(x => x.EntryDate >= original.PeriodStart && x.EntryDate < original.PeriodEnd).ToList();
@@ -1963,7 +1972,9 @@ namespace ApexERP.Application.Services
                         $"{x.Id:N}:{x.FundCentreId:N}:{x.GlAccountId:N}:{x.CostCentreId?.ToString("N") ?? "none"}:{x.Amount}")).Append('|')
                     .AppendJoin(';', glRows.OrderBy(x => x.Id).Select(x =>
                         $"{x.Id:N}:{x.GlAccountId:N}:{x.FundCentreId?.ToString("N") ?? "none"}:{x.CostCentreId?.ToString("N") ?? "none"}:{x.EntryDate:O}:{x.BaseDebit}:{x.BaseCredit}")).Append('|')
-                    .AppendJoin(';', cashActualsByBudgetLine.OrderBy(x => x.Key).Select(x => $"{x.Key:N}:{x.Value}"))
+                    .AppendJoin(';', cashActualsByBudgetLine.OrderBy(x => x.Key).Select(x => $"{x.Key:N}:{x.Value}")).Append('|')
+                    .AppendJoin(';', cashActualFingerprintRows.OrderBy(x => x.Id).Select(x =>
+                        $"{x.Id:N}:{x.BudgetVersionLineId:N}:{x.SourceKind}:{x.SourceRecordId:N}:{x.SourceReference}:{x.SourceDate:O}:{x.SourceAmount}:{x.Amount}:{x.ExchangeRateToBudgetCurrency}:{x.Status}:{x.ReversalOfId?.ToString("N") ?? "none"}:{x.CertifiedBy?.ToString("N") ?? "none"}:{x.CertifiedAt:O}"))
                     .ToString();
                 var sourceFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintMaterial)));
                 var calculatedAt = DateTime.UtcNow;
