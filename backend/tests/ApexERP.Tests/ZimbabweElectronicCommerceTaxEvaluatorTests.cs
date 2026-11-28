@@ -91,6 +91,14 @@ public sealed class ZimbabweElectronicCommerceTaxEvaluatorTests
                 new DateTime(2026, 1, 1)));
     }
 
+    [Fact]
+    public void Non_usd_revenue_is_rejected_until_an_approved_fx_conversion_exists()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            ZimbabweElectronicCommerceTaxEvaluator.Evaluate(Eligible() with { Currency = "EUR" },
+                new DateTime(2026, 1, 1)));
+    }
+
     [Theory]
     [InlineData(1, 2025, 12, 1, 2026, 3, 1, 2026, 3, 25, 2026, 4, 5)]
     [InlineData(2, 2026, 3, 1, 2026, 6, 1, 2026, 6, 25, 2026, 7, 5)]
