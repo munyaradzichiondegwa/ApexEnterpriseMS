@@ -829,7 +829,8 @@ namespace ApexERP.Infrastructure.Data
                 .HasIndex(x => x.OriginalEventId).IsUnique().HasFilter("\"OriginalEventId\" IS NOT NULL")
                 .HasDatabaseName("UX_ModifiedCashLedger_OneReversal");
             modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
-                .HasIndex(x => new { x.CompanyId, x.CommitmentId, x.Status, x.EventDate });
+                .HasIndex(x => new { x.CompanyId, x.CommitmentId, x.Status, x.EventDate })
+                .HasDatabaseName("IX_ModifiedCashLedger_CommitmentStatusDate");
             modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
                 .HasCheckConstraint("CK_ModifiedCashLedger_Amount", "\"Amount\" > 0");
             modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
