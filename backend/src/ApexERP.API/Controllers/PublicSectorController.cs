@@ -1004,20 +1004,30 @@ namespace ApexERP.API.Controllers
             // representable instant before the budget's exclusive end to preserve the budget cut-off.
             var cashFlow = await _cashFlow.GetStatementAsync(CompanyId, version.PeriodStart,
                 version.PeriodEnd.AddTicks(-1), ct);
+            // Only adjustments approved for this exact budget version, reporting period
+            // and reporting entity may enter this bridge. A year-wide aggregate can otherwise
+            // import approvals from another budget revision or reporting window.
             var adjustments = await _db.PublicSectorBudgetReconciliations.Where(x =>
                 x.CompanyId == CompanyId && x.FinancialYear == year &&
+                x.BudgetVersionId == version.Id &&
+                x.StatementPeriodStart == version.PeriodStart &&
+                x.StatementPeriodEnd == version.PeriodEnd &&
+                x.StatementEntityScope == version.EntityScope &&
+                x.StatementSection != null &&
+                (x.StatementSection == "Operating" || x.StatementSection == "Investing" ||
+                 x.StatementSection == "Financing") &&
                 x.Status == PublicSectorBudgetReconciliationStatus.Approved).ToListAsync(ct);
-            decimal Adjustment(Func<PublicSectorBudgetReconciliation, decimal> selector) =>
-                adjustments.Sum(selector);
+            decimal Adjustment(string section, Func<PublicSectorBudgetReconciliation, decimal> selector) =>
+                adjustments.Where(x => x.StatementSection == section).Sum(selector);
             var budgetOperating = Actual(CashFlowCategory.Operating);
             var budgetInvesting = Actual(CashFlowCategory.Investing);
             var budgetFinancing = Actual(CashFlowCategory.Financing);
             var operatingDifference = cashFlow.NetCashFromOperating - budgetOperating;
             var investingDifference = cashFlow.NetCashFromInvesting - budgetInvesting;
             var financingDifference = cashFlow.NetCashFromFinancing - budgetFinancing;
-            var operatingAdjustment = Adjustment(x => x.OperatingAmount);
-            var investingAdjustment = Adjustment(x => x.InvestingAmount);
-            var financingAdjustment = Adjustment(x => x.FinancingAmount);
+            var operatingAdjustment = Adjustment("Operating", x => x.OperatingAmount);
+            var investingAdjustment = Adjustment("Investing", x => x.InvestingAmount);
+            var financingAdjustment = Adjustment("Financing", x => x.FinancingAmount);
             var noSourceBackedCashActuals = actuals.Count == 0;
             // When there are no actuals, the period is acceptable only if it is genuinely nil
             // and has a current nil-return, or if every posted source record is covered by a
