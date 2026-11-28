@@ -731,8 +731,13 @@ namespace ApexERP.Infrastructure.Data
                 .HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
                     "(\"IsNoDifferenceAttestation\" = TRUE AND \"RevenueAmount\" = 0 AND \"ExpenseAmount\" = 0 AND \"OperatingAmount\" = 0 AND \"InvestingAmount\" = 0 AND \"FinancingAmount\" = 0) OR (\"IsNoDifferenceAttestation\" = FALSE AND (\"RevenueAmount\" <> 0 OR \"ExpenseAmount\" <> 0 OR \"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0))");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
-                .HasIndex(x => new { x.CompanyId, x.SourceKind, x.SourceRecordId, x.BudgetVersionLineId }).IsUnique()
+                .HasIndex(x => new { x.CompanyId, x.SourceKind, x.SourceRecordId, x.BudgetVersionLineId })
+                .IsUnique().HasFilter("\\"ReversalOfId\\" IS NULL")
                 .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_SourceAllocation");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasIndex(x => x.ReversalOfId).IsUnique()
+                .HasFilter("\\"ReversalOfId\\" IS NOT NULL")
+                .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_OneReversal");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasIndex(x => new { x.BudgetVersionId, x.EffectiveDate });
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
@@ -741,6 +746,8 @@ namespace ApexERP.Infrastructure.Data
                 .HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .Property(x => x.ExchangeRateToBudgetCurrency).HasColumnType("numeric(20,10)");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.ReversalReason).HasMaxLength(2000);
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_BudgetVersion");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
