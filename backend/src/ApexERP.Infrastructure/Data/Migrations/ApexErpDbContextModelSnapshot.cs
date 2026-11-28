@@ -3865,8 +3865,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
                     b.HasIndex("BudgetVersionId").HasDatabaseName("IX_PublicSectorBudgetVarianceExplanations_BudgetVersionId");
                     b.HasIndex("BudgetVersionLineId").HasDatabaseName("IX_PublicSectorBudgetVarianceExplanations_BudgetVersionLineId");
-                    b.HasIndex("CompanyId", "BudgetVersionLineId").IsUnique()
-                        .HasDatabaseName("UX_PublicSectorBudgetVarianceExplanation_Line");
+                    b.HasIndex("CompanyId", "BudgetVersionLineId")
+                        .HasDatabaseName("IX_PublicSectorBudgetVarianceExplanation_Line");
                     b.ToTable("PublicSectorBudgetVarianceExplanations", t =>
                         {
                             t.HasCheckConstraint("CK_PublicSectorBudgetVarianceExplanation_Amount", "\"VarianceAmount\" <> 0");
