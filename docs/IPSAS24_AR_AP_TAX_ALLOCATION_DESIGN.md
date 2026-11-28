@@ -48,3 +48,17 @@ The current-head PostgreSQL integration suite verifies AR/AP tax posting, exact 
 ## Release rule
 
 Tax-bearing actuals are not comparable merely because the invoice is posted. Each source must have a valid approved mapping, a valid approved budget-treatment policy, explicit settlement evidence, and independent source-completeness certification. A passing CI run does not approve the reporting entity's accounting policy or replace Treasury/PAAB review.
+
+
+
+## Verification and scope correction — 28 November 2026
+
+The case-variant cash-flow reconciliation guard at commit `992123a6451e61e06e7f479ca9c649d9297249ef` passed workflow [#46150746080](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46150746080), including backend PostgreSQL integration, frontend build/audit and migration/clean-install/RLS/backup checks. This run verifies the branch head before this documentation-only follow-up.
+
+### DST remains unsupported for IPSAS 24 actuals
+
+The domain enum contains a DST value, but that alone is not end-to-end support. Current database check constraints and posting/settlement validation intentionally restrict the implemented mapping contract to VAT and WHT. Do not create DST mappings or budget policies until the following are implemented together: tax-code identity and effective dates; distinct AR/AP tax-account mapping purposes and required GL account types; immutable invoice tax-component and exact journal-line provenance; explicit settlement/remittance treatment; independent budget-treatment approval; reversal/replacement; and PostgreSQL regressions for posting, settlement, remittance, certification and source completeness. No DST rate, legal incidence or recoverability rule is preconfigured by this application.
+
+### Additional tax types
+
+Any tax type beyond VAT/WHT must be enabled only through an explicit tax-type adapter that defines whether it is borne by the customer, supplier or entity; whether it is collected, withheld or remitted; its journal direction; settlement allocation behaviour; and budget treatment. The application must fail closed for unregistered types rather than treating them as VAT or WHT by analogy.
