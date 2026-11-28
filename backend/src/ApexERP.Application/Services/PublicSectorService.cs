@@ -1960,7 +1960,7 @@ namespace ApexERP.Application.Services
                         valid = policyPeriodValid && mappingValid && originalRecognition != null &&
                             settlement != null && originalRecognition.PolicyId == ledger.PolicyId &&
                             originalRecognition.CommitmentId == ledger.CommitmentId &&
-                            original.SourceEventKind == ledger.SourceEventKind &&
+                            originalRecognition.SourceEventKind == ledger.SourceEventKind &&
                             settlement.AllocatedAmount == ledger.Amount &&
                             settlement.PaymentDate == ledger.EventDate &&
                             !await _db.ModifiedCashRecognitionLedgerEvents.AnyAsync(x =>
