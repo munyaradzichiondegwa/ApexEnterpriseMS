@@ -82,7 +82,9 @@ namespace ApexERP.Application.Services
                 throw new InvalidOperationException("An original budget cannot carry an amendment nature.");
             if (lines.Any(x => x.Amount < 0 || string.IsNullOrWhiteSpace(x.Description) || string.IsNullOrWhiteSpace(x.ClassificationCode)))
                 throw new InvalidOperationException("Budget lines require non-negative amounts, descriptions and GL SubType classification codes.");
-            var requiresTreasuryClassification = classificationBasis.Contains("ZFRM", StringComparison.OrdinalIgnoreCase);
+            var requiresTreasuryClassification =
+                classificationBasis.Contains("ZFRM", StringComparison.OrdinalIgnoreCase) ||
+                classificationBasis.Contains("Zimbabwe Financial Reporting Manual", StringComparison.OrdinalIgnoreCase);
             if (requiresTreasuryClassification && lines.Any(x => string.IsNullOrWhiteSpace(x.TreasuryClassificationCode)))
                 throw new InvalidOperationException("A ZFRM Appendix 5 Treasury classification is required for every budget line.");
 
