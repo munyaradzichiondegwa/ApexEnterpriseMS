@@ -1192,6 +1192,8 @@ namespace ApexERP.Tests
             var companyId = Guid.NewGuid();
             var fundCentreId = Guid.NewGuid();
             var bankGlId = Guid.NewGuid();
+            var arControlGlId = Guid.NewGuid();
+            var apControlGlId = Guid.NewGuid();
             var revenueGlId = Guid.NewGuid();
             var expenseGlId = Guid.NewGuid();
             var bankAccountId = Guid.NewGuid();
@@ -1234,6 +1236,16 @@ namespace ApexERP.Tests
                     },
                     new GlAccount
                     {
+                        Id = arControlGlId, CompanyId = companyId, Code = "1200", Name = "Trade Receivables",
+                        Type = GlAccountType.Asset, SubType = "AR-CONTROL", Currency = "USD"
+                    },
+                    new GlAccount
+                    {
+                        Id = apControlGlId, CompanyId = companyId, Code = "2100", Name = "Trade Payables",
+                        Type = GlAccountType.Liability, SubType = "AP-CONTROL", Currency = "USD"
+                    },
+                    new GlAccount
+                    {
                         Id = revenueGlId, CompanyId = companyId, Code = "4100", Name = "Service Revenue",
                         Type = GlAccountType.Income, SubType = "REV-SVC", Currency = "USD",
                         CashFlowCategory = CashFlowCategory.Operating
@@ -1264,9 +1276,9 @@ namespace ApexERP.Tests
                 seed.JournalLines.AddRange(
                     new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = revenueGlId, FundCentreId = fundCentreId, Credit = 100m, Debit = 0m, BaseCredit = 100m, BaseDebit = 0m },
                     new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = bankGlId, Debit = 100m, Credit = 0m, BaseDebit = 100m, BaseCredit = 0m },
-                    new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = Guid.NewGuid(), Debit = 0m, Credit = 100m, BaseDebit = 0m, BaseCredit = 100m },
+                    new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = arControlGlId, Debit = 0m, Credit = 100m, BaseDebit = 0m, BaseCredit = 100m },
                     new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = expenseGlId, FundCentreId = fundCentreId, Debit = 200m, Credit = 0m, BaseDebit = 200m, BaseCredit = 0m },
-                    new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = Guid.NewGuid(), Debit = 200m, Credit = 0m, BaseDebit = 200m, BaseCredit = 0m },
+                    new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = apControlGlId, Debit = 200m, Credit = 0m, BaseDebit = 200m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = bankGlId, Debit = 0m, Credit = 200m, BaseDebit = 0m, BaseCredit = 200m });
                 seed.Customers.Add(new Customer { Id = customerId, CompanyId = companyId, Code = "C-SETTLE", Name = "Settlement Customer", Currency = "USD" });
                 seed.Suppliers.Add(new Supplier { Id = supplierId, CompanyId = companyId, Code = "S-SETTLE", Name = "Settlement Supplier", Currency = "USD" });
