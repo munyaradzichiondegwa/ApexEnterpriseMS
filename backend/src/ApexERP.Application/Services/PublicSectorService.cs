@@ -3362,8 +3362,7 @@ namespace ApexERP.Application.Services
                     x.Id == actual.SourceRecordId && x.CompanyId == companyId, ct);
                 if (receipt == null || !receipt.JournalEntryId.HasValue ||
                     receipt.Currency != actual.Currency || receipt.ReceiptDate.Date != actual.SourceDate.Date ||
-                    actual.EffectiveDate.Date != receipt.ReceiptDate.Date)
-                    return false;
+                    actual.EffectiveDate.Date != receipt.ReceiptDate.Date) return false;
                 var allocations = await _db.ArReceiptAllocations.Where(x => x.ArReceiptId == receipt.Id).ToListAsync(ct);
                 if (allocations.Count == 0 || allocations.Any(x => x.AmountApplied <= 0m) ||
                     allocations.Sum(x => x.AmountApplied) != receipt.Amount) return false;
@@ -3380,33 +3379,43 @@ namespace ApexERP.Application.Services
                         invoice.Total < allocation.AmountApplied || invoice.Outstanding < 0m ||
                         (invoice.Status == InvoiceStatus.Paid && invoice.Outstanding > 0.000001m) ||
                         (invoice.Status == InvoiceStatus.Partial && invoice.Outstanding <= 0m) ||
-                        invoice.VatAmount != 0m || !invoice.JournalEntryId.HasValue)
-                        return false;
+                        !invoice.JournalEntryId.HasValue) return false;
                     var invoiceLines = await _db.ArInvoiceLines.Where(x => x.ArInvoiceId == invoice.Id).ToListAsync(ct);
-                    if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
-                        invoiceLines.Sum(x => x.LineTotal) != invoice.Total) return false;
-                    var invoiceDimensions = invoiceLines.Select(x => (x.GlAccountId, x.CostCentreId)).Distinct().ToArray();
-                    var partialSettlement = allocation.AmountApplied < invoice.Total;
-                    if (partialSettlement && invoiceDimensions.Length > 1) return false;
-                    var postedLineAmount = invoiceLines.Where(x =>
-                        x.GlAccountId == actual.GlAccountId && x.CostCentreId == actual.CostCentreId)
-                        .Sum(x => x.LineTotal);
-                    var lineAmount = invoice.FundCentreId == actual.FundCentreId
-                        ? partialSettlement
-                            ? invoiceDimensions[0].GlAccountId == actual.GlAccountId &&
-                                invoiceDimensions[0].CostCentreId == actual.CostCentreId ? allocation.AmountApplied : 0m
-                            : postedLineAmount
-                        : 0m;
-                    if (lineAmount <= 0m) continue;
-                    var invoicePosted = await _db.JournalEntries.AnyAsync(x =>
-                        x.Id == invoice.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct);
-                    if (!invoicePosted) return false;
-                    var revenue = await _db.JournalLines.Where(x =>
-                        x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId &&
-                        x.FundCentreId == actual.FundCentreId && x.CostCentreId == actual.CostCentreId)
-                        .SumAsync(x => x.Credit - x.Debit, ct);
-                    if (revenue != postedLineAmount) return false;
-                    expectedAllocation += lineAmount;
+                    var taxComponents = await _db.InvoiceTaxComponents.Where(x => x.CompanyId == companyId &&
+                        x.InvoiceKind == "AR" && x.InvoiceId == invoice.Id).ToListAsync(ct);
+                    if (invoiceLines.Count == 0 || invoiceLines.Sum(x => x.LineTotal) != invoice.Total ||
+                        taxComponents.Sum(x => x.Amount) != invoice.VatAmount) return false;
+                    foreach (var taxGroup in taxComponents.GroupBy(x => x.JournalLineId))
+                    {
+                        var journalTax = await _db.JournalLines.SingleOrDefaultAsync(x =>
+                            x.Id == taxGroup.Key && x.JournalEntryId == invoice.JournalEntryId.Value &&
+                            x.TaxCodeId == taxGroup.First().TaxCodeId && x.GlAccountId == taxGroup.First().GlAccountId, ct);
+                        if (journalTax == null || journalTax.Credit - journalTax.Debit != taxGroup.Sum(x => x.Amount)) return false;
+                    }
+                    var details = await _db.SettlementComponentAllocations.Where(x =>
+                        x.CompanyId == companyId && x.SettlementKind == "AR" &&
+                        x.SettlementAllocationId == allocation.Id && x.InvoiceId == invoice.Id).ToListAsync(ct);
+                    if (details.Count == 0 || details.Sum(x => x.AmountApplied) != allocation.AmountApplied) return false;
+                    foreach (var detail in details)
+                    {
+                        var dimension = await ResolveSettlementComponentDimensionAsync(companyId, "AR",
+                            invoice.Id, invoice.FundCentreId.Value, detail, receipt.ReceiptDate, ct);
+                        if (!dimension.Included) continue;
+                        if (detail.ComponentKind == SettlementComponentKind.InvoiceLine)
+                        {
+                            var postedRevenue = await _db.JournalLines.Where(x =>
+                                x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == dimension.GlAccountId &&
+                                x.FundCentreId == dimension.FundCentreId && x.CostCentreId == dimension.CostCentreId)
+                                .SumAsync(x => x.Credit - x.Debit, ct);
+                            var expectedRevenue = invoiceLines.Where(x => x.GlAccountId == dimension.GlAccountId &&
+                                x.CostCentreId == dimension.CostCentreId).Sum(x => x.LineSubtotal);
+                            if (postedRevenue != expectedRevenue) return false;
+                        }
+                        if (dimension.GlAccountId == actual.GlAccountId &&
+                            dimension.FundCentreId == actual.FundCentreId &&
+                            dimension.CostCentreId == actual.CostCentreId)
+                            expectedAllocation += detail.AmountApplied;
+                    }
                 }
                 if (expectedAllocation != actual.SourceAmount) return false;
                 var receiptBankCandidates = await _db.BankAccounts.Where(x =>
@@ -3434,8 +3443,7 @@ namespace ApexERP.Application.Services
                     payment.Currency != actual.Currency || payment.PaymentDate.Date != actual.SourceDate.Date ||
                     actual.EffectiveDate.Date != payment.PaymentDate.Date ||
                     !payment.PreparedBy.HasValue || !payment.AuthorisedBy.HasValue ||
-                    payment.PreparedBy == payment.AuthorisedBy || !payment.AuthorisedAt.HasValue)
-                    return false;
+                    payment.PreparedBy == payment.AuthorisedBy || !payment.AuthorisedAt.HasValue) return false;
                 var allocations = await _db.ApPaymentAllocations.Where(x => x.ApPaymentId == payment.Id).ToListAsync(ct);
                 if (allocations.Count == 0 || allocations.Any(x => x.AmountApplied <= 0m) ||
                     allocations.Sum(x => x.AmountApplied) != payment.Amount) return false;
@@ -3449,32 +3457,49 @@ namespace ApexERP.Application.Services
                     if (invoice.SupplierId != payment.SupplierId ||
                         (invoice.Status != InvoiceStatus.Paid && invoice.Status != InvoiceStatus.Partial) ||
                         !invoice.FundCentreId.HasValue || invoice.Currency != payment.Currency ||
-                        invoice.Total < allocation.AmountApplied || invoice.Outstanding < 0m ||
+                        invoice.Total - invoice.WhtAmount < allocation.AmountApplied || invoice.Outstanding < 0m ||
                         (invoice.Status == InvoiceStatus.Paid && invoice.Outstanding > 0.000001m) ||
                         (invoice.Status == InvoiceStatus.Partial && invoice.Outstanding <= 0m) ||
-                        invoice.VatAmount != 0m || invoice.WhtAmount != 0m || !invoice.JournalEntryId.HasValue) return false;
+                        !invoice.JournalEntryId.HasValue) return false;
                     var invoiceLines = await _db.ApInvoiceLines.Where(x => x.ApInvoiceId == invoice.Id).ToListAsync(ct);
-                    if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
-                        invoiceLines.Sum(x => x.LineTotal) != invoice.Total) return false;
-                    var invoiceGlAccounts = invoiceLines.Select(x => x.GlAccountId).Distinct().ToArray();
-                    var partialSettlement = allocation.AmountApplied < invoice.Total;
-                    if (partialSettlement && invoiceGlAccounts.Length > 1) return false;
-                    var postedLineAmount = invoiceLines.Where(x => x.GlAccountId == actual.GlAccountId).Sum(x => x.LineTotal);
-                    var lineAmount = invoice.FundCentreId == actual.FundCentreId
-                        ? partialSettlement
-                            ? invoiceGlAccounts[0] == actual.GlAccountId ? allocation.AmountApplied : 0m
-                            : postedLineAmount
-                        : 0m;
-                    if (lineAmount <= 0m) continue;
-                    var invoicePosted = await _db.JournalEntries.AnyAsync(x =>
-                        x.Id == invoice.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct);
-                    if (!invoicePosted) return false;
-                    var expense = await _db.JournalLines.Where(x =>
-                        x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId &&
-                        x.FundCentreId == actual.FundCentreId && x.CostCentreId == actual.CostCentreId)
-                        .SumAsync(x => x.Debit - x.Credit, ct);
-                    if (expense != postedLineAmount) return false;
-                    expectedAllocation += lineAmount;
+                    var taxComponents = await _db.InvoiceTaxComponents.Where(x => x.CompanyId == companyId &&
+                        x.InvoiceKind == "AP" && x.InvoiceId == invoice.Id).ToListAsync(ct);
+                    if (invoiceLines.Count == 0 || invoiceLines.Sum(x => x.LineTotal) != invoice.Total ||
+                        taxComponents.Where(x => x.TaxType == TaxType.VAT).Sum(x => x.Amount) != invoice.VatAmount ||
+                        taxComponents.Where(x => x.TaxType == TaxType.WHT).Sum(x => x.Amount) != invoice.WhtAmount) return false;
+                    foreach (var taxGroup in taxComponents.GroupBy(x => x.JournalLineId))
+                    {
+                        var journalTax = await _db.JournalLines.SingleOrDefaultAsync(x =>
+                            x.Id == taxGroup.Key && x.JournalEntryId == invoice.JournalEntryId.Value &&
+                            x.GlAccountId == taxGroup.First().GlAccountId, ct);
+                        var postedTax = journalTax == null ? 0m : taxGroup.First().TaxType == TaxType.WHT
+                            ? journalTax.Credit - journalTax.Debit : journalTax.Debit - journalTax.Credit;
+                        if (journalTax == null || postedTax != taxGroup.Sum(x => x.Amount)) return false;
+                    }
+                    var details = await _db.SettlementComponentAllocations.Where(x =>
+                        x.CompanyId == companyId && x.SettlementKind == "AP" &&
+                        x.SettlementAllocationId == allocation.Id && x.InvoiceId == invoice.Id).ToListAsync(ct);
+                    if (details.Count == 0 || details.Sum(x => x.AmountApplied) != allocation.AmountApplied) return false;
+                    foreach (var detail in details)
+                    {
+                        var dimension = await ResolveSettlementComponentDimensionAsync(companyId, "AP",
+                            invoice.Id, invoice.FundCentreId.Value, detail, payment.PaymentDate, ct);
+                        if (!dimension.Included) continue;
+                        if (detail.ComponentKind == SettlementComponentKind.InvoiceLine)
+                        {
+                            var postedExpense = await _db.JournalLines.Where(x =>
+                                x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == dimension.GlAccountId &&
+                                x.FundCentreId == dimension.FundCentreId && x.CostCentreId == dimension.CostCentreId)
+                                .SumAsync(x => x.Debit - x.Credit, ct);
+                            var expectedExpense = invoiceLines.Where(x => x.GlAccountId == dimension.GlAccountId &&
+                                x.CostCentreId == dimension.CostCentreId).Sum(x => x.LineSubtotal);
+                            if (postedExpense != expectedExpense) return false;
+                        }
+                        if (dimension.GlAccountId == actual.GlAccountId &&
+                            dimension.FundCentreId == actual.FundCentreId &&
+                            dimension.CostCentreId == actual.CostCentreId)
+                            expectedAllocation += detail.AmountApplied;
+                    }
                 }
                 if (expectedAllocation != actual.SourceAmount) return false;
                 var paymentBankCandidates = await _db.BankAccounts.Where(x =>
