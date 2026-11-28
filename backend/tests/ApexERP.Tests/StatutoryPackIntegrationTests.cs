@@ -36,6 +36,31 @@ public sealed class StatutoryPackIntegrationTests
         Assert.Equal(0.155m, rules.RootElement.GetProperty("vat").GetProperty("standardRate").GetDecimal());
         Assert.Equal(0.03m, rules.RootElement.GetProperty("paye").GetProperty("aidsLevyRate").GetDecimal());
         Assert.Equal("baseline-only", rules.RootElement.GetProperty("coverage").GetString());
+        // ZIMRA's official 2026 ZWG monthly PAYE table: preserve each published threshold,
+        // marginal rate and cumulative deduction as a regression against statutory-source drift.
+        var zwgMonthly = rules.RootElement.GetProperty("paye").GetProperty("ZWG").GetProperty("monthly");
+        Assert.Equal(6, zwgMonthly.GetArrayLength());
+        var expectedZwgMonthly = new (decimal From, decimal? To, decimal Rate, decimal Deduction)[]
+        {
+            (0m, 2800m, 0m, 0m),
+            (2800.01m, 8400m, 0.20m, 560m),
+            (8400.01m, 28000m, 0.25m, 980m),
+            (28000.01m, 56000m, 0.30m, 2380m),
+            (56000.01m, 84000m, 0.35m, 5180m),
+            (84000.01m, null, 0.40m, 9380m)
+        };
+        for (var i = 0; i < expectedZwgMonthly.Length; i++)
+        {
+            var band = zwgMonthly[i];
+            Assert.Equal(expectedZwgMonthly[i].From, band.GetProperty("from").GetDecimal());
+            Assert.Equal(expectedZwgMonthly[i].To.HasValue ? expectedZwgMonthly[i].To.Value : (decimal?)null,
+                band.GetProperty("to").ValueKind == JsonValueKind.Null ? null : band.GetProperty("to").GetDecimal());
+            Assert.Equal(expectedZwgMonthly[i].Rate, band.GetProperty("rate").GetDecimal());
+            Assert.Equal(expectedZwgMonthly[i].Deduction, band.GetProperty("deduction").GetDecimal());
+        }
+        Assert.Contains(draft.Sources, source =>
+            source.Url == "https://www.zimra.co.zw/domestic-taxes/tax-tables?download=4522%3Azwg-paye-tax-tables-2026");
+
 
         var reviewer = Guid.NewGuid();
         var approver = Guid.NewGuid();
