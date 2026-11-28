@@ -47,7 +47,7 @@ namespace ApexERP.Application.Services
             string? TreasuryClassificationCode = null);
         public sealed record BudgetComparisonLine(int LineNumber, string Description, string FundCentreCode,
             string FundCentreName, string FundCentreLevel, string CostCentreCode, string CostCentreName,
-            string AccountCode, string AccountName, string ClassificationCode,
+            string AccountCode, string AccountName, string AccountType, string ClassificationCode,
             string? TreasuryClassificationCode, string? NoteReference,
             decimal OriginalBudget, decimal? FinalBudget, decimal? ActualOnComparableBasis,
             decimal? Variance, decimal? VariancePercent, string? OriginalToFinalExplanation,
@@ -122,7 +122,10 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("Budget lines must map to an active income/expense GL account, or for cash-basis budgets an active account classified to operating, investing or financing cash flows, in the same company.");
                 if (string.IsNullOrWhiteSpace(account.SubType) ||
                     !string.Equals(account.SubType.Trim(), line.ClassificationCode.Trim(), StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("Each budget classification code must match the selected GL account's configured SubType classification.");
+                    throw new InvalidOperationException("Each GL SubType classification code must match the selected GL account's configured SubType classification.");
+                if (requiresTreasuryClassification &&
+                    account.Type != GlAccountType.Income && account.Type != GlAccountType.Expense)
+                    throw new InvalidOperationException("ZFRM Appendix 5 budget lines must map to income or expense GL accounts.");
                 if (line.CostCentreId.HasValue && !await _db.CostCentres.AnyAsync(x =>
                     x.Id == line.CostCentreId.Value && x.CompanyId == companyId && x.IsActive, ct))
                     throw new InvalidOperationException("A budget line references an inactive or foreign cost centre.");
@@ -1617,7 +1620,7 @@ namespace ApexERP.Application.Services
                 rows.Add(new BudgetComparisonLine(dimension.OriginalLine?.LineNumber ?? dimension.FinalLine!.LineNumber,
                     line.Description, fund.Code, fund.Name, fund.Level.ToString(),
                     costCentre?.Code ?? string.Empty, costCentre?.Name ?? string.Empty,
-                    account.Code, account.Name, line.ClassificationCode,
+                    account.Code, account.Name, account.Type.ToString(), line.ClassificationCode,
                     dimension.FinalLine != null ? dimension.FinalLine.TreasuryClassificationCode : dimension.OriginalLine?.TreasuryClassificationCode,
                     dimension.FinalLine != null ? dimension.FinalLine.NoteReference : dimension.OriginalLine?.NoteReference,
                     originalAmount, finalAmount, actual, variance,
