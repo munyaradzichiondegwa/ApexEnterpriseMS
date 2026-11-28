@@ -699,7 +699,8 @@ export default function PublicSectorPage() {
                   <form onSubmit={addSourceReconciliationLine} className="grid grid-cols-1 md:grid-cols-4 gap-2">
                     <select className="input md:col-span-2" required value={recordLineDraft.sourceRecordId} onChange={(e) => {
                       const source = sourceRecordsForReconciliation.find((x: any) => x.id === e.target.value);
-                      const reference = source?.reference || source?.receiptNo || source?.paymentNo || source?.id || "";
+                      const fallbackReference = source?.id ? String(source.id).replace(/-/g, "") : "";
+                      const reference = source?.reference || source?.receiptNo || source?.paymentNo || fallbackReference;
                       setRecordLineDraft({ ...recordLineDraft, sourceRecordId: e.target.value, sourceReference: reference });
                     }}>
                       <option value="">Select source transaction</option>
