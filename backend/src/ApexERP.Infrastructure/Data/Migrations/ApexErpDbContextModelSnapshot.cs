@@ -3947,6 +3947,101 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.BankStatementImportBatch", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BankAccountId").HasColumnType("uuid");
+                    b.Property<string>("SourceInstitution").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<string>("SourceAccountReference").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<string>("StatementReference").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<DateTime>("PeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<decimal>("OpeningBalance").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("ClosingBalance").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("TotalDebits").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("TotalCredits").HasColumnType("numeric(20,6)");
+                    b.Property<int>("TransactionCount").HasColumnType("integer");
+                    b.Property<string>("OriginalFileName").IsRequired().HasMaxLength(255).HasColumnType("character varying(255)");
+                    b.Property<string>("MediaType").IsRequired().HasMaxLength(128).HasColumnType("character varying(128)");
+                    b.Property<string>("ParserVersion").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+                    b.Property<string>("Sha256").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+                    b.Property<long>("ByteLength").HasColumnType("bigint");
+                    b.Property<byte[]>("OriginalBytes").IsRequired().HasColumnType("bytea");
+                    b.Property<Guid>("UploadedBy").HasColumnType("uuid");
+                    b.Property<DateTime>("UploadedAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("AuthenticationMethod").HasColumnType("integer");
+                    b.Property<string>("AuthenticationEvidenceReference").HasMaxLength(1000).HasColumnType("character varying(1000)");
+                    b.Property<Guid?>("AuthenticationWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("AuthenticatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("AuthenticatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("CompletenessCertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CompletenessCertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BankAccountId");
+                    b.HasIndex("CompanyId", "BankAccountId", "PeriodStart", "PeriodEnd")
+                        .HasDatabaseName("IX_BankStatementBatch_AccountPeriod");
+                    b.HasIndex("CompanyId", "BankAccountId", "StatementReference").IsUnique()
+                        .HasDatabaseName("UX_BankStatementBatch_StatementIdentity");
+                    b.ToTable("BankStatementImportBatches", t =>
+                        {
+                            t.HasCheckConstraint("CK_BankStatementBatch_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+                            t.HasCheckConstraint("CK_BankStatementBatch_ByteLength", "\"ByteLength\" > 0");
+                            t.HasCheckConstraint("CK_BankStatementBatch_Totals", "\"TotalDebits\" >= 0 AND \"TotalCredits\" >= 0 AND \"TransactionCount\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.BankStatementImportedTransaction", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("ImportBatchId").HasColumnType("uuid");
+                    b.Property<Guid>("BankAccountId").HasColumnType("uuid");
+                    b.Property<string>("ExternalTransactionId").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<DateTime>("TransactionDate").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Description").IsRequired().HasMaxLength(500).HasColumnType("character varying(500)");
+                    b.Property<string>("Reference").HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<decimal>("Debit").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("Credit").HasColumnType("numeric(20,6)");
+                    b.Property<string>("Currency").IsRequired().HasMaxLength(3).HasColumnType("character varying(3)");
+                    b.Property<int>("SourceLineNumber").HasColumnType("integer");
+                    b.Property<string>("TransactionFingerprint").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("MatchedBankTransactionId").HasColumnType("uuid");
+                    b.Property<Guid?>("MatchedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("MatchedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ExclusionReason").HasMaxLength(1000).HasColumnType("character varying(1000)");
+                    b.Property<Guid?>("ExcludedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ExcludedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BankAccountId");
+                    b.HasIndex("ImportBatchId");
+                    b.HasIndex("MatchedBankTransactionId");
+                    b.HasIndex("CompanyId", "ImportBatchId", "Status")
+                        .HasDatabaseName("IX_BankStatementTransaction_BatchStatus");
+                    b.HasIndex("CompanyId", "BankAccountId", "ExternalTransactionId").IsUnique()
+                        .HasDatabaseName("UX_BankStatementTransaction_ExternalIdentity");
+                    b.HasIndex("CompanyId", "BankAccountId", "TransactionFingerprint").IsUnique()
+                        .HasDatabaseName("UX_BankStatementTransaction_Fingerprint");
+                    b.HasIndex("MatchedBankTransactionId").IsUnique()
+                        .HasFilter("\"MatchedBankTransactionId\" IS NOT NULL")
+                        .HasDatabaseName("UX_BankStatementTransaction_MatchedBankTransaction");
+                    b.ToTable("BankStatementImportedTransactions", t =>
+                        {
+                            t.HasCheckConstraint("CK_BankStatementTransaction_Amounts", "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0)");
+                            t.HasCheckConstraint("CK_BankStatementTransaction_SourceLine", "\"SourceLineNumber\" > 1");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
@@ -8320,6 +8415,33 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .WithMany().HasForeignKey("OriginalEventId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_ModifiedCashLedger_OriginalEvent");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.BankStatementImportBatch", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.BankAccount", null)
+                        .WithMany().HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BankStatementBatch_BankAccount")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.BankStatementImportedTransaction", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.BankStatementImportBatch", null)
+                        .WithMany().HasForeignKey("ImportBatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BankStatementTransaction_Batch")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.BankAccount", null)
+                        .WithMany().HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BankStatementTransaction_BankAccount")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.BankTransaction", null)
+                        .WithMany().HasForeignKey("MatchedBankTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BankStatementTransaction_MatchedBankTransaction");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", b =>
