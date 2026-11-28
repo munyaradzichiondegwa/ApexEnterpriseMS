@@ -242,10 +242,12 @@ namespace ApexERP.Application.Services
                 .Contains(statementSection, StringComparer.OrdinalIgnoreCase))
                 statementSection = new[] { "Revenue", "Expense", "Operating", "Investing", "Financing" }
                     .First(x => string.Equals(x, statementSection, StringComparison.OrdinalIgnoreCase));
-            var approvedBudget = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
+            var approvedBudget = await _db.PublicSectorBudgetVersions.Where(x =>
                     x.CompanyId == companyId && x.FinancialYear == financialYear &&
                     x.Status == PublicSectorBudgetVersionStatus.Approved &&
-                    (!budgetVersionId.HasValue || x.Id == budgetVersionId.Value), ct)
+                    (!budgetVersionId.HasValue || x.Id == budgetVersionId.Value))
+                .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber)
+                .FirstOrDefaultAsync(ct)
                 ?? throw new InvalidOperationException("The selected approved IPSAS 24 budget version is required before recording a reconciliation.");
             var currentFinalBudget = await _db.PublicSectorBudgetVersions.Where(x =>
                     x.CompanyId == companyId && x.FinancialYear == financialYear &&
