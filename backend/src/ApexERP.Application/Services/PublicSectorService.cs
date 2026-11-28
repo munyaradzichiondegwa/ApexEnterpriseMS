@@ -175,6 +175,82 @@ namespace ApexERP.Application.Services
             }, ct);
         }
 
+        public async Task<PublicSectorBudgetReconciliation> CreateBudgetReconciliationAsync(Guid companyId,
+            int financialYear, PublicSectorBudgetReconciliationType type, string description, string statementSection,
+            decimal operatingAmount, decimal investingAmount, decimal financingAmount, string supportingReference,
+            Guid actorId, CancellationToken ct = default)
+        {
+            if (financialYear < 2000 || financialYear > 2200 || string.IsNullOrWhiteSpace(description) ||
+                string.IsNullOrWhiteSpace(statementSection) || string.IsNullOrWhiteSpace(supportingReference) ||
+                (operatingAmount == 0m && investingAmount == 0m && financingAmount == 0m))
+                throw new InvalidOperationException("A valid year, description, statement section, supporting reference and non-zero reconciliation amount are required.");
+            var reconciliation = new PublicSectorBudgetReconciliation
+            {
+                CompanyId = companyId, FinancialYear = financialYear, Type = type,
+                Description = description.Trim(), StatementSection = statementSection.Trim(),
+                OperatingAmount = operatingAmount, InvestingAmount = investingAmount,
+                FinancingAmount = financingAmount, SupportingReference = supportingReference.Trim(),
+                Status = PublicSectorBudgetReconciliationStatus.Draft, CreatedBy = actorId
+            };
+            _db.PublicSectorBudgetReconciliations.Add(reconciliation);
+            _audit.Record(companyId, actorId, "PublicSectorBudgetReconciliation.Created", "PublicSector",
+                nameof(PublicSectorBudgetReconciliation), reconciliation.Id, null,
+                new { reconciliation.FinancialYear, reconciliation.Type, reconciliation.Description,
+                    reconciliation.StatementSection, reconciliation.OperatingAmount,
+                    reconciliation.InvestingAmount, reconciliation.FinancingAmount,
+                    reconciliation.SupportingReference });
+            await _db.SaveChangesAsync(ct);
+            return reconciliation;
+        }
+
+        public async Task MarkBudgetReconciliationPendingAsync(Guid companyId, Guid reconciliationId,
+            Guid workflowId, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorBudgetReconciliations.FirstOrDefaultAsync(x =>
+                x.Id == reconciliationId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Budget reconciliation row not found.");
+            if (item.Status != PublicSectorBudgetReconciliationStatus.Draft)
+                throw new InvalidOperationException("Only a draft reconciliation row can be submitted for approval.");
+            var approvalAmount = Math.Abs(item.OperatingAmount) + Math.Abs(item.InvestingAmount) + Math.Abs(item.FinancingAmount);
+            var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x =>
+                x.Id == workflowId && x.CompanyId == companyId && x.RequestType == "PublicSectorBudgetReconciliation" &&
+                x.ReferenceId == item.Id && x.Amount == approvalAmount && x.Status == WorkflowStatus.Pending, ct)
+                ?? throw new InvalidOperationException("A matching pending reconciliation approval workflow is required.");
+            item.ApprovalWorkflowId = workflow.Id;
+            item.Status = PublicSectorBudgetReconciliationStatus.PendingApproval;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        public async Task<PublicSectorBudgetReconciliation> FinaliseBudgetReconciliationApprovalAsync(
+            Guid companyId, Guid reconciliationId, Guid actorId, CancellationToken ct = default)
+        {
+            return await _db.InTransactionAsync(async token =>
+            {
+                var item = await _db.PublicSectorBudgetReconciliations.FirstOrDefaultAsync(x =>
+                    x.Id == reconciliationId && x.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Budget reconciliation row not found.");
+                if (item.Status != PublicSectorBudgetReconciliationStatus.PendingApproval || !item.ApprovalWorkflowId.HasValue)
+                    throw new InvalidOperationException("Only a pending reconciliation row with an approval workflow can be approved.");
+                var workflow = await _db.WorkflowRequests.Include(x => x.Approvals).FirstOrDefaultAsync(x =>
+                    x.Id == item.ApprovalWorkflowId.Value && x.CompanyId == companyId &&
+                    x.RequestType == "PublicSectorBudgetReconciliation" && x.ReferenceId == item.Id &&
+                    x.Status == WorkflowStatus.Approved && x.Approvals.Any(a => a.Approved && a.ApproverId == actorId), token)
+                    ?? throw new InvalidOperationException("The independent reconciliation approval workflow has not been approved.");
+                if (workflow.SubmittedBy == actorId)
+                    throw new InvalidOperationException("The reconciliation preparer cannot approve their own reconciliation.");
+                item.Status = PublicSectorBudgetReconciliationStatus.Approved;
+                item.ApprovedBy = actorId;
+                item.ApprovedAt = DateTime.UtcNow;
+                _audit.Record(companyId, actorId, "PublicSectorBudgetReconciliation.Approved", "PublicSector",
+                    nameof(PublicSectorBudgetReconciliation), item.Id,
+                    new { Status = PublicSectorBudgetReconciliationStatus.PendingApproval },
+                    new { item.Status, item.ApprovedBy, item.ApprovedAt, item.ApprovalWorkflowId,
+                        item.Type, item.OperatingAmount, item.InvestingAmount, item.FinancingAmount });
+                await _db.SaveChangesAsync(token);
+                return item;
+            }, ct);
+        }
+
         public async Task<BudgetComparisonReport> GetBudgetComparisonAsync(Guid companyId, int financialYear,
             CancellationToken ct = default)
         {
@@ -234,7 +310,7 @@ namespace ApexERP.Application.Services
             }
 
             var reconciliations = await _db.PublicSectorBudgetReconciliations
-                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear && x.ApprovedAt != null)
+                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear && x.Status == PublicSectorBudgetReconciliationStatus.Approved)
                 .OrderBy(x => x.Type).ThenBy(x => x.Description).ToListAsync(ct);
             return new BudgetComparisonReport(original.Id, final?.Id, financialYear, original.Currency,
                 original.AccountingBasis.ToString(), original.ClassificationBasis, original.EntityScope,
