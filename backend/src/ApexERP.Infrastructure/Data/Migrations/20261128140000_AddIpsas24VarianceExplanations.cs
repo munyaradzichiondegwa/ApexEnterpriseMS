@@ -47,9 +47,9 @@ public sealed class AddIpsas24VarianceExplanations : Migration
                     onDelete: ReferentialAction.Restrict);
             });
 
-        migrationBuilder.CreateIndex("UX_PublicSectorBudgetVarianceExplanation_Line",
+        migrationBuilder.CreateIndex("IX_PublicSectorBudgetVarianceExplanation_Line",
             "PublicSectorBudgetVarianceExplanations",
-            new[] { "CompanyId", "BudgetVersionLineId" }, unique: true);
+            new[] { "CompanyId", "BudgetVersionLineId" });
         migrationBuilder.CreateIndex("IX_PublicSectorBudgetVarianceExplanations_BudgetVersionId",
             "PublicSectorBudgetVarianceExplanations", "BudgetVersionId");
         migrationBuilder.CreateIndex("IX_PublicSectorBudgetVarianceExplanations_BudgetVersionLineId",
