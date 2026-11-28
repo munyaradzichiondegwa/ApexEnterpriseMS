@@ -106,7 +106,36 @@ export default function PublicSectorPage() {
         ? null : finalSurplusDeficit - actualSurplusDeficit,
       variancePercent: null, originalToFinalExplanation: "", budgetVersionLineId: null,
     };
-    const exportRows = canCalculateSurplusDeficit ? [...lines, summaryRow] : lines;
+    const financialStatementReconciliation = budgetComparison.financialStatementReconciliation;
+    const reconciliationRows = financialStatementReconciliation?.required ? [
+      {
+        description: "RECONCILIATION TO FINANCIAL STATEMENT ACTUALS — REVENUE",
+        noteReference: "", treasuryClassificationCode: "", classificationCode: "", accountType: "Reconciliation",
+        originalBudget: null, finalBudget: null,
+        actualOnComparableBasis: financialStatementReconciliation.comparableRevenueActual,
+        reconciliationAdjustment: financialStatementReconciliation.revenueAdjustment,
+        financialStatementActual: financialStatementReconciliation.financialStatementRevenueActual,
+        variance: null, variancePercent: null, originalToFinalExplanation: "", budgetVersionLineId: null,
+        commentReference: budgetComparison.reconciliations?.filter((x: any) => x.statementSection === "Revenue")
+          .map((x: any) => x.supportingReference).join("; ") ?? "",
+      },
+      {
+        description: "RECONCILIATION TO FINANCIAL STATEMENT ACTUALS — EXPENSE",
+        noteReference: "", treasuryClassificationCode: "", classificationCode: "", accountType: "Reconciliation",
+        originalBudget: null, finalBudget: null,
+        actualOnComparableBasis: financialStatementReconciliation.comparableExpenseActual,
+        reconciliationAdjustment: financialStatementReconciliation.expenseAdjustment,
+        financialStatementActual: financialStatementReconciliation.financialStatementExpenseActual,
+        variance: null, variancePercent: null, originalToFinalExplanation: "", budgetVersionLineId: null,
+        commentReference: budgetComparison.reconciliations?.filter((x: any) => x.statementSection === "Expense")
+          .map((x: any) => x.supportingReference).join("; ") ?? "",
+      },
+    ] : [];
+    const exportRows = [
+      ...lines,
+      ...(canCalculateSurplusDeficit ? [summaryRow] : []),
+      ...reconciliationRows,
+    ];
     downloadCsv(`apexerp-ipsas24-budget-comparison-${year}`, exportRows, [
       // Reporting metadata required to interpret the separate statement.
       { header: "Financial Year", value: () => budgetComparison.financialYear },
@@ -123,7 +152,9 @@ export default function PublicSectorPage() {
       { header: "Final", value: (row: any) => row.finalBudget },
       { header: "Actual Amounts on Comparable Basis", value: (row: any) => row.actualOnComparableBasis },
       { header: "Difference between final budget and actual", value: (row: any) => row.variance },
-      { header: "Comment Ref", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.evidenceReference ?? "" },
+      { header: "Reconciliation Adjustment", value: (row: any) => row.reconciliationAdjustment ?? "" },
+      { header: "Actual Amount in Financial Statements", value: (row: any) => row.financialStatementActual ?? "" },
+      { header: "Comment Ref", value: (row: any) => row.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.evidenceReference ?? "" },
       // Supporting dimensions and audit references.
       { header: "Treasury Classification", value: (row: any) => row.treasuryClassificationCode ?? "" },
       { header: "GL SubType", value: (row: any) => row.classificationCode },
@@ -136,8 +167,8 @@ export default function PublicSectorPage() {
       { header: "GL Account", value: (row: any) => row.accountName },
       { header: "Variance Percent", value: (row: any) => row.variancePercent },
       { header: "Original-to-Final Explanation", value: (row: any) => row.originalToFinalExplanation },
-      { header: "Variance Explanation", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.explanation ?? "" },
-      { header: "Evidence Reference", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.evidenceReference ?? "" },
+      { header: "Variance Explanation", value: (row: any) => row.explanation ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.explanation ?? "" },
+      { header: "Evidence Reference", value: (row: any) => row.evidenceReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.evidenceReference ?? "" },
     ]);
   }
 
