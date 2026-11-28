@@ -1556,6 +1556,60 @@ namespace ApexERP.Tests
             foreach (var item in new[] { arActual, arActual2, apActual, apActual2 })
                 await service.CertifyBudgetExecutionActualAsync(companyId, item.Id, certifierId);
 
+            // Cash actuals are not comparable until each registered source population has
+            // independently reviewed control totals, record-level allocations and a certified
+            // completeness attestation for the full reporting entity.
+            var sourceReviewerId = Guid.NewGuid();
+            var reconciliationPreparerId = Guid.NewGuid();
+            var reconciliationReviewerId = Guid.NewGuid();
+            var registerCertifierId = Guid.NewGuid();
+            var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var arExpectedSource = await service.CreateExpectedCashSourceAsync(companyId, budgetVersionId,
+                "ReceivablesControl", "AR-CONTROL-001", "Trade receivables control",
+                arControlGlId.ToString(), true, periodStart, periodEnd, preparerId);
+            var apExpectedSource = await service.CreateExpectedCashSourceAsync(companyId, budgetVersionId,
+                "PayablesControl", "AP-CONTROL-001", "Trade payables control",
+                apControlGlId.ToString(), true, periodStart, periodEnd, preparerId);
+            foreach (var expectedSource in new[] { arExpectedSource, apExpectedSource })
+            {
+                await service.SubmitExpectedCashSourceAsync(companyId, expectedSource.Id, preparerId);
+                await service.ApproveExpectedCashSourceAsync(companyId, expectedSource.Id, sourceReviewerId);
+            }
+
+            var arSubmission = await service.CreateCashSourceSubmissionAsync(companyId, arExpectedSource.Id,
+                1, 130m, 0m, 130m, "USD", "AR control account statement and receipt listing", preparerId);
+            var apSubmission = await service.CreateCashSourceSubmissionAsync(companyId, apExpectedSource.Id,
+                1, 260m, 0m, 260m, "USD", "AP control account statement and payment listing", preparerId);
+            foreach (var submission in new[] { arSubmission, apSubmission })
+            {
+                await service.SubmitCashSourceSubmissionAsync(companyId, submission.Id, preparerId);
+                await service.ReviewCashSourceSubmissionAsync(companyId, submission.Id, sourceReviewerId,
+                    true, "Source control totals independently agreed to supporting statement.");
+            }
+
+            await service.AddCashSourceReconciliationLineAsync(companyId, arSubmission.Id, arReceiptId,
+                "RCT-SETTLE-001", arActual.Id, false, null, reconciliationPreparerId);
+            await service.AddCashSourceReconciliationLineAsync(companyId, arSubmission.Id, arReceiptId,
+                "RCT-SETTLE-001", arActual2.Id, false, null, reconciliationPreparerId);
+            await service.AddCashSourceReconciliationLineAsync(companyId, apSubmission.Id, apPaymentId,
+                "PAY-SETTLE-001", apActual.Id, false, null, reconciliationPreparerId);
+            await service.AddCashSourceReconciliationLineAsync(companyId, apSubmission.Id, apPaymentId,
+                "PAY-SETTLE-001", apActual2.Id, false, null, reconciliationPreparerId);
+            foreach (var submission in new[] { arSubmission, apSubmission })
+            {
+                await service.SubmitCashSourceRecordReconciliationAsync(companyId, submission.Id, reconciliationPreparerId);
+                await service.ReviewCashSourceRecordReconciliationAsync(companyId, submission.Id,
+                    reconciliationReviewerId, true, "Every source transaction is fully allocated to certified budget actuals.");
+            }
+
+            var registerAttestation = await service.CreateExpectedCashSourceRegisterAttestationAsync(
+                companyId, budgetVersionId, 2, "IPSAS AR AP Settlement MDA",
+                "Signed register of AR and AP control accounts for the reporting entity", preparerId);
+            await service.SubmitExpectedCashSourceRegisterAttestationAsync(companyId, registerAttestation.Id, preparerId);
+            await service.ReviewExpectedCashSourceRegisterAttestationAsync(companyId, registerAttestation.Id,
+                registerCertifierId, true, "Register completeness and all source populations independently confirmed.");
+
             var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
             Assert.Equal(60m, comparison.Lines.Single(x => x.AccountCode == "4100").ActualOnComparableBasis);
