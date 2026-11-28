@@ -69,6 +69,8 @@ namespace ApexERP.Domain.Entities
         public PublicSectorBudgetReconciliationType Type { get; set; }
         public string Description { get; set; } = string.Empty;
         public string StatementSection { get; set; } = string.Empty;
+        public decimal RevenueAmount { get; set; }
+        public decimal ExpenseAmount { get; set; }
         public decimal OperatingAmount { get; set; }
         public decimal InvestingAmount { get; set; }
         public decimal FinancingAmount { get; set; }
