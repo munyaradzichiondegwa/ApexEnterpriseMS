@@ -1545,7 +1545,10 @@ namespace ApexERP.Application.Services
                     missingApSettlementCoverage == 0 && pendingCashActuals == 0 &&
                     invalidCertifiedCashActuals == 0 && cashSourceControlsComplete)
                 {
-                    foreach (var group in cashActuals.GroupBy(x => x.BudgetVersionLineId))
+                    foreach (var group in cashActuals
+                        .Where(x => x.Status == PublicSectorBudgetActualStatus.Certified ||
+                            x.Status == PublicSectorBudgetActualStatus.Reversed)
+                        .GroupBy(x => x.BudgetVersionLineId))
                         cashActualsByBudgetLine[group.Key] = group.Sum(x =>
                             x.ReversalOfId.HasValue ? -x.Amount : x.Amount);
                 }
