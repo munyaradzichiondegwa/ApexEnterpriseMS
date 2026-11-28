@@ -1290,6 +1290,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("BankAccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("BankReference")
+                        .HasColumnType("text");
+
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid");
 
