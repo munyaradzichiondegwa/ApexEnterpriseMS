@@ -339,6 +339,66 @@ namespace ApexERP.Application.Services
             return reconciliation;
         }
 
+        public async Task<PublicSectorBudgetReconciliation> CreateAutomaticBudgetReconciliationAsync(
+            Guid companyId, int financialYear, Guid budgetVersionId, PublicSectorBudgetReconciliationType type,
+            string statementSection, string description, string supportingReference,
+            DateTime statementPeriodStart, DateTime statementPeriodEnd, string statementEntityScope,
+            Guid actorId, CancellationToken ct = default)
+        {
+            if (!Enum.IsDefined(type) ||
+                !new[] { "Revenue", "Expense" }.Contains(statementSection?.Trim(), StringComparer.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(description) || string.IsNullOrWhiteSpace(supportingReference))
+                throw new InvalidOperationException("Automatic reconciliation requires a supported reconciliation type, Revenue or Expense section, description and supporting reference.");
+
+            var section = new[] { "Revenue", "Expense" }.Single(x =>
+                string.Equals(x, statementSection.Trim(), StringComparison.OrdinalIgnoreCase));
+            return await _db.InTransactionAsync(async token =>
+            {
+                await _db.AcquireTransactionLockAsync(
+                    $"ipsas24-auto-reconciliation:{companyId:N}:{budgetVersionId:N}:{statementPeriodStart:yyyyMMdd}:{statementPeriodEnd:yyyyMMdd}:{type}:{section}",
+                    token);
+                var report = await GetBudgetComparisonAsync(companyId, financialYear, token,
+                    statementPeriodStart, statementPeriodEnd, statementEntityScope);
+                if (!report.ComparableActualsAvailable)
+                    throw new InvalidOperationException("Automatic reconciliation requires a complete comparable budget actual population: " + report.ComparabilityMessage);
+                if (report.FinalBudgetVersionId != budgetVersionId)
+                    throw new InvalidOperationException("Automatic reconciliation must reference the current approved final budget version.");
+                var candidate = report.AutomaticReconciliationCandidates.SingleOrDefault(x =>
+                    x.Type == type && string.Equals(x.StatementSection, section, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException("No system-calculated reconciliation candidate is available for the selected type and statement section.");
+                if (await _db.PublicSectorBudgetReconciliations.AnyAsync(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId &&
+                    x.StatementPeriodStart == report.StatementPeriodStart &&
+                    x.StatementPeriodEnd == report.StatementPeriodEnd &&
+                    x.StatementEntityScope == report.FinancialStatementEntityScope &&
+                    x.Type == type && x.StatementSection == section &&
+                    x.Status != PublicSectorBudgetReconciliationStatus.Rejected, token))
+                    throw new InvalidOperationException("An active reconciliation already exists for this calculated type, section, budget version and statement scope.");
+
+                var item = new PublicSectorBudgetReconciliation
+                {
+                    CompanyId = companyId, FinancialYear = financialYear, BudgetVersionId = budgetVersionId,
+                    StatementPeriodStart = report.StatementPeriodStart, StatementPeriodEnd = report.StatementPeriodEnd,
+                    StatementEntityScope = report.FinancialStatementEntityScope,
+                    SourceFingerprint = candidate.SourceFingerprint, CalculatedAt = candidate.CalculatedAt,
+                    Type = type, Description = description.Trim(), StatementSection = section,
+                    RevenueAmount = section == "Revenue" ? candidate.ExpectedAdjustment : 0m,
+                    ExpenseAmount = section == "Expense" ? candidate.ExpectedAdjustment : 0m,
+                    SupportingReference = supportingReference.Trim(),
+                    IsNoDifferenceAttestation = candidate.ExpectedAdjustment == 0m,
+                    Status = PublicSectorBudgetReconciliationStatus.Draft, CreatedBy = actorId
+                };
+                _db.PublicSectorBudgetReconciliations.Add(item);
+                _audit.Record(companyId, actorId, "PublicSectorBudgetReconciliation.AutomaticDraftCreated",
+                    "PublicSector", nameof(PublicSectorBudgetReconciliation), item.Id, null,
+                    new { item.BudgetVersionId, item.Type, item.StatementSection, item.RevenueAmount,
+                        item.ExpenseAmount, item.SourceFingerprint, item.CalculatedAt,
+                        ExpectedAdjustment = candidate.ExpectedAdjustment });
+                await _db.SaveChangesAsync(token);
+                return item;
+            }, ct);
+        }
+
         public async Task MarkBudgetReconciliationPendingAsync(Guid companyId, Guid reconciliationId,
             Guid workflowId, CancellationToken ct = default)
         {
