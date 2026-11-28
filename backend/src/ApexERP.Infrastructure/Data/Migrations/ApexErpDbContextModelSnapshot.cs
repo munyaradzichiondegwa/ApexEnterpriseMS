@@ -3727,8 +3727,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("BudgetVersionLineId");
                     b.HasIndex("FundCentreId");
                     b.HasIndex("GlAccountId");
-                    b.HasIndex("CompanyId", "SourceKind", "SourceRecordId")
-                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetExecutionActual_Source");
+                    b.HasIndex("CompanyId", "SourceKind", "SourceRecordId", "BudgetVersionLineId")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetExecutionActual_SourceAllocation");
                     b.HasIndex("BudgetVersionId", "EffectiveDate");
                     b.ToTable("PublicSectorBudgetExecutionActuals", t =>
                         {
