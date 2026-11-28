@@ -216,3 +216,17 @@ No modified-cash rule should be enabled by default. Each entity must configure a
 
 The earlier phase-by-phase notes have been removed from this current-status document because they described intermediate states that are superseded by the implementation and remaining-boundary sections above. Commit history and the regression acceptance matrix provide the implementation audit trail. Use the status and limitations at the beginning of this document as the authoritative current position.
 
+
+
+
+## Verification status — 28 November 2026
+
+The case-insensitive guard on manual cash-flow bridge creation is included in commit `992123a6451e61e06e7f479ca9c649d9297249ef`. Workflow [#46150746080](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46150746080) passed backend build and PostgreSQL integration tests, frontend type-check/tests/production build and dependency audit, EF model/migration drift, clean PostgreSQL migration install, hardening, least-privilege RLS boot and backup/restore. This verifies the current branch head before the documentation-only follow-up; it does not close the remaining policy and external-evidence requirements below.
+
+### Remaining implementation contract: modified-cash recognition
+
+The current budget model accepts accrual and cash bases for reconciliation; modified cash must remain blocked until a company-scoped, effective-dated and independently approved recognition policy exists. That policy must enumerate eligible obligation/commitment event classes, recognition trigger, reporting cut-off, liquidation/reversal rules, classification mapping, and whether an obligation is disclosed separately or included in the budget-comparable measure. A generic PO or commitment balance must never be treated as cash flow. Every recognized obligation must link to the immutable commitment and source event, and later liquidation must not double-count the same expenditure.
+
+### Remaining implementation contract: external bank/cashbook evidence
+
+The current source-register adapter reads ApexERP bank transactions and AR/AP control populations. It does not ingest an independently supplied bank/cashbook statement or authenticate an external source file. The next adapter must retain the original bytes or immutable object reference, SHA-256 digest, media type, byte length, upload actor/time, source institution/account identifier, statement period, parser/version, signature/verification result and import batch ID. It must reject altered bytes, duplicate statement/batch identities, overlapping duplicate transactions and cross-company references. Hashing proves byte identity after receipt; it does not prove the bank authored the file. Bank-origin authentication requires a verified digital signature, trusted provider channel/API, or independently controlled bank confirmation. Unauthenticated uploads must remain unverified evidence and cannot certify completeness.
