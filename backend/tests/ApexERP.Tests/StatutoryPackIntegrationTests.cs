@@ -61,6 +61,31 @@ public sealed class StatutoryPackIntegrationTests
         Assert.Contains(draft.Sources, source =>
             source.Url == "https://www.zimra.co.zw/domestic-taxes/tax-tables?download=4522%3Azwg-paye-tax-tables-2026");
 
+        // The published 2026 USD table uses the same monthly thresholds as the baseline's
+        // USD schedule; assert the USD-specific official source independently.
+        var usdMonthly = rules.RootElement.GetProperty("paye").GetProperty("USD").GetProperty("monthly");
+        Assert.Equal(6, usdMonthly.GetArrayLength());
+        var expectedUsdMonthly = new (decimal From, decimal? To, decimal Rate, decimal Deduction)[]
+        {
+            (0m, 100m, 0m, 0m),
+            (100.01m, 300m, 0.20m, 20m),
+            (300.01m, 1000m, 0.25m, 35m),
+            (1000.01m, 2000m, 0.30m, 85m),
+            (2000.01m, 3000m, 0.35m, 185m),
+            (3000.01m, null, 0.40m, 335m)
+        };
+        for (var i = 0; i < expectedUsdMonthly.Length; i++)
+        {
+            var band = usdMonthly[i];
+            Assert.Equal(expectedUsdMonthly[i].From, band.GetProperty("from").GetDecimal());
+            Assert.Equal(expectedUsdMonthly[i].To,
+                band.GetProperty("to").ValueKind == JsonValueKind.Null ? null : band.GetProperty("to").GetDecimal());
+            Assert.Equal(expectedUsdMonthly[i].Rate, band.GetProperty("rate").GetDecimal());
+            Assert.Equal(expectedUsdMonthly[i].Deduction, band.GetProperty("deduction").GetDecimal());
+        }
+        Assert.Contains(draft.Sources, source =>
+            source.Url == "https://www.zimra.co.zw/domestic-taxes/tax-tables?download=4523%3Ausd-paye-tax-tables-2026");
+
 
         var reviewer = Guid.NewGuid();
         var approver = Guid.NewGuid();
