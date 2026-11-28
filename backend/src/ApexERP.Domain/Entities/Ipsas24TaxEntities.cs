@@ -11,6 +11,7 @@ namespace ApexERP.Domain.Entities
     public class TaxAccountMapping : TenantEntity
     {
         public TaxType TaxType { get; set; }
+        public string Purpose { get; set; } = string.Empty; // AR-VAT-OUTPUT | AP-VAT-INPUT | AP-WHT-PAYABLE
         public Guid? TaxCodeId { get; set; }
         public Guid GlAccountId { get; set; }
         public int VersionNumber { get; set; } = 1;
