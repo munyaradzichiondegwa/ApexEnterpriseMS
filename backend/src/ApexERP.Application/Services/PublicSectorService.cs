@@ -477,7 +477,88 @@ namespace ApexERP.Application.Services
 
         private sealed record ExpectedCashSourcePopulation(
             HashSet<Guid> RecordIds, Dictionary<Guid, ExpectedCashSourceRecord> Records,
-            decimal ControlTotal, bool CurrencyMatches, decimal? NetMovement);
+            decimal ControlTotal, bool CurrencyMatches, decimal? NetMovement,
+            decimal? OpeningSubledgerBalance, decimal? ClosingSubledgerBalance,
+            decimal? OpeningGlBalance, decimal? ClosingGlBalance);
+
+        private async Task<decimal> GetArControlSubledgerBalanceAsync(
+            Guid companyId, Guid controlAccountId, string currency, DateTime asOf, CancellationToken ct)
+        {
+            var invoices = await _db.ArInvoices.Where(x =>
+                x.CompanyId == companyId && x.Currency == currency && x.InvoiceDate < asOf &&
+                x.JournalEntryId.HasValue &&
+                _db.Customers.Any(customer => customer.Id == x.CustomerId &&
+                    customer.CompanyId == companyId && customer.ArAccountId == controlAccountId) &&
+                _db.JournalEntries.Any(journal => journal.Id == x.JournalEntryId.Value &&
+                    journal.CompanyId == companyId &&
+                    (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed)))
+                .Select(x => new { x.Id, x.Total }).ToListAsync(ct);
+            var invoiceIds = invoices.Select(x => x.Id).ToArray();
+            if (invoiceIds.Length == 0) return 0m;
+            var applied = await _db.ArReceiptAllocations.Where(x => invoiceIds.Contains(x.ArInvoiceId) &&
+                _db.ArReceipts.Any(receipt => receipt.Id == x.ArReceiptId &&
+                    receipt.CompanyId == companyId && receipt.Currency == currency &&
+                    receipt.ReceiptDate < asOf && receipt.JournalEntryId.HasValue &&
+                    _db.JournalEntries.Any(journal => journal.Id == receipt.JournalEntryId.Value &&
+                        journal.CompanyId == companyId &&
+                        (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed))))
+                .SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
+            return invoices.Sum(x => x.Total) - applied;
+        }
+
+        private async Task<decimal> GetApControlSubledgerBalanceAsync(
+            Guid companyId, Guid controlAccountId, string currency, DateTime asOf, CancellationToken ct)
+        {
+            var invoices = await _db.ApInvoices.Where(x =>
+                x.CompanyId == companyId && x.Currency == currency && x.InvoiceDate < asOf &&
+                x.JournalEntryId.HasValue &&
+                _db.Suppliers.Any(supplier => supplier.Id == x.SupplierId &&
+                    supplier.CompanyId == companyId && supplier.ApAccountId == controlAccountId) &&
+                _db.JournalEntries.Any(journal => journal.Id == x.JournalEntryId.Value &&
+                    journal.CompanyId == companyId &&
+                    (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed)))
+                .Select(x => new { x.Id, x.Total }).ToListAsync(ct);
+            var invoiceIds = invoices.Select(x => x.Id).ToArray();
+            if (invoiceIds.Length == 0) return 0m;
+            var applied = await _db.ApPaymentAllocations.Where(x => invoiceIds.Contains(x.ApInvoiceId) &&
+                _db.ApPayments.Any(payment => payment.Id == x.ApPaymentId &&
+                    payment.CompanyId == companyId && payment.Currency == currency &&
+                    payment.PaymentDate < asOf && payment.JournalEntryId.HasValue &&
+                    _db.JournalEntries.Any(journal => journal.Id == payment.JournalEntryId.Value &&
+                        journal.CompanyId == companyId &&
+                        (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed))))
+                .SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
+            return invoices.Sum(x => x.Total) - applied;
+        }
+
+        private async Task<decimal> GetControlGlBalanceAsync(
+            Guid companyId, Guid controlAccountId, string currency, DateTime asOf,
+            bool liability, CancellationToken ct)
+        {
+            return await _db.JournalLines.Where(line =>
+                line.GlAccountId == controlAccountId && line.Currency == currency &&
+                line.JournalEntry!.CompanyId == companyId && line.JournalEntry.EntryDate < asOf &&
+                (line.JournalEntry.Status == JournalStatus.Posted ||
+                    line.JournalEntry.Status == JournalStatus.Reversed))
+                .SumAsync(line => liability ? line.Credit - line.Debit : line.Debit - line.Credit, ct);
+        }
+
+        private static bool CloseEnough(decimal left, decimal right) =>
+            Math.Abs(left - right) <= 0.000001m;
+
+        private static bool AreCashSourceSubmissionBalancesReconciled(
+            PublicSectorExpectedCashSource expected, PublicSectorCashSourceSubmission submission,
+            ExpectedCashSourcePopulation population)
+        {
+            if (expected.SourceKind == "BankAccount") return true;
+            return population.OpeningSubledgerBalance.HasValue &&
+                population.ClosingSubledgerBalance.HasValue &&
+                population.OpeningGlBalance.HasValue && population.ClosingGlBalance.HasValue &&
+                CloseEnough(submission.OpeningBalance, population.OpeningSubledgerBalance.Value) &&
+                CloseEnough(submission.ClosingBalance, population.ClosingSubledgerBalance.Value) &&
+                CloseEnough(population.OpeningSubledgerBalance.Value, population.OpeningGlBalance.Value) &&
+                CloseEnough(population.ClosingSubledgerBalance.Value, population.ClosingGlBalance.Value);
+        }
 
         // Re-read the live source population rather than trusting a previously submitted count.
         // SourceIdentifier is the internal BankAccount ID or the AR/AP control GL account ID.
