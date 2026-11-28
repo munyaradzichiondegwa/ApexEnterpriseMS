@@ -143,6 +143,35 @@ public sealed class ModifiedCashRecognitionIntegrationTests
             await Assert.ThrowsAsync<DbUpdateException>(() => duplicate.SaveChangesAsync());
         }
 
+        await using (var partialSettlements = db.NewContext(companyId, preparerId))
+        {
+            var original = await partialSettlements.ModifiedCashRecognitionLedgerEvents
+                .SingleAsync(x => x.SourceEventId == sourceEventId &&
+                    x.EventKind == ModifiedCashLedgerEventKind.Recognition);
+            partialSettlements.ModifiedCashRecognitionLedgerEvents.AddRange(
+                new ModifiedCashRecognitionLedgerEvent
+                {
+                    CompanyId = companyId, PolicyId = policyId, CommitmentId = commitmentId,
+                    SourceEventId = Guid.NewGuid(), SourceEventKind = "GoodsReceived",
+                    EventKind = ModifiedCashLedgerEventKind.Liquidation, OriginalEventId = original.Id,
+                    Amount = 10m, EventDate = periodStart.AddDays(20),
+                    EvidenceAcceptedAt = periodStart.AddDays(21), EvidenceReference = "AP allocation 1",
+                    Status = ModifiedCashLedgerEventStatus.Draft, PreparedBy = preparerId
+                },
+                new ModifiedCashRecognitionLedgerEvent
+                {
+                    CompanyId = companyId, PolicyId = policyId, CommitmentId = commitmentId,
+                    SourceEventId = Guid.NewGuid(), SourceEventKind = "GoodsReceived",
+                    EventKind = ModifiedCashLedgerEventKind.Liquidation, OriginalEventId = original.Id,
+                    Amount = 15m, EventDate = periodStart.AddDays(22),
+                    EvidenceAcceptedAt = periodStart.AddDays(23), EvidenceReference = "AP allocation 2",
+                    Status = ModifiedCashLedgerEventStatus.Draft, PreparedBy = preparerId
+                });
+            await partialSettlements.SaveChangesAsync();
+            Assert.Equal(2, await partialSettlements.ModifiedCashRecognitionLedgerEvents.CountAsync(x =>
+                x.OriginalEventId == original.Id && x.EventKind == ModifiedCashLedgerEventKind.Liquidation));
+        }
+
         await using (var immutable = db.NewContext(companyId))
         {
             var certified = await immutable.ModifiedCashRecognitionLedgerEvents
