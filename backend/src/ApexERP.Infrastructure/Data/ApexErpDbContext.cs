@@ -1211,6 +1211,38 @@ namespace ApexERP.Infrastructure.Data
                     throw new InvalidOperationException("The audit log is append-only and cannot be changed or deleted.");
             }
 
+            foreach (var entry in ChangeTracker.Entries<ZimbabweDswtFiling>())
+            {
+                if (entry.State == EntityState.Deleted)
+                    throw new InvalidOperationException("DSWT filing snapshots and their evidence cannot be deleted.");
+                if (entry.State != EntityState.Modified) continue;
+
+                var allowed = new HashSet<string>
+                {
+                    nameof(ZimbabweDswtFiling.Status),
+                    nameof(ZimbabweDswtFiling.SubmittedAt), nameof(ZimbabweDswtFiling.SubmittedBy),
+                    nameof(ZimbabweDswtFiling.SubmissionReference), nameof(ZimbabweDswtFiling.SubmissionEvidenceReference),
+                    nameof(ZimbabweDswtFiling.AcknowledgedAt), nameof(ZimbabweDswtFiling.AcknowledgementReference),
+                    nameof(ZimbabweDswtFiling.AcknowledgementEvidenceReference),
+                    nameof(ZimbabweDswtFiling.PaymentConfirmedAt), nameof(ZimbabweDswtFiling.PaymentReference),
+                    nameof(ZimbabweDswtFiling.PaymentAmount), nameof(ZimbabweDswtFiling.PaymentCurrency),
+                    nameof(ZimbabweDswtFiling.PaymentEvidenceReference),
+                    nameof(BaseEntity.UpdatedAt), nameof(BaseEntity.UpdatedBy)
+                };
+                if (entry.Properties.Any(p => p.IsModified && !allowed.Contains(p.Metadata.Name)))
+                    throw new InvalidOperationException("The DSWT return payload, hash and identity are immutable after preparation.");
+
+                var original = entry.Property(x => x.Status).OriginalValue;
+                var current = entry.Property(x => x.Status).CurrentValue;
+                var validTransition =
+                    (original == ZimbabweDswtFilingStatus.Prepared && current == ZimbabweDswtFilingStatus.Submitted) ||
+                    (original == ZimbabweDswtFilingStatus.Submitted &&
+                        current is ZimbabweDswtFilingStatus.Acknowledged or ZimbabweDswtFilingStatus.Rejected) ||
+                    (original == ZimbabweDswtFilingStatus.Acknowledged && current == ZimbabweDswtFilingStatus.PaymentConfirmed);
+                if (current != original && !validTransition)
+                    throw new InvalidOperationException($"A DSWT filing cannot move from {original} to {current}.");
+            }
+
             foreach (var entry in ChangeTracker.Entries<JournalEntry>())
             {
                 if (entry.State is not (EntityState.Modified or EntityState.Deleted)) continue;
