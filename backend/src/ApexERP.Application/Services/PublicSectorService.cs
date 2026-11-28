@@ -3041,12 +3041,16 @@ namespace ApexERP.Application.Services
                     x.Id == source.JournalEntryId.Value && x.CompanyId == companyId &&
                     x.Status == JournalStatus.Posted, ct);
                 if (!posted) return false;
-                var mapped = await _db.JournalLines.Where(x =>
+                var mappedLines = _db.JournalLines.Where(x =>
                     x.JournalEntryId == source.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId &&
-                    x.FundCentreId == actual.FundCentreId && x.CostCentreId == actual.CostCentreId)
-                    .SumAsync(x => isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
+                    x.FundCentreId == actual.FundCentreId && x.CostCentreId == actual.CostCentreId);
+                var mapped = await mappedLines.SumAsync(x =>
+                    isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
+                var mappedBase = await mappedLines.SumAsync(x =>
+                    isReceipt ? x.BaseCredit - x.BaseDebit : x.BaseDebit - x.BaseCredit, ct);
                 var bankReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
-                return mapped == actual.SourceAmount && source.TransactionDate.Date == actual.SourceDate.Date &&
+                return mapped == actual.SourceAmount && mappedBase == actual.Amount &&
+                    source.TransactionDate.Date == actual.SourceDate.Date &&
                     actual.EffectiveDate.Date == source.TransactionDate.Date &&
                     string.Equals(actual.SourceReference, bankReference, StringComparison.Ordinal);
             }
