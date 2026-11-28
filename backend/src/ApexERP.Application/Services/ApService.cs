@@ -165,6 +165,24 @@ namespace ApexERP.Application.Services
 
                 if (invoice.VatAmount > 0m)
                 {
+                    var taxableLines = invoice.Lines.Where(x => x.LineVat > 0m).ToList();
+                    if (taxableLines.Count == 0 || taxableLines.Any(x => !x.TaxCodeId.HasValue))
+                        throw new InvalidOperationException("Every VAT-bearing AP invoice line must identify its tax code.");
+                    var taxCodeIds = taxableLines.Select(x => x.TaxCodeId!.Value).Distinct().ToArray();
+                    var taxCodes = await _db.TaxCodes.Where(x => x.CompanyId == companyId && taxCodeIds.Contains(x.Id)).ToListAsync(token);
+                    if (taxCodes.Count != taxCodeIds.Length || taxCodes.Any(x => !x.IsActive || x.Type != TaxType.VAT ||
+                        x.EffectiveFrom.Date > invoice.InvoiceDate.Date || (x.EffectiveTo.HasValue && x.EffectiveTo.Value.Date < invoice.InvoiceDate.Date)))
+                        throw new InvalidOperationException("AP invoice VAT requires active, company-owned VAT tax codes effective on the invoice date.");
+                    foreach (var line in taxableLines)
+                    {
+                        var taxCode = taxCodes.Single(x => x.Id == line.TaxCodeId!.Value);
+                        var expectedVat = decimal.Round(line.LineSubtotal * taxCode.Rate, 2, MidpointRounding.AwayFromZero);
+                        if (Math.Abs(expectedVat - line.LineVat) > 0.01m)
+                            throw new InvalidOperationException("An AP invoice line VAT amount does not agree with its effective tax-code rate.");
+                    }
+                    if (taxableLines.Sum(x => x.LineVat) != invoice.VatAmount ||
+                        invoice.Lines.Sum(x => x.LineSubtotal) != invoice.Subtotal)
+                        throw new InvalidOperationException("AP invoice line tax and subtotal amounts must reconcile exactly to the invoice header.");
                     var taxAccount = await _db.GlAccounts.SingleOrDefaultAsync(x =>
                         x.Id == vatInputAccountId && x.CompanyId == companyId && x.IsActive && x.IsPostable, token);
                     if (taxAccount == null || taxAccount.Type != GlAccountType.Asset)
