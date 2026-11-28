@@ -26,6 +26,9 @@ namespace ApexERP.API.Controllers
         Guid SourceRecordId, DateTime EffectiveDate, CashFlowCategory CashFlowSection);
     public record CreateCashPeriodAttestationRequest(Guid BudgetVersionId, string EvidenceReference);
     public record CreateExpectedCashSourceRequest(Guid BudgetVersionId, string SourceKind, string SourceCode, string SourceName, string? SourceIdentifier, bool IsRequired, DateTime EffectiveFrom, DateTime EffectiveTo);
+    public record CreateCashSourceSubmissionRequest(Guid ExpectedCashSourceId, int RecordCount,
+        decimal ControlTotal, decimal OpeningBalance, decimal ClosingBalance, string Currency, string EvidenceReference);
+    public record ReviewCashSourceSubmissionRequest(bool Accepted, string? ReviewNote);
 
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
@@ -429,6 +432,47 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> ApproveExpectedCashSource(Guid id, CancellationToken ct)
         {
             try { return Ok(await _publicSector.ApproveExpectedCashSourceAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        // ---- IPSAS 24: expected source period submissions ----
+
+        [HttpGet("cash-source-submissions")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetCashSourceSubmissions([FromQuery] Guid budgetVersionId, CancellationToken ct)
+        {
+            if (budgetVersionId == Guid.Empty) return BadRequest(new { error = "A budget version is required." });
+            return Ok(await _publicSector.GetCashSourceSubmissionsAsync(CompanyId, budgetVersionId, ct));
+        }
+
+        [HttpPost("cash-source-submissions")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateCashSourceSubmission(CreateCashSourceSubmissionRequest req, CancellationToken ct)
+        {
+            try
+            {
+                var item = await _publicSector.CreateCashSourceSubmissionAsync(CompanyId, req.ExpectedCashSourceId,
+                    req.RecordCount, req.ControlTotal, req.OpeningBalance, req.ClosingBalance,
+                    req.Currency, req.EvidenceReference, UserId, ct);
+                return Ok(item);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("cash-source-submissions/{id}/submit")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitCashSourceSubmission(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.SubmitCashSourceSubmissionAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("cash-source-submissions/{id}/review")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> ReviewCashSourceSubmission(Guid id, ReviewCashSourceSubmissionRequest req, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.ReviewCashSourceSubmissionAsync(CompanyId, id, UserId,
+                req.Accepted, req.ReviewNote, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
