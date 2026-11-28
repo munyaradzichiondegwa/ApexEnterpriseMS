@@ -77,7 +77,7 @@ public sealed class BankStatementImportController : ApiControllerBase
             var batch = await _db.InTransactionAsync(async token =>
             {
                 await _db.AcquireTransactionLockAsync(
-                    $"ipsas24-bank-statement:{CompanyId:N}:{req.BankAccountId:N}:{req.PeriodStart:O}", token);
+                    $"ipsas24-bank-statement:{CompanyId:N}:{req.BankAccountId:N}", token);
                 var bankAccount = await _db.BankAccounts.SingleOrDefaultAsync(x =>
                     x.Id == req.BankAccountId && x.CompanyId == CompanyId, token)
                     ?? throw new InvalidOperationException("Bank account not found in this company.");
@@ -162,6 +162,7 @@ public sealed class BankStatementImportController : ApiControllerBase
             });
         }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        catch (DbUpdateException) { return Conflict(new { error = "A duplicate statement, transaction identity or concurrent import was detected. No partial import was retained." }); }
     }
 
     [HttpPost("imports/{id:guid}/submit-authentication")]
