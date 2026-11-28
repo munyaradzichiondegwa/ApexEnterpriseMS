@@ -61,6 +61,39 @@ namespace ApexERP.API.Controllers
             return Ok(record);
         }
 
+
+        /// <summary>Returns a USD-validated DSWT monthly preparation summary; it does not submit to TaRMS.</summary>
+        [HttpGet("dswt/monthly-return")]
+        public async Task<IActionResult> GetDswtMonthlyReturn(
+            [FromQuery] int year, [FromQuery] int month, [FromQuery] string tin)
+        {
+            try
+            {
+                return Ok(await _dswt.GenerateMonthlyReturnSummaryAsync(CompanyId, year, month, tin));
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>Downloads the monthly DSWT preparation schedule as CSV for review before TaRMS filing.</summary>
+        [HttpGet("dswt/monthly-return.csv")]
+        public async Task<IActionResult> ExportDswtMonthlyReturnCsv(
+            [FromQuery] int year, [FromQuery] int month, [FromQuery] string tin)
+        {
+            try
+            {
+                var csv = await _dswt.GenerateMonthlyReturnCsvAsync(CompanyId, year, month, tin);
+                return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv",
+                    $"DSWT_{year}_{month:00}_preparation.csv");
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
         /// <summary>Returns the company-scoped DSWT monthly register for reconciliation and TaRMS preparation.</summary>
         [HttpGet("dswt/monthly-register")]
         public async Task<IActionResult> GetDswtMonthlyRegister([FromQuery] int year, [FromQuery] int month)
