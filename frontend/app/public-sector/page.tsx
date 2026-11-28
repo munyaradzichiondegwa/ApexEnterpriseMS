@@ -547,7 +547,7 @@ export default function PublicSectorPage() {
               <div><label className="label">Version type</label><select className="input" value={budgetDraft.kind} onChange={(e) => setBudgetDraft({ ...budgetDraft, kind: e.target.value, amendmentNature: "" })}><option value="Original">Original</option><option value="Revised">Revised</option></select></div>
               <div><label className="label">Currency</label><input className="input" maxLength={3} required value={budgetDraft.currency} onChange={(e) => setBudgetDraft({ ...budgetDraft, currency: e.target.value.toUpperCase() })} /></div>
               <div><label className="label">Budget accounting basis</label><select className="input" value={budgetDraft.accountingBasis} onChange={(e) => setBudgetDraft({ ...budgetDraft, accountingBasis: e.target.value })}><option value="Accrual">Accrual</option><option value="Cash">Cash</option></select></div>
-              <div><label className="label">Classification basis</label><input className="input" required value={budgetDraft.classificationBasis} onChange={(e) => setBudgetDraft({ ...budgetDraft, classificationBasis: e.target.value })} placeholder="Approved Treasury classification" /></div>
+              <div><label className="label">Classification basis</label><input className="input" required value={budgetDraft.classificationBasis} onChange={(e) => setBudgetDraft({ ...budgetDraft, classificationBasis: e.target.value })} placeholder="ZFRM Appendix 5 / approved jurisdictional classification" /></div>
               <div><label className="label">Entity scope</label><input className="input" required value={budgetDraft.entityScope} onChange={(e) => setBudgetDraft({ ...budgetDraft, entityScope: e.target.value })} placeholder="Reporting entity / MDA" /></div>
               <p className="md:col-span-3 text-xs text-slate-500">For automatic accrual-basis actuals, entity scope must match the registered company name and currency must match its functional currency. Otherwise actuals are withheld pending reconciliation.</p>
               <div><label className="label">Authority reference</label><input className="input" required value={budgetDraft.authorityReference} onChange={(e) => setBudgetDraft({ ...budgetDraft, authorityReference: e.target.value })} placeholder="Appropriation Act / authority" /></div>
@@ -564,12 +564,10 @@ export default function PublicSectorPage() {
                 <div key={index} className="grid grid-cols-1 md:grid-cols-7 gap-2 border-t pt-2">
                   <select className="input" required value={line.fundCentreId} onChange={(e) => updateBudgetLine(index, "fundCentreId", e.target.value)}><option value="">Fund centre</option>{fundCentres.map((f: any) => <option key={f.id} value={f.id}>{f.code} — {f.name}</option>)}</select>
                   <select className="input" required value={line.glAccountId} onChange={(e) => {
-                    const account = budgetAccounts.find((a: any) => a.id === e.target.value);
                     updateBudgetLine(index, "glAccountId", e.target.value);
-                    updateBudgetLine(index, "classificationCode", account?.subType ?? "");
                   }}><option value="">Select GL account</option>{selectableBudgetAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} — {a.name} ({a.type})</option>)}</select>
                   <input className="input" required placeholder="Description" value={line.description} onChange={(e) => updateBudgetLine(index, "description", e.target.value)} />
-                  <input className="input" required placeholder="Treasury classification code" value={line.classificationCode} onChange={(e) => updateBudgetLine(index, "classificationCode", e.target.value)} />
+                  <input className="input" required placeholder="ZFRM Appendix 5 line / approved code" value={line.classificationCode} onChange={(e) => updateBudgetLine(index, "classificationCode", e.target.value)} />
                   <input className="input" placeholder="Notes reference (Appendix 5)" value={line.noteReference} onChange={(e) => updateBudgetLine(index, "noteReference", e.target.value)} />
                   <input className="input" type="number" min="0" step="0.01" required placeholder="Amount" value={line.amount} onChange={(e) => updateBudgetLine(index, "amount", Number(e.target.value))} />
                   <button type="button" className="btn-secondary" disabled={budgetLines.length === 1} onClick={() => setBudgetLines((current) => current.filter((_, i) => i !== index))}>Remove</button>
