@@ -6,6 +6,7 @@ using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PersistedModifiedCashRecognitionPolicy = ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy;
 
 namespace ApexERP.API.Controllers;
 
@@ -74,14 +75,14 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                 var versionNumber = (await _db.ModifiedCashRecognitionPolicies.Where(x =>
                     x.CompanyId == CompanyId && x.BudgetVersionId == version.Id)
                     .Select(x => (int?)x.VersionNumber).MaxAsync(token) ?? 0) + 1;
-                var item = new ModifiedCashRecognitionPolicy
+                var item = new PersistedModifiedCashRecognitionPolicy
                 {
                     CompanyId = CompanyId, BudgetVersionId = version.Id, FinancialYear = version.FinancialYear,
                     VersionNumber = versionNumber, PolicyReference = req.PolicyReference.Trim(),
                     EffectiveFrom = req.EffectiveFrom, EffectiveTo = req.EffectiveTo,
                     ReportingPeriodStart = req.ReportingPeriodStart, ReportingPeriodEnd = req.ReportingPeriodEnd,
                     PostPeriodRecognitionWindowDays = req.PostPeriodRecognitionWindowDays,
-                    Treatment = req.Treatment, Status = ModifiedCashRecognitionPolicyStatus.Draft,
+                    Treatment = req.Treatment, Status = PersistedModifiedCashRecognitionPolicyStatus.Draft,
                     PreparedBy = UserId, CreatedBy = UserId
                 };
                 _db.ModifiedCashRecognitionPolicies.Add(item);
@@ -92,8 +93,8 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                         SourceEventKind = mapping.SourceEventKind.Trim(),
                         BudgetVersionLineId = mapping.BudgetVersionLineId, CreatedBy = UserId
                     });
-                _audit.Record(CompanyId, UserId, "ModifiedCashRecognitionPolicy.Created", "PublicSector",
-                    nameof(ModifiedCashRecognitionPolicy), item.Id, null,
+                _audit.Record(CompanyId, UserId, "PersistedModifiedCashRecognitionPolicy.Created", "PublicSector",
+                    nameof(PersistedModifiedCashRecognitionPolicy), item.Id, null,
                     new { item.BudgetVersionId, item.VersionNumber, item.PolicyReference, item.EffectiveFrom,
                         item.EffectiveTo, item.ReportingPeriodStart, item.ReportingPeriodEnd,
                         item.PostPeriodRecognitionWindowDays, item.Treatment, MappingCount = req.Mappings.Count });
@@ -116,15 +117,15 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                 var policy = await _db.ModifiedCashRecognitionPolicies.SingleOrDefaultAsync(x =>
                     x.Id == id && x.CompanyId == CompanyId, token)
                     ?? throw new InvalidOperationException("Modified-cash policy not found.");
-                if (policy.Status != ModifiedCashRecognitionPolicyStatus.Draft || policy.PreparedBy != UserId)
+                if (policy.Status != PersistedModifiedCashRecognitionPolicyStatus.Draft || policy.PreparedBy != UserId)
                     throw new InvalidOperationException("Only the policy preparer may submit a draft policy.");
                 var workflow = await _approvals.SubmitForApprovalAsync(CompanyId,
-                    "ModifiedCashRecognitionPolicy", policy.Id, nameof(ModifiedCashRecognitionPolicy),
+                    "PersistedModifiedCashRecognitionPolicy", policy.Id, nameof(PersistedModifiedCashRecognitionPolicy),
                     UserId, 0m, null, policy.PolicyReference, token);
                 policy.ApprovalWorkflowId = workflow.Id;
                 policy.SubmittedBy = UserId;
                 policy.SubmittedAt = DateTime.UtcNow;
-                policy.Status = ModifiedCashRecognitionPolicyStatus.PendingApproval;
+                policy.Status = PersistedModifiedCashRecognitionPolicyStatus.PendingApproval;
                 await _db.SaveChangesAsync(token);
                 return Ok(policy);
             }, ct);
@@ -141,21 +142,21 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
             var policy = await _db.ModifiedCashRecognitionPolicies.SingleOrDefaultAsync(x =>
                 x.Id == id && x.CompanyId == CompanyId, ct)
                 ?? throw new InvalidOperationException("Modified-cash policy not found.");
-            if (policy.Status != ModifiedCashRecognitionPolicyStatus.PendingApproval || !policy.ApprovalWorkflowId.HasValue)
+            if (policy.Status != PersistedModifiedCashRecognitionPolicyStatus.PendingApproval || !policy.ApprovalWorkflowId.HasValue)
                 throw new InvalidOperationException("Only a policy pending approval can be finalised.");
             var workflow = await _db.WorkflowRequests.Include(x => x.Approvals).SingleOrDefaultAsync(x =>
                 x.Id == policy.ApprovalWorkflowId.Value && x.CompanyId == CompanyId &&
-                x.RequestType == "ModifiedCashRecognitionPolicy" && x.ReferenceId == policy.Id &&
+                x.RequestType == "PersistedModifiedCashRecognitionPolicy" && x.ReferenceId == policy.Id &&
                 x.Status == WorkflowStatus.Approved && x.Approvals.Any(a => a.Approved && a.ApproverId == UserId), ct)
                 ?? throw new InvalidOperationException("A completed independent approval decision is required.");
             if (policy.PreparedBy == UserId || workflow.SubmittedBy == UserId)
                 throw new InvalidOperationException("The policy preparer cannot approve their own policy.");
-            policy.Status = ModifiedCashRecognitionPolicyStatus.Approved;
+            policy.Status = PersistedModifiedCashRecognitionPolicyStatus.Approved;
             policy.ApprovedBy = UserId;
             policy.ApprovedAt = DateTime.UtcNow;
-            _audit.Record(CompanyId, UserId, "ModifiedCashRecognitionPolicy.Approved", "PublicSector",
-                nameof(ModifiedCashRecognitionPolicy), policy.Id,
-                new { Status = ModifiedCashRecognitionPolicyStatus.PendingApproval },
+            _audit.Record(CompanyId, UserId, "PersistedModifiedCashRecognitionPolicy.Approved", "PublicSector",
+                nameof(PersistedModifiedCashRecognitionPolicy), policy.Id,
+                new { Status = PersistedModifiedCashRecognitionPolicyStatus.PendingApproval },
                 new { policy.Status, policy.ApprovedBy, policy.ApprovedAt, policy.ApprovalWorkflowId });
             await _db.SaveChangesAsync(ct);
             return Ok(policy);
@@ -173,7 +174,7 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
             {
                 await _db.AcquireTransactionLockAsync($"ipsas24-modified-cash-commitment:{CompanyId:N}:{req.CommitmentId:N}", token);
                 var policy = await _db.ModifiedCashRecognitionPolicies.SingleOrDefaultAsync(x =>
-                    x.Id == id && x.CompanyId == CompanyId && x.Status == ModifiedCashRecognitionPolicyStatus.Approved, token)
+                    x.Id == id && x.CompanyId == CompanyId && x.Status == PersistedModifiedCashRecognitionPolicyStatus.Approved, token)
                     ?? throw new InvalidOperationException("An approved modified-cash policy is required.");
                 if (policy.Treatment == ModifiedCashBudgetTreatment.DiscloseSeparately &&
                     !await _db.ModifiedCashRecognitionMappings.AnyAsync(x => x.CompanyId == CompanyId && x.PolicyId == policy.Id, token))
@@ -299,7 +300,7 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                     throw new InvalidOperationException("The event preparer cannot certify their own recognition.");
                 var policy = await _db.ModifiedCashRecognitionPolicies.SingleOrDefaultAsync(x =>
                     x.Id == ledger.PolicyId && x.CompanyId == CompanyId &&
-                    x.Status == ModifiedCashRecognitionPolicyStatus.Approved, token)
+                    x.Status == PersistedModifiedCashRecognitionPolicyStatus.Approved, token)
                     ?? throw new InvalidOperationException("The recognition policy is no longer approved.");
                 if (ledger.EventKind != ModifiedCashLedgerEventKind.Recognition)
                     throw new InvalidOperationException("Only GoodsReceived recognition events are enabled. Liquidation and reversal events require dedicated source adapters and are fail-closed.");
