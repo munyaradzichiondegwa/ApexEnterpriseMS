@@ -2762,8 +2762,10 @@ namespace ApexERP.Application.Services
                     .ToListAsync(ct);
                 var inverseRates = await _db.ExchangeRates.Where(x =>
                     x.CompanyId == companyId && x.FromCurrency.ToUpper() == budgetCurrency &&
-                    x.ToCurrency.ToUpper() == sourceCurrency && x.RateDate <= sourceDate && x.Rate > 0m &&
-                    x.ApprovedBy.HasValue && x.ApprovedAt.HasValue && x.CreatedBy != x.ApprovedBy)
+                    x.ToCurrency.ToUpper() == sourceCurrency && x.RateDate <= sourceDate &&
+                    x.RateDate >= sourceDate.Date.AddDays(-7) && x.Rate > 0m &&
+                    x.CreatedBy.HasValue && x.ApprovedBy.HasValue && x.ApprovedAt.HasValue &&
+                    x.CreatedBy != x.ApprovedBy)
                     .ToListAsync(ct);
                 var selected = ExchangeRateResolver.SelectEffectiveRate(directRates, inverseRates, sourceDate);
                 if (selected == null)
