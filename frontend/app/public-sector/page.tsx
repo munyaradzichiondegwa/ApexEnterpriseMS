@@ -1002,13 +1002,13 @@ export default function PublicSectorPage() {
                       <thead><tr><th>Section</th><th className="text-right">Actual on comparable basis</th><th className="text-right">Approved reconciliation adjustment</th><th className="text-right">Actual in financial statements</th><th>Coverage</th></tr></thead>
                       <tbody>
                         <tr><td>Revenue</td>
-                          <td className="text-right">{fmt(budgetComparison.financialStatementReconciliation.comparableRevenueActual ?? 0)}</td>
+                          <td className="text-right">{budgetComparison.financialStatementReconciliation.comparableRevenueActual == null ? "—" : fmt(budgetComparison.financialStatementReconciliation.comparableRevenueActual)}</td>
                           <td className="text-right">{fmt(budgetComparison.financialStatementReconciliation.revenueAdjustment)}</td>
                           <td className="text-right">{budgetComparison.financialStatementReconciliation.financialStatementRevenueActual == null ? "—" : fmt(budgetComparison.financialStatementReconciliation.financialStatementRevenueActual)}</td>
                           <td>{budgetComparison.financialStatementReconciliation.revenueCovered ? "Approved adjustment / nil-difference attestation" : "Missing"}</td>
                         </tr>
                         <tr><td>Expense</td>
-                          <td className="text-right">{fmt(budgetComparison.financialStatementReconciliation.comparableExpenseActual ?? 0)}</td>
+                          <td className="text-right">{budgetComparison.financialStatementReconciliation.comparableExpenseActual == null ? "—" : fmt(budgetComparison.financialStatementReconciliation.comparableExpenseActual)}</td>
                           <td className="text-right">{fmt(budgetComparison.financialStatementReconciliation.expenseAdjustment)}</td>
                           <td className="text-right">{budgetComparison.financialStatementReconciliation.financialStatementExpenseActual == null ? "—" : fmt(budgetComparison.financialStatementReconciliation.financialStatementExpenseActual)}</td>
                           <td>{budgetComparison.financialStatementReconciliation.expenseCovered ? "Approved adjustment / nil-difference attestation" : "Missing"}</td>
@@ -1116,10 +1116,11 @@ export default function PublicSectorPage() {
                 </form>
                 <div className="overflow-x-auto">
                   <table className="table-base">
-                    <thead><tr><th>Type</th><th>Description</th><th>Section</th><th>Revenue</th><th>Expense</th><th>Operating</th><th>Investing</th><th>Financing</th><th>Status</th><th>Action</th></tr></thead>
+                    <thead><tr><th>Type</th><th>Description</th><th>Section</th><th>No difference</th><th>Revenue</th><th>Expense</th><th>Operating</th><th>Investing</th><th>Financing</th><th>Status</th><th>Action</th></tr></thead>
                     <tbody>{budgetReconciliations.map((item: any) => (
                       <tr key={item.id}>
                         <td>{item.type}</td><td>{item.description}</td><td>{item.statementSection}</td>
+                        <td>{item.isNoDifferenceAttestation ? "Yes" : "—"}</td>
                         <td>{fmt(item.revenueAmount)}</td><td>{fmt(item.expenseAmount)}</td>
                         <td>{fmt(item.operatingAmount)}</td><td>{fmt(item.investingAmount)}</td>
                         <td>{fmt(item.financingAmount)}</td><td>{item.status}</td>
@@ -1130,7 +1131,7 @@ export default function PublicSectorPage() {
                             : "—"}</td>
                       </tr>
                     ))}
-                    {!budgetReconciliations.length && <tr><td colSpan={10} className="text-center text-slate-500">No reconciliation adjustments recorded.</td></tr>}</tbody>
+                    {!budgetReconciliations.length && <tr><td colSpan={11} className="text-center text-slate-500">No reconciliation adjustments recorded.</td></tr>}</tbody>
                   </table>
                 </div>
                 <p className="text-xs text-slate-500">For pending rows, complete the independent approval in the Approvals workspace first, then finalise it here. Draft and pending rows are not included in the published comparison.</p>
