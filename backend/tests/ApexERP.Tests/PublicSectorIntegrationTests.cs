@@ -1901,7 +1901,7 @@ namespace ApexERP.Tests
             Assert.False(await service.HasValidCertifiedZeroActivityAttestationAsync(companyId, budgetVersionId));
             var staleComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.False(staleComparison.ComparableActualsAvailable);
-            Assert.Contains("zero-activity attestation", staleComparison.ComparabilityMessage, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("no cash actuals were captured", staleComparison.ComparabilityMessage, StringComparison.OrdinalIgnoreCase);
         }
 
         [PostgresFact]
