@@ -627,6 +627,24 @@ namespace ApexERP.API.Controllers
                 .Select(x => x.SourceRecordId).Distinct().ToArray();
             var apPaymentIds = actuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ApPayment)
                 .Select(x => x.SourceRecordId).Distinct().ToArray();
+            var reviewedExclusions = await (
+                from line in _db.PublicSectorCashSourceReconciliationLines
+                join submission in _db.PublicSectorCashSourceSubmissions
+                    on line.CashSourceSubmissionId equals submission.Id
+                join expected in _db.PublicSectorExpectedCashSources
+                    on submission.ExpectedCashSourceId equals expected.Id
+                where line.CompanyId == CompanyId && submission.CompanyId == CompanyId &&
+                    expected.CompanyId == CompanyId && submission.BudgetVersionId == version.Id &&
+                    submission.Status == "Reviewed" && submission.RecordLevelStatus == "Reviewed" &&
+                    line.IsExcluded
+                select new { line.SourceRecordId, expected.SourceKind }
+            ).ToListAsync(ct);
+            var excludedBankSourceIds = reviewedExclusions.Where(x => x.SourceKind == "BankAccount")
+                .Select(x => x.SourceRecordId).Distinct().ToArray();
+            var excludedArReceiptIds = reviewedExclusions.Where(x => x.SourceKind == "ReceivablesControl")
+                .Select(x => x.SourceRecordId).Distinct().ToArray();
+            var excludedApPaymentIds = reviewedExclusions.Where(x => x.SourceKind == "PayablesControl")
+                .Select(x => x.SourceRecordId).Distinct().ToArray();
             var capturedSettlementJournalIds = await _db.ArReceipts
                 .Where(x => x.CompanyId == CompanyId && arReceiptIds.Contains(x.Id) && x.JournalEntryId.HasValue)
                 .Select(x => x.JournalEntryId!.Value)
@@ -653,9 +671,11 @@ namespace ApexERP.API.Controllers
                         j.CompanyId == CompanyId && j.Status == JournalStatus.Posted))
                 .Select(x => new { x.Id, JournalEntryId = x.JournalEntryId!.Value }).ToListAsync(ct);
             var missingArSettlementCoverage = postedArReceipts.Count(x =>
-                !arReceiptIds.Contains(x.Id) && !capturedBankJournalIds.Contains(x.JournalEntryId));
+                !arReceiptIds.Contains(x.Id) && !excludedArReceiptIds.Contains(x.Id) &&
+                !capturedBankJournalIds.Contains(x.JournalEntryId));
             var missingApSettlementCoverage = postedApPayments.Count(x =>
-                !apPaymentIds.Contains(x.Id) && !capturedBankJournalIds.Contains(x.JournalEntryId));
+                !apPaymentIds.Contains(x.Id) && !excludedApPaymentIds.Contains(x.Id) &&
+                !capturedBankJournalIds.Contains(x.JournalEntryId));
             // AR/AP actuals cover the same posted bank movement through their settlement journal.
             var periodBankMovements = _db.BankTransactions.Where(x => x.CompanyId == CompanyId &&
                 x.TransactionDate >= version.PeriodStart && x.TransactionDate < version.PeriodEnd);
@@ -663,7 +683,8 @@ namespace ApexERP.API.Controllers
                 !x.IsReconciled || !x.JournalEntryId.HasValue ||
                 !_db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
                     j.CompanyId == CompanyId && j.Status == JournalStatus.Posted) ||
-                (!capturedBankSourceIds.Contains(x.Id) && !capturedSettlementJournalIds.Contains(x.JournalEntryId.Value)), ct);
+                (!capturedBankSourceIds.Contains(x.Id) && !excludedBankSourceIds.Contains(x.Id) &&
+                 !capturedSettlementJournalIds.Contains(x.JournalEntryId.Value)), ct);
             var pendingActuals = actuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
             var certifiedActualsForValidation = actuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
             var invalidCertifiedActuals = 0;
@@ -695,10 +716,19 @@ namespace ApexERP.API.Controllers
             var investingAdjustment = Adjustment(x => x.InvestingAmount);
             var financingAdjustment = Adjustment(x => x.FinancingAmount);
             var noSourceBackedCashActuals = actuals.Count == 0;
-            // An empty actuals ledger is complete only for a separately certified nil-return
-            // whose bank, AR and AP source populations are still empty at read time.
+            // When there are no actuals, the period is acceptable only if it is genuinely nil
+            // and has a current nil-return, or if every posted source record is covered by a
+            // reason-coded exclusion that has passed independent record-level review.
             var certifiedZeroActivity = noSourceBackedCashActuals &&
                 await _publicSector.HasValidCertifiedZeroActivityAttestationAsync(CompanyId, version.Id, ct);
+            var periodBankPopulationCount = await _db.BankTransactions.CountAsync(x =>
+                x.CompanyId == CompanyId && x.TransactionDate >= version.PeriodStart &&
+                x.TransactionDate < version.PeriodEnd, ct);
+            var sourceActivityCoveredByExclusions = noSourceBackedCashActuals &&
+                reviewedExclusions.Count > 0 &&
+                periodBankPopulationCount == excludedBankSourceIds.Length &&
+                postedArReceipts.Count == excludedArReceiptIds.Length &&
+                postedApPayments.Count == excludedApPaymentIds.Length;
             // A source-backed cash bridge also requires every required entry in the approved
             // expected-source register to have an independently reviewed period submission.
             // This checks the registered population only; it does not certify that the register
@@ -742,7 +772,7 @@ namespace ApexERP.API.Controllers
             var liveSourceRegisterComplete = await _publicSector.HasCompleteCashSourceRegisterAsync(
                 CompanyId, version.Id, ct);
             var sourceCoverageComplete = (noSourceBackedCashActuals
-                    ? certifiedZeroActivity
+                    ? certifiedZeroActivity || sourceActivityCoveredByExclusions
                     : true) &&
                 uncapturedPostedMovements == 0 && missingArSettlementCoverage == 0 &&
                 missingApSettlementCoverage == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0 &&
@@ -761,6 +791,7 @@ namespace ApexERP.API.Controllers
                 SourceCoverageComplete = sourceCoverageComplete,
                 NoSourceBackedCashActuals = noSourceBackedCashActuals,
                 CertifiedZeroActivityAttestationValid = certifiedZeroActivity,
+                SourceActivityCoveredByReviewedExclusions = sourceActivityCoveredByExclusions,
                 ExpectedSourceRegisterPresent = expectedSourceRegisterPresent,
                 ExpectedSourceRegisterApproved = expectedSourceRegisterApproved,
                 RequiredExpectedSources = requiredExpectedSources.Count,
