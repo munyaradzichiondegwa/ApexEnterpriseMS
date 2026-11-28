@@ -119,12 +119,14 @@ namespace ApexERP.Application.Services
                 if (taxableLines.Sum(x => x.LineVat) != invoice.VatAmount ||
                     invoice.Lines.Sum(x => x.LineSubtotal) != invoice.Subtotal)
                     throw new InvalidOperationException("AR invoice line tax and subtotal amounts must reconcile exactly to the invoice header.");
-                var mappings = await _db.TaxAccountMappings.Where(x =>
+                var mappingCandidates = await _db.TaxAccountMappings.Where(x =>
                     x.CompanyId == companyId && x.Purpose == "AR-VAT-OUTPUT" &&
                     x.TaxCodeId.HasValue && taxCodeIds.Contains(x.TaxCodeId.Value) &&
                     x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
                     (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
                     .ToListAsync(ct);
+                var mappings = mappingCandidates.GroupBy(x => x.TaxCodeId)
+                    .Select(g => g.OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).First()).ToList();
                 if (mappings.Count != taxCodeIds.Length ||
                     mappings.Select(x => x.TaxCodeId).Distinct().Count() != taxCodeIds.Length ||
                     mappings.Any(x => x.GlAccountId != vatOutputAccountId))
@@ -165,7 +167,7 @@ namespace ApexERP.Application.Services
                         x.CompanyId == companyId && x.Purpose == "AR-VAT-OUTPUT" && x.TaxCodeId == taxCodeId &&
                         x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
                         (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
-                        .SingleAsync(ct);
+                        .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstAsync(ct);
                     var journalLine = je.Lines.Single(x => x.TaxCodeId == taxCodeId &&
                         x.GlAccountId == mapping.GlAccountId && x.Credit ==
                         invoice.Lines.Where(l => l.TaxCodeId == taxCodeId).Sum(l => l.LineVat));
