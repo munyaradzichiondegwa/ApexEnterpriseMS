@@ -282,7 +282,7 @@ namespace ApexERP.Application.Services
                 .Select(x => new { x.Name, x.FunctionalCurrency }).FirstOrDefaultAsync(ct);
             var comparabilityIssues = new List<string>();
             if (original.AccountingBasis != AccountingBasis.Accrual)
-                comparabilityIssues.Add("The budget is not accrual basis; accrual GL actuals cannot be substituted.");
+                comparabilityIssues.Add("The budget is not accrual basis; accrual GL actuals cannot be substituted. Load and approve actuals on the budget basis and complete the IPSAS 24 reconciliation before issuing the statement.");
             if (companyProfile == null)
                 comparabilityIssues.Add("The registered company profile could not be resolved.");
             else
