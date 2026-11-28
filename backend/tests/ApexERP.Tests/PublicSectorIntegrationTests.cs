@@ -1701,8 +1701,10 @@ namespace ApexERP.Tests
             Assert.Single(register);
             Assert.Equal("BANK-OPERATING-01", register[0].SourceCode);
 
+            // This source has no activity in the period. Its zero control total is only accepted
+            // after the separate record-level reconciliation is independently reviewed.
             var submission = await service.CreateCashSourceSubmissionAsync(companyId, approved.Id,
-                12, 4500m, 1000m, 5500m, "USD", "Bank statement and reconciliation pack", preparerId);
+                0, 0m, 1000m, 1000m, "USD", "Bank statement and reconciliation pack", preparerId);
             Assert.Equal("Draft", submission.Status);
             await service.SubmitCashSourceSubmissionAsync(companyId, submission.Id, preparerId);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -1711,6 +1713,19 @@ namespace ApexERP.Tests
                 approverId, true, "Statement control totals agreed.");
             Assert.Equal("Reviewed", reviewed.Status);
             Assert.Equal(approverId, reviewed.ReviewedBy);
+
+            var reconciliationPreparerId = Guid.NewGuid();
+            var reconciliationReviewerId = Guid.NewGuid();
+            var submittedReconciliation = await service.SubmitCashSourceRecordReconciliationAsync(
+                companyId, submission.Id, reconciliationPreparerId);
+            Assert.Equal("PendingReview", submittedReconciliation.RecordLevelStatus);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ReviewCashSourceRecordReconciliationAsync(companyId, submission.Id,
+                    reconciliationPreparerId, true, null));
+            var reviewedReconciliation = await service.ReviewCashSourceRecordReconciliationAsync(
+                companyId, submission.Id, reconciliationReviewerId, true, "Zero source records confirmed against the reviewed bank statement.");
+            Assert.Equal("Reviewed", reviewedReconciliation.RecordLevelStatus);
+            Assert.Equal(reconciliationReviewerId, reviewedReconciliation.RecordLevelReviewedBy);
 
             // Database triggers protect both approved register history and independently reviewed controls.
             reviewed.ControlTotal = 999999m;
