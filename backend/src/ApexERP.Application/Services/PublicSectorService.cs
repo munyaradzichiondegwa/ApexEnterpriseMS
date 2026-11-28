@@ -544,6 +544,8 @@ namespace ApexERP.Application.Services
                     .Select(x => x.Currency).SingleOrDefaultAsync(ct);
                 if (string.IsNullOrWhiteSpace(controlCurrency))
                     throw new InvalidOperationException($"Receivables control account for {expected.SourceCode} is not a valid asset account in this company.");
+                if (!await _db.Customers.AnyAsync(x => x.CompanyId == companyId && x.ArAccountId == sourceId, ct))
+                    throw new InvalidOperationException($"Receivables control account for {expected.SourceCode} is not mapped to any customer subledger.");
                 var rows = await _db.ArReceipts.Where(x => x.CompanyId == companyId &&
                     x.ReceiptDate >= periodStart && x.ReceiptDate < periodEnd &&
                     _db.Customers.Any(c => c.Id == x.CustomerId && c.CompanyId == companyId &&
@@ -572,6 +574,8 @@ namespace ApexERP.Application.Services
                     .Select(x => x.Currency).SingleOrDefaultAsync(ct);
                 if (string.IsNullOrWhiteSpace(controlCurrency))
                     throw new InvalidOperationException($"Payables control account for {expected.SourceCode} is not a valid liability account in this company.");
+                if (!await _db.Suppliers.AnyAsync(x => x.CompanyId == companyId && x.ApAccountId == sourceId, ct))
+                    throw new InvalidOperationException($"Payables control account for {expected.SourceCode} is not mapped to any supplier subledger.");
                 var rows = await _db.ApPayments.Where(x => x.CompanyId == companyId &&
                     x.PaymentDate >= periodStart && x.PaymentDate < periodEnd &&
                     _db.Suppliers.Any(s => s.Id == x.SupplierId && s.CompanyId == companyId &&
