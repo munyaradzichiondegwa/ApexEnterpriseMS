@@ -3800,18 +3800,18 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
                     b.HasIndex("CashSourceSubmissionId").HasDatabaseName("IX_CashSourceReconciliationLines_Submission");
                     b.HasIndex("BudgetExecutionActualId").IsUnique()
-                        .HasFilter("\\"BudgetExecutionActualId\\" IS NOT NULL")
+                        .HasFilter("\"BudgetExecutionActualId\" IS NOT NULL")
                         .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
                     b.HasIndex("CompanyId", "CashSourceSubmissionId", "SourceRecordId", "BudgetExecutionActualId")
                         .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
                     b.HasIndex("CompanyId", "CashSourceSubmissionId", "SourceRecordId")
-                        .IsUnique().HasFilter("\\"IsExcluded\\" = TRUE")
+                        .IsUnique().HasFilter("\"IsExcluded\" = TRUE")
                         .HasDatabaseName("UX_CashSourceReconciliationLine_Exclusion");
                     b.ToTable("PublicSectorCashSourceReconciliationLines", t =>
                         {
-                            t.HasCheckConstraint("CK_CashSourceReconciliationLine_SourceAmount", "\\"SourceAmount\\" > 0");
+                            t.HasCheckConstraint("CK_CashSourceReconciliationLine_SourceAmount", "\"SourceAmount\" > 0");
                             t.HasCheckConstraint("CK_CashSourceReconciliationLine_Amounts",
-                                "(\\"IsExcluded\\" = TRUE AND \\"BudgetExecutionActualId\\" IS NULL AND \\"AllocatedAmount\\" = 0 AND length(trim(\\"ExclusionReason\\")) > 0) OR (\\"IsExcluded\\" = FALSE AND \\"BudgetExecutionActualId\\" IS NOT NULL AND \\"AllocatedAmount\\" > 0 AND \\"ExclusionReason\\" IS NULL)");
+                                "(\"IsExcluded\" = TRUE AND \"BudgetExecutionActualId\" IS NULL AND \"AllocatedAmount\" = 0 AND length(trim(\"ExclusionReason\")) > 0) OR (\"IsExcluded\" = FALSE AND \"BudgetExecutionActualId\" IS NOT NULL AND \"AllocatedAmount\" > 0 AND \"ExclusionReason\" IS NULL)");
                         });
                 });
 
