@@ -58,6 +58,8 @@ public static class ZimbabweElectronicCommerceTaxEvaluator
             throw new ArgumentException("A three-letter ISO currency code is required.", nameof(request));
 
         var currency = request.Currency.ToUpperInvariant();
+        if (!string.Equals(currency, "USD", StringComparison.Ordinal))
+            throw new InvalidOperationException("Only USD revenue is supported. Non-USD revenue requires an approved, evidenced ZIMRA-compliant conversion before it can enter the tax base.");
 
         if (revenueDate.Date < EffectiveFrom)
             return Excluded(request, currency, "Pre-2026 revenue requires the prior-year US$500,000 threshold assessment; it must not be treated as exempt or silently included in the 2026 no-threshold calculation.");
