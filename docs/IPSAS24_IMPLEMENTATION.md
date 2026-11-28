@@ -72,6 +72,26 @@ The cash-budget-to-Statement-of-Cash-Flows reconciliation endpoint now checks th
 
 This is intentionally a gate over the sources already registered; it is not proof that the register contains every bank account, cashbook, receivables/payables population or reporting unit that should be in scope. The endpoint therefore continues to report both `RecordLevelSourceReconciliationComplete` and `ExpectedSourceRegisterCompletenessCertified` as false, and the overall bridge as **not reconciled**, until both controls are implemented. A source submission's record count and control total are not yet matched to every external source row and one-or-more certified budget actual allocations (or a reason-coded, independently approved exclusion). No caller-supplied declaration or presence of one or more source entries is treated as proof of population completeness.
 
+### Record-level source reconciliation — implemented foundation
+
+The branch now has a separate record-level reconciliation lifecycle attached to each reviewed period source submission:
+
+- A source record is identified by its company-scoped internal source-record ID and source reference. Bank-account sources map to bank transactions; receivables-control sources map to AR receipts; payables-control sources map to AP payments. Cashbook is deliberately rejected until a dedicated adapter exists.
+- Each source record is either allocated across one or more already-certified budget execution actuals or recorded once as an exclusion with a mandatory reason. A source cannot be partly allocated and partly excluded.
+- Split AR/AP allocations are supported: the sum of the certified actual allocations must equal the underlying receipt/payment amount exactly. Bank movements map to their one certified actual.
+- The service derives the source amount, date and currency from the company-owned source record. It checks source kind, budget version, reporting period, currency, actual status, source-record identity and source reference; it does not trust caller-supplied amounts.
+- The submitted source population's distinct record count and sum of distinct source-record amounts must equal the reviewed submission's record count and control total exactly.
+- A separate reconciliation preparer submits the transaction mapping; an independent reviewer must differ from the source preparer, source reviewer and reconciliation submitter.
+- PostgreSQL makes mapping rows append-only and prevents mapping a certified actual more than once. Final record-reconciliation states are immutable. The cash-flow bridge now requires the record-level reconciliation to be independently reviewed for every required source.
+
+API routes:
+- `GET /api/v1/public-sector/cash-source-submissions/{id}/reconciliation-lines`
+- `POST /api/v1/public-sector/cash-source-submissions/{id}/reconciliation-lines`
+- `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/submit`
+- `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/review`
+
+This is a transaction-level mapping against records already present in ApexERP. It is not yet a cryptographically verified import of an external bank or subledger statement. The reviewer must compare the submitted source evidence to the original source-system export. External cashbook ingestion and independent certification that the expected-source register is complete remain outstanding.
+
 ### Required completion design
 
 1. Maintain an expected-source register for each company, reporting entity and period. It must identify the bank accounts/cashbooks and AR/AP source populations in scope, with effective dates and accountable owners. The register must be independently approved before period close.
