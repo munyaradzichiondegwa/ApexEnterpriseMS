@@ -400,8 +400,11 @@ namespace ApexERP.Tests
                 (x.EntityId == bidId || x.EntityId == secondBidId) && x.Action == "Tender.BidScored")
                 .ToListAsync();
             Assert.Equal(2, bidAudit.Count);
-            Assert.All(bidAudit, entry => Assert.False(string.IsNullOrWhiteSpace(entry.BeforeValueJson)) &&
-                Assert.False(string.IsNullOrWhiteSpace(entry.AfterValueJson)));
+            Assert.All(bidAudit, entry =>
+            {
+                Assert.False(string.IsNullOrWhiteSpace(entry.BeforeValueJson));
+                Assert.False(string.IsNullOrWhiteSpace(entry.AfterValueJson));
+            });
         }
 
         [PostgresFact]
