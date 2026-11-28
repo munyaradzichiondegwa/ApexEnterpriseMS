@@ -362,7 +362,8 @@ export default function PublicSectorPage() {
                 <p className="text-xs text-slate-500">
                   Source coverage: {cashActualReconciliation.sourceCoverageComplete ? "complete for posted bank movements" : "incomplete"} ·
                   Uncaptured/unreconciled posted movements: {cashActualReconciliation.uncapturedOrUnreconciledPostedBankMovements} ·
-                  Draft/pending actuals: {cashActualReconciliation.pendingOrDraftActuals}
+                  Draft/pending actuals: {cashActualReconciliation.pendingOrDraftActuals} ·
+                  Invalidated source/journal links: {cashActualReconciliation.invalidCertifiedActuals}
                 </p>
                 <div className="overflow-x-auto">
                   <table className="table-base">
