@@ -1118,12 +1118,14 @@ namespace ApexERP.Application.Services
                         x.Status == "Certified", ct);
                     var liveCounts = await GetCashPeriodSourceCountsAsync(companyId, actualVersion.PeriodStart,
                         actualVersion.PeriodEnd, ct);
-                    if (zeroAttestation == null)
+                    if (zeroAttestation == null &&
+                        liveCounts.Bank + liveCounts.Ar + liveCounts.Ap == 0)
                         comparabilityIssues.Add("No source-backed cash actuals or independently certified zero-activity attestation are available.");
-                    else if (liveCounts.Bank + liveCounts.Ar + liveCounts.Ap != 0 ||
-                        zeroAttestation.ObservedBankTransactionCount != 0 ||
-                        zeroAttestation.ObservedArReceiptCount != 0 ||
-                        zeroAttestation.ObservedApPaymentCount != 0)
+                    else if (zeroAttestation != null &&
+                        (liveCounts.Bank + liveCounts.Ar + liveCounts.Ap != 0 ||
+                         zeroAttestation.ObservedBankTransactionCount != 0 ||
+                         zeroAttestation.ObservedArReceiptCount != 0 ||
+                         zeroAttestation.ObservedApPaymentCount != 0))
                         comparabilityIssues.Add("The zero-activity attestation is no longer valid: source activity exists or its recorded source counts are inconsistent.");
                 }
 
@@ -1133,6 +1135,26 @@ namespace ApexERP.Application.Services
                 var arReceiptIds = cashActuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ArReceipt)
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
                 var apPaymentIds = cashActuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ApPayment)
+                    .Select(x => x.SourceRecordId).Distinct().ToArray();
+                // A source record may instead be explicitly excluded, with a mandatory reason,
+                // in a record-level reconciliation that has been independently reviewed.
+                var reviewedExclusions = await (
+                    from line in _db.PublicSectorCashSourceReconciliationLines
+                    join submission in _db.PublicSectorCashSourceSubmissions
+                        on line.CashSourceSubmissionId equals submission.Id
+                    join expected in _db.PublicSectorExpectedCashSources
+                        on submission.ExpectedCashSourceId equals expected.Id
+                    where line.CompanyId == companyId && submission.CompanyId == companyId &&
+                        expected.CompanyId == companyId && submission.BudgetVersionId == actualVersion.Id &&
+                        submission.Status == "Reviewed" && submission.RecordLevelStatus == "Reviewed" &&
+                        line.IsExcluded
+                    select new { line.SourceRecordId, expected.SourceKind }
+                ).ToListAsync(ct);
+                var excludedBankSourceIds = reviewedExclusions.Where(x => x.SourceKind == "BankAccount")
+                    .Select(x => x.SourceRecordId).Distinct().ToArray();
+                var excludedArReceiptIds = reviewedExclusions.Where(x => x.SourceKind == "ReceivablesControl")
+                    .Select(x => x.SourceRecordId).Distinct().ToArray();
+                var excludedApPaymentIds = reviewedExclusions.Where(x => x.SourceKind == "PayablesControl")
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
                 var capturedSettlementJournalIds = await _db.ArReceipts
                     .Where(x => x.CompanyId == companyId && arReceiptIds.Contains(x.Id) && x.JournalEntryId.HasValue)
@@ -1164,9 +1186,11 @@ namespace ApexERP.Application.Services
                             j.CompanyId == companyId && j.Status == JournalStatus.Posted))
                     .Select(x => new { x.Id, JournalEntryId = x.JournalEntryId!.Value }).ToListAsync(ct);
                 var missingArSettlementCoverage = postedArReceipts.Count(x =>
-                    !arReceiptIds.Contains(x.Id) && !capturedBankJournalIds.Contains(x.JournalEntryId));
+                    !arReceiptIds.Contains(x.Id) && !excludedArReceiptIds.Contains(x.Id) &&
+                    !capturedBankJournalIds.Contains(x.JournalEntryId));
                 var missingApSettlementCoverage = postedApPayments.Count(x =>
-                    !apPaymentIds.Contains(x.Id) && !capturedBankJournalIds.Contains(x.JournalEntryId));
+                    !apPaymentIds.Contains(x.Id) && !excludedApPaymentIds.Contains(x.Id) &&
+                    !capturedBankJournalIds.Contains(x.JournalEntryId));
 
                 // A reconciled bank movement may be represented by its posted AR receipt/AP
                 // payment source. Match those settlements through their posted journal identity;
@@ -1177,7 +1201,8 @@ namespace ApexERP.Application.Services
                     !x.IsReconciled || !x.JournalEntryId.HasValue ||
                     !_db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
                         j.CompanyId == companyId && j.Status == JournalStatus.Posted) ||
-                    (!capturedSourceIds.Contains(x.Id) && !capturedSettlementJournalIds.Contains(x.JournalEntryId.Value)), ct);
+                    (!capturedSourceIds.Contains(x.Id) && !excludedBankSourceIds.Contains(x.Id) &&
+                     !capturedSettlementJournalIds.Contains(x.JournalEntryId.Value)), ct);
                 var pendingCashActuals = cashActuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
                 var certifiedActuals = cashActuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
                 var invalidCertifiedCashActuals = 0;
