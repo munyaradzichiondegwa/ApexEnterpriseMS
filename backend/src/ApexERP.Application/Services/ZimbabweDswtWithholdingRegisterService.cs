@@ -167,6 +167,11 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             new ZimbabweDswtApPaymentEvidence(
                 payment.Amount, payment.Currency, supplier.Name,
                 bank != null, bank?.Currency, journalPosted));
+        var allocatedAmount = await _db.ApPaymentAllocations
+            .Where(x => x.ApPaymentId == payment.Id)
+            .SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
+        if (allocatedAmount != grossPaymentAmount)
+            throw new InvalidOperationException("The AP payment allocations must reconcile to the gross bank debit before DSWT evidence can be linked.");
     }
 
 
