@@ -71,7 +71,7 @@ public sealed class AddIpsas24BudgetExecutionActuals : Migration
             "PublicSectorBudgetExecutionActuals", new[] { "CompanyId", "SourceKind", "SourceRecordId" }, unique: true);
 
         migrationBuilder.Sql("""
-CREATE OR REPLACE FUNCTION apex_guard_budget_execution_actual() RETURNS trigger AS $
+CREATE OR REPLACE FUNCTION apex_guard_budget_execution_actual() RETURNS trigger AS $ipsas_actual$
 BEGIN
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'Budget execution actual evidence is immutable; use a reversal event.' USING ERRCODE = 'restrict_violation';
@@ -93,7 +93,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$ LANGUAGE plpgsql;
+$ipsas_actual$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_budget_execution_actual_immutable
     BEFORE UPDATE OR DELETE ON "PublicSectorBudgetExecutionActuals"
     FOR EACH ROW EXECUTE FUNCTION apex_guard_budget_execution_actual();
