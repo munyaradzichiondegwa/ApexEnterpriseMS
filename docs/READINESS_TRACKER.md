@@ -2,6 +2,14 @@
 
 Maps every section of *APEXERP: Enterprise Readiness and Accounting Controls Enhancement Specification v1.0* to the repository, and says how each item was checked.
 
+## Zimbabwe public procurement regulatory update (28 November 2026)
+
+- Added `docs/ZIMBABWE_PUBLIC_PROCUREMENT_REQUIREMENTS.md`, mapping the PPDPA Act [Chapter 22:23] and PRAZ tendering guidance to the existing tender workflow.
+- Implemented immutable audit events for tender creation, bid submission (including late rejection), evaluation start, bid scoring (before/after scores and weights), and approved award finalisation (selected bid and approval-workflow reference).
+- Added PostgreSQL regression assertions for evaluation/award audit records, bid score before/after values, and late-bid submission evidence. CI verification is pending for this change.
+- Remaining statutory controls include national/international minimum advertisement periods (20/40 days per PRAZ guidance), working-day calculation using an approved public-holiday calendar, public bid opening records, committee appointment/composition, proposed-award notifications and the 14-day standstill before contract signing, contract/performance-security records, award publication within one month, section 73 challenges, complete procurement-file retention and PRAZ e-GP integration. The Act defines a day as excluding weekends and public holidays; do not enforce a calendar-day approximation.
+- The Act's requirements for proposed-award notification and 14-day standstill before contract signature are distinct from ApexERP's current internal award status. No e-GP integration or statutory publication is claimed.
+
 ## Zimbabwe IPSAS regulatory update (28 November 2026)
 
 - Zimbabwe's current prescription framework is SI 137 of 2026, which replaces SI 41 of 2019. The 2026 regulations include IPSAS in the prescribed standards; IFAC still describes public-sector accrual IPSAS implementation as phased / partially adopted. See [IFAC's Zimbabwe jurisdiction profile](https://www.ifac.org/about-ifac/membership/profile/zimbabwe).
