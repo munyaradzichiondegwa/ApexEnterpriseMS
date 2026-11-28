@@ -87,6 +87,128 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("TenantSlaPolicies");
                 });
 
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.TaxAccountMapping", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("TaxType").HasColumnType("integer");
+                    b.Property<Guid?>("TaxCodeId").HasColumnType("uuid");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<int>("VersionNumber").HasColumnType("integer");
+                    b.Property<DateTime>("EffectiveFrom").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("EffectiveTo").HasColumnType("timestamp with time zone");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "TaxType", "TaxCodeId", "VersionNumber").IsUnique();
+                    b.HasIndex("CompanyId", "TaxType", "TaxCodeId", "EffectiveFrom", "EffectiveTo").HasDatabaseName("IX_TaxAccountMappings_Effective");
+                    b.ToTable("TaxAccountMappings", t =>
+                        {
+                            t.HasCheckConstraint("CK_TaxAccountMappings_Version", "\"VersionNumber\" > 0");
+                            t.HasCheckConstraint("CK_TaxAccountMappings_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.InvoiceTaxComponent", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<string>("InvoiceKind").IsRequired().HasMaxLength(2).HasColumnType("character varying(2)");
+                    b.Property<Guid>("InvoiceId").HasColumnType("uuid");
+                    b.Property<Guid?>("InvoiceLineId").HasColumnType("uuid");
+                    b.Property<Guid?>("TaxCodeId").HasColumnType("uuid");
+                    b.Property<int>("TaxType").HasColumnType("integer");
+                    b.Property<decimal>("TaxableBase").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("Rate").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<Guid>("TaxAccountMappingId").HasColumnType("uuid");
+                    b.Property<int>("MappingVersionNumber").HasColumnType("integer");
+                    b.Property<Guid>("JournalEntryId").HasColumnType("uuid");
+                    b.Property<Guid>("JournalLineId").HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "InvoiceKind", "InvoiceId", "JournalLineId").IsUnique();
+                    b.HasIndex("CompanyId", "TaxAccountMappingId", "InvoiceId");
+                    b.ToTable("InvoiceTaxComponents", t =>
+                        {
+                            t.HasCheckConstraint("CK_InvoiceTaxComponents_Amounts", "\"TaxableBase\" >= 0 AND \"Rate\" >= 0 AND \"Amount\" > 0");
+                            t.HasCheckConstraint("CK_InvoiceTaxComponents_Kind", "\"InvoiceKind\" IN ('AR','AP')");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorTaxBudgetPolicy", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("TaxType").HasColumnType("integer");
+                    b.Property<Guid?>("TaxCodeId").HasColumnType("uuid");
+                    b.Property<int>("Treatment").HasColumnType("integer");
+                    b.Property<Guid?>("BudgetGlAccountId").HasColumnType("uuid");
+                    b.Property<Guid?>("FundCentreId").HasColumnType("uuid");
+                    b.Property<Guid?>("CostCentreId").HasColumnType("uuid");
+                    b.Property<int>("VersionNumber").HasColumnType("integer");
+                    b.Property<DateTime>("EffectiveFrom").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("EffectiveTo").HasColumnType("timestamp with time zone");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "TaxType", "TaxCodeId", "VersionNumber").IsUnique();
+                    b.HasIndex("CompanyId", "TaxType", "TaxCodeId", "EffectiveFrom", "EffectiveTo").HasDatabaseName("IX_PublicSectorTaxBudgetPolicies_Effective");
+                    b.ToTable("PublicSectorTaxBudgetPolicies", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Version", "\"VersionNumber\" > 0");
+                            t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                            t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Separate", "\"Treatment\" <> 2 OR \"BudgetGlAccountId\" IS NOT NULL");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.SettlementComponentAllocation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<string>("SettlementKind").IsRequired().HasMaxLength(2).HasColumnType("character varying(2)");
+                    b.Property<Guid>("SettlementAllocationId").HasColumnType("uuid");
+                    b.Property<Guid>("InvoiceId").HasColumnType("uuid");
+                    b.Property<int>("ComponentKind").HasColumnType("integer");
+                    b.Property<Guid?>("InvoiceLineId").HasColumnType("uuid");
+                    b.Property<Guid?>("TaxComponentId").HasColumnType("uuid");
+                    b.Property<decimal>("AmountApplied").HasColumnType("numeric(20,6)");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "SettlementKind", "SettlementAllocationId", "InvoiceLineId", "TaxComponentId").IsUnique();
+                    b.HasIndex("TaxComponentId").HasDatabaseName("IX_SettlementComponentAllocations_TaxComponentId");
+                    b.ToTable("SettlementComponentAllocations", t =>
+                        {
+                            t.HasCheckConstraint("CK_SettlementComponentAllocations_Component", "((\"ComponentKind\" = 0 AND \"InvoiceLineId\" IS NOT NULL AND \"TaxComponentId\" IS NULL) OR (\"ComponentKind\" = 1 AND \"InvoiceLineId\" IS NULL AND \"TaxComponentId\" IS NOT NULL))");
+                            t.HasCheckConstraint("CK_SettlementComponentAllocations_Amount", "\"AmountApplied\" > 0");
+                            t.HasCheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP')");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.TenantSlaIncident", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
@@ -5200,6 +5322,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("GrantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("TaxCodeId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("JournalEntryId")
