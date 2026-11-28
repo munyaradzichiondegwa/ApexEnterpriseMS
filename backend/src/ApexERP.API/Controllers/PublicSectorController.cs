@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using ApexERP.Application.Security;
 using ApexERP.API.Authorization;
 using ApexERP.Application.Services;
@@ -32,6 +35,15 @@ namespace ApexERP.API.Controllers
         PublicSectorBudgetReconciliationType Type, string StatementSection, string Description,
         string SupportingReference, DateTime StatementPeriodStart, DateTime StatementPeriodEnd,
         string StatementEntityScope);
+    public record CreateBudgetStatementIssueRequest(int FinancialYear, DateTime? StatementPeriodStart,
+        DateTime? StatementPeriodEnd, string? StatementEntityScope, string TemplateAuthorityReference,
+        string TemplateVersion, string? IssueReference = null);
+    public sealed record BudgetStatementIssueDocument(Guid Id, int FinancialYear, Guid BudgetVersionId,
+        DateTime StatementPeriodStart, DateTime StatementPeriodEnd, string StatementEntityScope,
+        string Currency, string AccountingBasis, string TemplateAuthorityReference, string TemplateVersion,
+        string TemplateReferenceStatus, string IssueReference, string SnapshotJson, string SnapshotSha256,
+        string Status, Guid PreparedBy, DateTime PreparedAt, Guid? ReviewedBy, DateTime? ReviewedAt,
+        Guid? ApprovedBy, DateTime? ApprovedAt, Guid? IssuedBy, DateTime? IssuedAt);
     public record CreateAutomaticCashFlowBudgetReconciliationRequest(int FinancialYear, Guid BudgetVersionId,
         string StatementSection, string SupportingReference);
     public record CreateBudgetExecutionActualReversalRequest(string Reason);
@@ -599,6 +611,179 @@ namespace ApexERP.API.Controllers
         {
             try { return Ok(await _publicSector.GetBudgetComparisonAsync(CompanyId, year, ct,
                 statementPeriodStart, statementPeriodEnd, statementEntityScope)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        private const string BudgetStatementIssueKeyPrefix = "ipsas24.statement.issue:";
+
+        private async Task<(BudgetComparisonReport Report, string SnapshotJson, string SnapshotSha256)>
+            BuildBudgetStatementIssueSnapshotAsync(Guid companyId, int financialYear,
+                DateTime? statementPeriodStart, DateTime? statementPeriodEnd, string? statementEntityScope,
+                string templateAuthorityReference, string templateVersion, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(templateAuthorityReference) || string.IsNullOrWhiteSpace(templateVersion))
+                throw new InvalidOperationException("A source reference and version for the financial-statement presentation template are required.");
+            var report = await _publicSector.GetBudgetComparisonAsync(companyId, financialYear, ct,
+                statementPeriodStart, statementPeriodEnd, statementEntityScope);
+            if (!report.ComparableActualsAvailable)
+                throw new InvalidOperationException("The statement cannot be prepared while comparable actuals or source evidence are incomplete: " + report.ComparabilityMessage);
+            if (!report.FinancialStatementReconciliation.Complete)
+                throw new InvalidOperationException("The statement cannot be prepared until all calculated basis, timing, entity and presentation differences are independently approved.");
+            if (!report.VarianceExplanationsComplete || !report.OriginalToFinalExplanationsComplete)
+                throw new InvalidOperationException("All non-zero budget variances and original-to-final budget amendments must be explained and independently approved before statement issue.");
+
+            object? cashFlowBridge = null;
+            if (string.Equals(report.AccountingBasis, "Cash", StringComparison.OrdinalIgnoreCase))
+            {
+                var bridgeAction = await GetBudgetExecutionReconciliation(financialYear, ct);
+                if (bridgeAction is not OkObjectResult bridgeOk || bridgeOk.Value == null)
+                    throw new InvalidOperationException("The IPSAS 24 cash-flow bridge is not available for statement issue.");
+                var reconciledProperty = bridgeOk.Value.GetType().GetProperty("Reconciled");
+                if (reconciledProperty?.GetValue(bridgeOk.Value) is not bool reconciled || !reconciled)
+                    throw new InvalidOperationException("The IPSAS 24 cash-flow bridge must be source-complete and reconciled to the Statement of Cash Flows before statement issue.");
+                cashFlowBridge = bridgeOk.Value;
+            }
+
+            var snapshot = new
+            {
+                Report = report,
+                CashFlowBridge = cashFlowBridge,
+                TemplateAuthorityReference = templateAuthorityReference.Trim(),
+                TemplateVersion = templateVersion.Trim(),
+                TemplateReferenceStatus = "UserSuppliedNotIndependentlyVerified"
+            };
+            var snapshotJson = JsonSerializer.Serialize(snapshot);
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(snapshotJson)));
+            return (report, snapshotJson, hash);
+        }
+
+        [HttpPost("budget-statements/issues")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateBudgetStatementIssue(CreateBudgetStatementIssueRequest req, CancellationToken ct)
+        {
+            try
+            {
+                var snapshot = await BuildBudgetStatementIssueSnapshotAsync(CompanyId, req.FinancialYear,
+                    req.StatementPeriodStart, req.StatementPeriodEnd, req.StatementEntityScope,
+                    req.TemplateAuthorityReference, req.TemplateVersion, ct);
+                var issueId = Guid.NewGuid();
+                var issueReference = string.IsNullOrWhiteSpace(req.IssueReference)
+                    ? $"IPSAS24-{req.FinancialYear}-{issueId.ToString("N")[..8].ToUpperInvariant()}"
+                    : req.IssueReference.Trim();
+                var document = new BudgetStatementIssueDocument(issueId, req.FinancialYear,
+                    snapshot.Report.FinalBudgetVersionId ?? snapshot.Report.OriginalBudgetVersionId,
+                    snapshot.Report.StatementPeriodStart, snapshot.Report.StatementPeriodEnd,
+                    snapshot.Report.FinancialStatementEntityScope, snapshot.Report.Currency,
+                    snapshot.Report.AccountingBasis, req.TemplateAuthorityReference.Trim(), req.TemplateVersion.Trim(),
+                    "UserSuppliedNotIndependentlyVerified", issueReference, snapshot.SnapshotJson,
+                    snapshot.SnapshotSha256, "Draft", UserId, DateTime.UtcNow, null, null, null, null, null, null);
+                await _db.InTransactionAsync(async token =>
+                {
+                    await _db.AcquireTransactionLockAsync($"ipsas24-statement-issue:{CompanyId:N}:{issueId:N}", token);
+                    _db.CompanySettings.Add(new CompanySetting
+                    {
+                        CompanyId = CompanyId,
+                        Key = BudgetStatementIssueKeyPrefix + issueId.ToString("N"),
+                        Value = JsonSerializer.Serialize(document)
+                    });
+                    _audit.Record(CompanyId, UserId, "PublicSectorBudgetStatementIssue.DraftCreated",
+                        "PublicSector", nameof(BudgetStatementIssueDocument), issueId, null,
+                        new { document.FinancialYear, document.BudgetVersionId, document.IssueReference,
+                            document.SnapshotSha256, document.TemplateAuthorityReference, document.TemplateVersion });
+                    await _db.SaveChangesAsync(token);
+                }, ct);
+                return Ok(document);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpGet("budget-statements/issues")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> ListBudgetStatementIssues(CancellationToken ct)
+        {
+            var settings = await _db.CompanySettings.Where(x => x.CompanyId == CompanyId &&
+                x.Key.StartsWith(BudgetStatementIssueKeyPrefix)).ToListAsync(ct);
+            return Ok(settings.Select(x => JsonSerializer.Deserialize<BudgetStatementIssueDocument>(x.Value))
+                .Where(x => x != null).OrderByDescending(x => x!.PreparedAt));
+        }
+
+        [HttpGet("budget-statements/issues/{id:guid}")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetBudgetStatementIssue(Guid id, CancellationToken ct)
+        {
+            var setting = await _db.CompanySettings.FirstOrDefaultAsync(x => x.CompanyId == CompanyId &&
+                x.Key == BudgetStatementIssueKeyPrefix + id.ToString("N"), ct);
+            if (setting == null) return NotFound();
+            return Ok(JsonSerializer.Deserialize<BudgetStatementIssueDocument>(setting.Value));
+        }
+
+        private async Task<BudgetStatementIssueDocument> TransitionBudgetStatementIssueAsync(Guid id,
+            string expectedStatus, string nextStatus, Guid actorId, CancellationToken ct)
+        {
+            return await _db.InTransactionAsync(async token =>
+            {
+                await _db.AcquireTransactionLockAsync($"ipsas24-statement-issue:{CompanyId:N}:{id:N}", token);
+                var setting = await _db.CompanySettings.FirstOrDefaultAsync(x => x.CompanyId == CompanyId &&
+                    x.Key == BudgetStatementIssueKeyPrefix + id.ToString("N"), token)
+                    ?? throw new InvalidOperationException("IPSAS 24 statement issue record not found.");
+                var document = JsonSerializer.Deserialize<BudgetStatementIssueDocument>(setting.Value)
+                    ?? throw new InvalidOperationException("IPSAS 24 statement issue record is corrupt.");
+                if (document.Status != expectedStatus)
+                    throw new InvalidOperationException($"Only a {expectedStatus} statement issue can move to {nextStatus}.");
+                if (nextStatus == "Reviewed" && actorId == document.PreparedBy)
+                    throw new InvalidOperationException("The statement preparer cannot review their own statement.");
+                if (nextStatus == "Approved" && (actorId == document.PreparedBy || actorId == document.ReviewedBy))
+                    throw new InvalidOperationException("The statement approver must be independent of both the preparer and reviewer.");
+                if (nextStatus == "Issued" && (actorId == document.PreparedBy || actorId == document.ReviewedBy || actorId == document.ApprovedBy))
+                    throw new InvalidOperationException("The statement publisher must be independent of the preparer, reviewer and approver.");
+
+                var snapshot = await BuildBudgetStatementIssueSnapshotAsync(CompanyId, document.FinancialYear,
+                    document.StatementPeriodStart, document.StatementPeriodEnd, document.StatementEntityScope,
+                    document.TemplateAuthorityReference, document.TemplateVersion, token);
+                if (snapshot.Report.FinalBudgetVersionId != document.BudgetVersionId ||
+                    !string.Equals(snapshot.SnapshotSha256, document.SnapshotSha256, StringComparison.Ordinal))
+                    throw new InvalidOperationException("The approved budget, ledger, certified cash actuals, reconciliations or template reference changed after preparation. Create a new statement issue draft.");
+
+                var now = DateTime.UtcNow;
+                var changed = nextStatus switch
+                {
+                    "Reviewed" => document with { Status = nextStatus, ReviewedBy = actorId, ReviewedAt = now },
+                    "Approved" => document with { Status = nextStatus, ApprovedBy = actorId, ApprovedAt = now },
+                    "Issued" => document with { Status = nextStatus, IssuedBy = actorId, IssuedAt = now },
+                    _ => throw new InvalidOperationException("Unsupported statement issue transition.")
+                };
+                setting.Value = JsonSerializer.Serialize(changed);
+                _audit.Record(CompanyId, actorId, $"PublicSectorBudgetStatementIssue.{nextStatus}",
+                    "PublicSector", nameof(BudgetStatementIssueDocument), id,
+                    new { Status = document.Status, document.SnapshotSha256 },
+                    new { changed.Status, changed.ReviewedBy, changed.ApprovedBy, changed.IssuedBy,
+                        changed.ReviewedAt, changed.ApprovedAt, changed.IssuedAt });
+                await _db.SaveChangesAsync(token);
+                return changed;
+            }, ct);
+        }
+
+        [HttpPost("budget-statements/issues/{id:guid}/review")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> ReviewBudgetStatementIssue(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await TransitionBudgetStatementIssueAsync(id, "Draft", "Reviewed", UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-statements/issues/{id:guid}/approve")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> ApproveBudgetStatementIssue(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await TransitionBudgetStatementIssueAsync(id, "Reviewed", "Approved", UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-statements/issues/{id:guid}/publish")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> PublishBudgetStatementIssue(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await TransitionBudgetStatementIssueAsync(id, "Approved", "Issued", UserId, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
