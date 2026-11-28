@@ -6,12 +6,16 @@ import { api, extractErrorMessage } from "@/lib/api";
 
 export default function PublicSectorPage() {
   const [tab, setTab] = useState<"funds" | "tenders" | "assets" | "ipsas24">("funds");
-  const [fundCentres, setFundCentres] = useState<any[]>([]);\n  const [budgetAccounts, setBudgetAccounts] = useState<any[]>([]);
+  const [fundCentres, setFundCentres] = useState<any[]>([]);
+  const [budgetAccounts, setBudgetAccounts] = useState<any[]>([]);
   const [utilization, setUtilization] = useState<any[]>([]);
   const [tenders, setTenders] = useState<any[]>([]);
   const [batches, setBatches] = useState<any[]>([]);
   const [budgetComparison, setBudgetComparison] = useState<any | null>(null);
-  const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);\n  const [budgetDraftId, setBudgetDraftId] = useState<string | null>(null);\n  const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "" });\n  const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", amount: 0 }]);
+  const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);
+  const [budgetDraftId, setBudgetDraftId] = useState<string | null>(null);
+  const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "" });
+  const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", amount: 0 }]);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [year] = useState(new Date().getFullYear());
@@ -19,7 +23,8 @@ export default function PublicSectorPage() {
   const [newTender, setNewTender] = useState({ title: "", specifications: "", submissionDeadline: "" });
 
   function load() {
-    api.get(`/public-sector/fund-centres?year=${year}`).then((r) => setFundCentres(r.data)).catch((e) => setError(extractErrorMessage(e)));\n    api.get("/gl/accounts").then((r) => setBudgetAccounts(r.data.filter((a: any) => a.isActive && (a.type === "Income" || a.type === "Expense")))).catch(() => {});
+    api.get(`/public-sector/fund-centres?year=${year}`).then((r) => setFundCentres(r.data)).catch((e) => setError(extractErrorMessage(e)));
+    api.get("/gl/accounts").then((r) => setBudgetAccounts(r.data.filter((a: any) => a.isActive && (a.type === "Income" || a.type === "Expense")))).catch(() => {});
     api.get(`/public-sector/fund-centres/utilization?year=${year}`).then((r) => setUtilization(r.data)).catch(() => {});
     api.get("/public-sector/tenders").then((r) => setTenders(r.data)).catch(() => {});
     api.get("/public-sector/asset-verification/batches").then((r) => setBatches(r.data)).catch(() => {});
