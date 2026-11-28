@@ -3746,6 +3746,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("PublicSectorBudgetExecutionActuals", t =>
                         {
                             t.HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_Amount", "\"Amount\" > 0");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_SourceAmount", "\"SourceAmount\" > 0");
                             t.HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
                         });
                 });
