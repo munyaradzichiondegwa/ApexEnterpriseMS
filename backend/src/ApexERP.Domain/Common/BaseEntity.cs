@@ -277,6 +277,14 @@ namespace ApexERP.Domain.Common
         Presentation
     }
 
+    public enum PublicSectorBudgetReconciliationStatus
+    {
+        Draft,
+        PendingApproval,
+        Approved,
+        Rejected
+    }
+
     public enum GrantStatus
     {
         Active,
