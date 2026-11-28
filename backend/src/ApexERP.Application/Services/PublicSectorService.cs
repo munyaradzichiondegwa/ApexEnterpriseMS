@@ -1066,6 +1066,8 @@ namespace ApexERP.Application.Services
             sourceDate = source.TransactionDate;
             sourceReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
 
+            if (effectiveDate.Date != sourceDate.Date)
+                throw new InvalidOperationException("The budget effective date must match the reconciled bank transaction date. Report timing differences through the separately approved IPSAS 24 reconciliation workflow.");
             if (amount <= 0m || !string.Equals(currency, version.Currency, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The source amount must be positive and its currency must match the approved budget currency. Foreign-currency conversion requires approved rate provenance and is not enabled in this phase.");
             var actual = new PublicSectorBudgetExecutionActual
