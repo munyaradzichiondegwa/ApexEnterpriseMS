@@ -21,6 +21,9 @@ namespace ApexERP.API.Controllers
     public record CreateBudgetReconciliationRequest(int FinancialYear, PublicSectorBudgetReconciliationType Type,
         string Description, string StatementSection, decimal OperatingAmount, decimal InvestingAmount,
         decimal FinancingAmount, string SupportingReference);
+    public record CreateBudgetExecutionActualRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
+        PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualSourceKind SourceKind,
+        Guid SourceRecordId, DateTime EffectiveDate, CashFlowCategory CashFlowSection);
 
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
@@ -371,5 +374,45 @@ namespace ApexERP.API.Controllers
         [HttpGet("asset-verification/batches")]
         public async Task<IActionResult> GetBatches() =>
             Ok(await _db.AssetVerificationBatches.Include(b => b.Scans).Where(b => b.CompanyId == CompanyId).OrderByDescending(b => b.VerificationDate).ToListAsync());
+
+        // ---- IPSAS 24: source-backed cash budget actuals ----
+
+        [HttpGet("budget-execution-actuals")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetBudgetExecutionActuals([FromQuery] int year, CancellationToken ct)
+        {
+            if (year < 2000 || year > 2200) return BadRequest(new { error = "A valid financial year is required." });
+            return Ok(await _publicSector.GetBudgetExecutionActualsAsync(CompanyId, year, ct));
+        }
+
+        [HttpPost("budget-execution-actuals")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateBudgetExecutionActual(CreateBudgetExecutionActualRequest req, CancellationToken ct)
+        {
+            try
+            {
+                var actual = await _publicSector.CreateBudgetExecutionActualAsync(CompanyId,
+                    req.BudgetVersionId, req.BudgetVersionLineId, req.EventKind, req.SourceKind,
+                    req.SourceRecordId, req.EffectiveDate, req.CashFlowSection, UserId, ct);
+                return Ok(actual);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-execution-actuals/{id}/submit")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitBudgetExecutionActual(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.SubmitBudgetExecutionActualAsync(CompanyId, id, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-execution-actuals/{id}/certify")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CertifyBudgetExecutionActual(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.CertifyBudgetExecutionActualAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
     }
 }
