@@ -3770,6 +3770,16 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashPeriodAttestation", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashPeriodAttestation_BudgetVersion")
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
