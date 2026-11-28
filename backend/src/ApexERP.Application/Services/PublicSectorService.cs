@@ -855,7 +855,15 @@ namespace ApexERP.Application.Services
                 var statementBatches = await _db.BankStatementImportBatches.Where(x =>
                     x.CompanyId == companyId && x.BankAccountId == sourceId &&
                     x.PeriodStart >= periodStart && x.PeriodEnd <= periodEnd)
-                    .OrderBy(x => x.PeriodStart).ToListAsync(ct);
+                    .OrderBy(x => x.PeriodStart)
+                    .Select(x => new
+                    {
+                        x.Id, x.PeriodStart, x.PeriodEnd, x.Status, x.AuthenticationMethod,
+                        x.AuthenticatedBy, x.AuthenticatedAt, x.CompletenessCertifiedBy,
+                        x.CompletenessCertifiedAt, x.UploadedBy, x.ByteLength, x.Sha256,
+                        x.OpeningBalance, x.ClosingBalance, x.TotalDebits, x.TotalCredits,
+                        x.TransactionCount
+                    }).ToListAsync(ct);
                 if (rows.Count > 0)
                 {
                     if (statementBatches.Count == 0)
