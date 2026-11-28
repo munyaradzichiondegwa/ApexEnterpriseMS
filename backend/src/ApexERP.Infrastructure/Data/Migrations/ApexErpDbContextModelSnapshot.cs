@@ -141,7 +141,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
-                    b.HasIndex("CompanyId", "InvoiceKind", "InvoiceId", "JournalLineId").IsUnique();
+                    b.HasIndex("CompanyId", "InvoiceKind", "InvoiceId", "JournalLineId", "InvoiceLineId").IsUnique();
                     b.HasIndex("CompanyId", "TaxAccountMappingId", "InvoiceId");
                     b.ToTable("InvoiceTaxComponents", t =>
                         {
