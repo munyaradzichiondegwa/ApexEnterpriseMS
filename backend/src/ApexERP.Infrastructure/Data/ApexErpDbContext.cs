@@ -796,6 +796,10 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorBudgetReconciliation>()
                 .HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
                     "(\"IsNoDifferenceAttestation\" = TRUE AND \"RevenueAmount\" = 0 AND \"ExpenseAmount\" = 0 AND \"OperatingAmount\" = 0 AND \"InvestingAmount\" = 0 AND \"FinancingAmount\" = 0) OR (\"IsNoDifferenceAttestation\" = FALSE AND (\"RevenueAmount\" <> 0 OR \"ExpenseAmount\" <> 0 OR \"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0))");
+            modelBuilder.Entity<ModifiedCashRecognitionPolicy>().Property(x => x.PolicyReference).HasMaxLength(160);
+            modelBuilder.Entity<ModifiedCashRecognitionMapping>().Property(x => x.SourceEventKind).HasMaxLength(80);
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>().Property(x => x.SourceEventKind).HasMaxLength(80);
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>().Property(x => x.EvidenceReference).HasMaxLength(1000);
             modelBuilder.Entity<ModifiedCashRecognitionPolicy>()
                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.VersionNumber }).IsUnique()
                 .HasDatabaseName("UX_ModifiedCashPolicy_Version");
