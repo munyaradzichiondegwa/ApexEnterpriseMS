@@ -3646,9 +3646,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("FundCentreId");
                     b.HasIndex("GlAccountId");
                     b.HasIndex("CompanyId", "FundCentreId", "GlAccountId", "CostCentreId", "FinancialYear")
-                        .IsUnique().HasFilter("\"CostCentreId\" IS NOT NULL");
+                        .IsUnique().HasFilter("\"CostCentreId\" IS NOT NULL")
+                        .HasDatabaseName("UX_PublicSectorBudgetAllocation_Dimension");
                     b.HasIndex("CompanyId", "FundCentreId", "GlAccountId", "FinancialYear")
-                        .IsUnique().HasFilter("\"CostCentreId\" IS NULL");
+                        .IsUnique().HasFilter("\"CostCentreId\" IS NULL")
+                        .HasDatabaseName("UX_PublicSectorBudgetAllocation_Unassigned");
                     b.ToTable("PublicSectorBudgetAllocations", t =>
                         {
                             t.HasCheckConstraint("CK_PublicSectorBudgetAllocations_Amount", "\"Amount\" > 0");
