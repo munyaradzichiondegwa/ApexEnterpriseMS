@@ -1381,5 +1381,60 @@ namespace ApexERP.Tests
             Assert.Equal(100m, comparison.Lines.Single(x => x.AccountCode == "4100").ActualOnComparableBasis);
             Assert.Equal(200m, comparison.Lines.Single(x => x.AccountCode == "5100").ActualOnComparableBasis);
         }
+
+        [PostgresFact]
+        public async Task Cash_period_zero_activity_requires_independent_attestation_and_rechecks_sources()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var preparerId = Guid.NewGuid();
+            var certifierId = Guid.NewGuid();
+            var budgetVersionId = Guid.NewGuid();
+            var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Zero Activity MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
+                {
+                    Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
+                    VersionNumber = 1, Kind = PublicSectorBudgetVersionKind.Original,
+                    Status = PublicSectorBudgetVersionStatus.Approved, Currency = "USD",
+                    AccountingBasis = AccountingBasis.Cash,
+                    ClassificationBasis = "Cash economic classification",
+                    EntityScope = "Zero Activity MDA", PeriodStart = periodStart, PeriodEnd = periodEnd,
+                    AuthorityReference = "Appropriation Act 2026", ApprovedBy = certifierId,
+                    ApprovedAt = DateTime.UtcNow, CreatedBy = preparerId
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var blocked = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.False(blocked.ComparableActualsAvailable);
+            Assert.Contains("zero-activity attestation", blocked.ComparabilityMessage, StringComparison.OrdinalIgnoreCase);
+
+            var attestation = await service.CreateCashPeriodAttestationAsync(companyId,
+                budgetVersionId, "MDA cashbook nil-return 2026", preparerId);
+            Assert.Equal("Draft", attestation.Status);
+            await service.SubmitCashPeriodAttestationAsync(companyId, attestation.Id, preparerId);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CertifyCashPeriodAttestationAsync(companyId, attestation.Id, preparerId));
+
+            var certified = await service.CertifyCashPeriodAttestationAsync(companyId, attestation.Id, certifierId);
+            Assert.Equal("Certified", certified.Status);
+            Assert.Equal(0, certified.ObservedBankTransactionCount);
+            Assert.Equal(0, certified.ObservedArReceiptCount);
+            Assert.Equal(0, certified.ObservedApPaymentCount);
+
+            var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
+        }
     }
 }
