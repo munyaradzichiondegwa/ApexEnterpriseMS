@@ -397,7 +397,7 @@ namespace ApexERP.Infrastructure.Data
                 .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId, x.BudgetExecutionActualId })
                 .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
-                .HasIndex(x => x.BudgetExecutionActualId).IsUnique()
+                .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.BudgetExecutionActualId }).IsUnique()
                 .HasFilter("\"BudgetExecutionActualId\" IS NOT NULL")
                 .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
             // One accounting period per company per month (guards concurrent first-posting races).
@@ -750,8 +750,8 @@ namespace ApexERP.Infrastructure.Data
                 .HasIndex(x => x.ExpectedCashSourceId)
                 .HasDatabaseName("IX_PublicSectorCashSourceSubmissions_ExpectedCashSourceId");
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
-                .HasIndex(x => new { x.CompanyId, x.ExpectedCashSourceId }).IsUnique()
-                .HasDatabaseName("UX_PublicSectorCashSourceSubmission_Source");
+                .HasIndex(x => new { x.CompanyId, x.ExpectedCashSourceId, x.SubmissionRevision }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorCashSourceSubmission_Revision");
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
                 .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Period", "\"PeriodEnd\" > \"PeriodStart\"");
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
