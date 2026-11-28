@@ -44,7 +44,7 @@ public sealed class AddIpsas24TaxAllocationControls : Migration
                 table.PrimaryKey("PK_TaxAccountMappings", x => x.Id);
                 table.CheckConstraint("CK_TaxAccountMappings_Version", "\"VersionNumber\" > 0");
                 table.CheckConstraint("CK_TaxAccountMappings_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
-                            t.HasCheckConstraint("CK_TaxAccountMappings_Purpose", "((\"Purpose\" IN ('AR-VAT-OUTPUT','AP-VAT-INPUT') AND \"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"Purpose\" = 'AP-WHT-PAYABLE' AND \"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
+                            table.CheckConstraint("CK_TaxAccountMappings_Purpose", "((\"Purpose\" IN ('AR-VAT-OUTPUT','AP-VAT-INPUT') AND \"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"Purpose\" = 'AP-WHT-PAYABLE' AND \"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
             });
 
         migrationBuilder.CreateTable(
@@ -76,7 +76,7 @@ public sealed class AddIpsas24TaxAllocationControls : Migration
                 table.PrimaryKey("PK_InvoiceTaxComponents", x => x.Id);
                 table.CheckConstraint("CK_InvoiceTaxComponents_Amounts", "\"TaxableBase\" >= 0 AND \"Rate\" >= 0 AND \"Amount\" > 0");
                 table.CheckConstraint("CK_InvoiceTaxComponents_Kind", "\"InvoiceKind\" IN ('AR','AP')");
-                            t.HasCheckConstraint("CK_InvoiceTaxComponents_TaxCode", "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
+                            table.CheckConstraint("CK_InvoiceTaxComponents_TaxCode", "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
             });
 
         migrationBuilder.CreateTable(
@@ -111,7 +111,7 @@ public sealed class AddIpsas24TaxAllocationControls : Migration
                 table.CheckConstraint("CK_PublicSectorTaxBudgetPolicies_Version", "\"VersionNumber\" > 0");
                 table.CheckConstraint("CK_PublicSectorTaxBudgetPolicies_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
                 table.CheckConstraint("CK_PublicSectorTaxBudgetPolicies_Separate", "\"Treatment\" <> 2 OR \"BudgetGlAccountId\" IS NOT NULL");
-                            t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_TaxCode", "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
+                            table.CheckConstraint("CK_PublicSectorTaxBudgetPolicies_TaxCode", "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
             });
 
         migrationBuilder.CreateTable(
@@ -139,7 +139,7 @@ public sealed class AddIpsas24TaxAllocationControls : Migration
                     "((\"ComponentKind\" = 0 AND \"InvoiceLineId\" IS NOT NULL AND \"TaxComponentId\" IS NULL) OR (\"ComponentKind\" = 1 AND \"InvoiceLineId\" IS NULL AND \"TaxComponentId\" IS NOT NULL))");
                 table.CheckConstraint("CK_SettlementComponentAllocations_Amount", "\"AmountApplied\" > 0");
                 table.CheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP')");
-                            t.HasCheckConstraint("CK_SettlementComponentAllocations_TaxRemittance", "\"SettlementKind\" <> 'TX' OR \"ComponentKind\" = 1");
+                            table.CheckConstraint("CK_SettlementComponentAllocations_TaxRemittance", "\"SettlementKind\" <> 'TX' OR \"ComponentKind\" = 1");
             });
 
         migrationBuilder.CreateIndex(name: "IX_TaxAccountMappings_CompanyId_Purpose_TaxCodeId_VersionNumber",
