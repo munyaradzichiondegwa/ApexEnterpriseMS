@@ -15,6 +15,19 @@ The existing invoice models retain invoice totals, VAT/WHT amounts and tax-code 
 
 The GL journal is authoritative evidence of what was posted, but identifying a journal line only by matching an amount is not a safe substitute for a durable tax-account mapping: equal-valued tax and other journal legs can occur.
 
+## Implemented foundation — 28 November 2026
+
+The first code increment now persists the exact tax-control GL account IDs used at posting:
+
+- AR invoice: `VatOutputAccountId`.
+- AP invoice: `VatInputAccountId` and `WhtPayableAccountId`.
+
+AR posting requires the VAT output account to be an active, postable liability account in the invoice company. AP posting requires VAT input to be an active, postable asset account and WHT payable to be an active, postable liability account in that same company. The values are saved with the invoice and therefore identify the actual accounts used by the posted journal rather than relying on a later account-name or code lookup.
+
+Migration `20261128120000_PersistArApTaxPostingAccounts` adds nullable columns so existing historical invoices remain intact; historical account IDs are not guessed or backfilled. PostgreSQL integration regressions cover valid AR/AP persistence and rejection of wrong-type or cross-company AR VAT accounts.
+
+This is a traceability foundation only. It does not yet provide effective-dated tax-code mappings, per-tax-component journal-line identity, tax settlement allocation, approved budget-treatment policy, or tax-bearing IPSAS 24 actual capture. The adapter must remain fail-closed for VAT/WHT invoices.
+
 ## Required accounting model
 
 Before enabling tax-bearing cash actuals, implement all of the following:
