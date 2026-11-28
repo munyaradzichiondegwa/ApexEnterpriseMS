@@ -220,7 +220,7 @@ namespace ApexERP.API.Controllers
             if (year < 2000 || year > 2200) return BadRequest(new { error = "A valid financial year is required." });
             var latest = await _db.PublicSectorBudgetVersions.Include(x => x.Lines)
                 .Where(x => x.CompanyId == CompanyId && x.FinancialYear == year &&
-                    x.Status == PublicSectorBudgetVersionStatus.Approved)
+                    x.Status == PublicSectorBudgetVersionStatus.Approved && x.AccountingBasis == AccountingBasis.Cash)
                 .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber)
                 .FirstOrDefaultAsync(ct);
             return Ok(latest == null ? Array.Empty<PublicSectorBudgetVersion>() : new[] { latest });
