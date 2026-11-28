@@ -244,6 +244,18 @@ namespace ApexERP.Application.Services
             if (isNoDifferenceAttestation &&
                 !new[] { "Revenue", "Expense" }.Contains(statementSection.Trim(), StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException("A no-difference attestation must explicitly cover Revenue or Expense.");
+            if (string.Equals(statementSection.Trim(), "Revenue", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(statementSection.Trim(), "Expense", StringComparison.OrdinalIgnoreCase))
+            {
+                var existingSectionRows = await _db.PublicSectorBudgetReconciliations.Where(x =>
+                    x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                    x.StatementSection == statementSection.Trim() &&
+                    x.Status != PublicSectorBudgetReconciliationStatus.Rejected).ToListAsync(ct);
+                if (isNoDifferenceAttestation && existingSectionRows.Count > 0)
+                    throw new InvalidOperationException("A no-difference attestation cannot coexist with another active reconciliation for the same financial-statement section.");
+                if (!isNoDifferenceAttestation && existingSectionRows.Any(x => x.IsNoDifferenceAttestation))
+                    throw new InvalidOperationException("An active no-difference attestation already covers this section; reject it before recording an adjustment.");
+            }
             // Cash-budget actuals are on the budget's cash basis. Revenue/expense adjustments
             // reconcile those comparable amounts to accrual financial-statement actuals;
             // operating/investing/financing adjustments remain available for the separate cash-flow bridge.
