@@ -4054,6 +4054,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<int>("Type").HasColumnType("integer");
                     b.Property<string>("Description").IsRequired().HasColumnType("text");
                     b.Property<string>("StatementSection").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("RevenueAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("ExpenseAmount").HasColumnType("numeric(20,6)");
                     b.Property<decimal>("OperatingAmount").HasColumnType("numeric(20,6)");
                     b.Property<decimal>("InvestingAmount").HasColumnType("numeric(20,6)");
                     b.Property<decimal>("FinancingAmount").HasColumnType("numeric(20,6)");
@@ -4072,7 +4074,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("PublicSectorBudgetReconciliations", t =>
                         {
                             t.HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
-                                "\"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0");
+                                "\"RevenueAmount\" <> 0 OR \"ExpenseAmount\" <> 0 OR \"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0");
                         });
                 });
 
