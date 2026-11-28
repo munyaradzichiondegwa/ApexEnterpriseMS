@@ -788,13 +788,14 @@ export default function PublicSectorPage() {
                 </div>
               )}
               <div className="overflow-x-auto">
-                <table className="table-base min-w-[900px]">
-                  <thead><tr><th>Classification</th><th>Fund centre</th><th>Account</th><th className="text-right">Original</th><th className="text-right">Final</th><th className="text-right">Actual (comparable)</th><th className="text-right">Variance</th><th>Original-to-final explanation</th><th>Final-to-actual explanation</th></tr></thead>
+                <table className="table-base min-w-[1100px]">
+                  <thead><tr><th>Classification</th><th>Fund centre / level</th><th>Cost centre</th><th>Account</th><th className="text-right">Original</th><th className="text-right">Final</th><th className="text-right">Actual (comparable)</th><th className="text-right">Variance</th><th>Original-to-final explanation</th><th>Final-to-actual explanation</th></tr></thead>
                   <tbody>
                     {budgetComparison.lines.map((line: any, index: number) => (
-                      <tr key={`${line.accountCode}-${line.fundCentreCode}-${index}`}>
+                      <tr key={`${line.accountCode}-${line.fundCentreCode}-${line.costCentreCode}-${index}`}>
                         <td>{line.classificationCode}</td>
-                        <td><span className="font-mono">{line.fundCentreCode}</span><br />{line.fundCentreName}</td>
+                        <td><span className="font-mono">{line.fundCentreCode}</span><br />{line.fundCentreName}<div className="text-xs text-slate-500">{line.fundCentreLevel}</div></td>
+                        <td>{line.costCentreCode ? <><span className="font-mono">{line.costCentreCode}</span><br />{line.costCentreName}</> : "—"}</td>
                         <td><span className="font-mono">{line.accountCode}</span><br />{line.accountName}</td>
                         <td className="text-right">{fmt(line.originalBudget)}</td>
                         <td className="text-right">{line.finalBudget == null ? "—" : fmt(line.finalBudget)}</td>
@@ -804,7 +805,7 @@ export default function PublicSectorPage() {
                         <td>{budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId)?.explanation ?? (line.variance ? "Explanation required" : "—")}</td>
                       </tr>
                     ))}
-                    {budgetComparison.lines.length === 0 && <tr><td colSpan={9} className="text-center text-slate-500">No budget lines are available.</td></tr>}
+                    {budgetComparison.lines.length === 0 && <tr><td colSpan={10} className="text-center text-slate-500">No budget lines are available.</td></tr>}
                   </tbody>
                 </table>
               </div>
