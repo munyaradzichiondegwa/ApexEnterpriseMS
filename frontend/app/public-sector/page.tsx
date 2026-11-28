@@ -34,7 +34,7 @@ export default function PublicSectorPage() {
   const [cashActualDraft, setCashActualDraft] = useState({ budgetVersionId: "", budgetVersionLineId: "", sourceKind: "BankTransaction", sourceRecordId: "", eventKind: "CashPayment", effectiveDate: new Date().toISOString().slice(0, 10), cashFlowSection: "Operating" });
   const [budgetDraftId, setBudgetDraftId] = useState<string | null>(null);
   const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "", amendmentNature: "" });
-  const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", noteReference: "", amount: 0 }]);
+  const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", treasuryClassificationCode: "", noteReference: "", amount: 0 }]);
   const [varianceDraft, setVarianceDraft] = useState({ budgetVersionLineId: "", explanation: "", evidenceReference: "", commentReference: "" });
   const [budgetReconciliations, setBudgetReconciliations] = useState<any[]>([]);
   const [budgetReconciliationDraft, setBudgetReconciliationDraft] = useState({
@@ -100,7 +100,8 @@ export default function PublicSectorPage() {
       { header: "Difference between final budget and actual", value: (row: any) => row.variance },
       { header: "Comment Ref", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.evidenceReference ?? "" },
       // Supporting dimensions and audit references.
-      { header: "Treasury Classification", value: (row: any) => row.classificationCode },
+      { header: "Treasury Classification", value: (row: any) => row.treasuryClassificationCode ?? "" },
+      { header: "GL SubType", value: (row: any) => row.classificationCode },
       { header: "Fund Centre Code", value: (row: any) => row.fundCentreCode },
       { header: "Fund Centre", value: (row: any) => row.fundCentreName },
       { header: "Fund Centre Level", value: (row: any) => row.fundCentreLevel },
@@ -572,15 +573,18 @@ export default function PublicSectorPage() {
               </>}
             </div>
             <div className="space-y-2">
-              <div className="flex items-center justify-between"><h4 className="font-medium text-sm">Budget lines</h4><button type="button" className="btn-secondary" onClick={() => setBudgetLines((current) => [...current, { fundCentreId: "", glAccountId: "", costCentreId: null, description: "", classificationCode: "", noteReference: "", amount: 0 }])}>Add line</button></div>
+              <div className="flex items-center justify-between"><h4 className="font-medium text-sm">Budget lines</h4><button type="button" className="btn-secondary" onClick={() => setBudgetLines((current) => [...current, { fundCentreId: "", glAccountId: "", costCentreId: null, description: "", classificationCode: "", treasuryClassificationCode: "", noteReference: "", amount: 0 }])}>Add line</button></div>
               {budgetLines.map((line, index) => (
-                <div key={index} className="grid grid-cols-1 md:grid-cols-7 gap-2 border-t pt-2">
+                <div key={index} className="grid grid-cols-1 md:grid-cols-9 gap-2 border-t pt-2">
                   <select className="input" required value={line.fundCentreId} onChange={(e) => updateBudgetLine(index, "fundCentreId", e.target.value)}><option value="">Fund centre</option>{fundCentres.map((f: any) => <option key={f.id} value={f.id}>{f.code} — {f.name}</option>)}</select>
                   <select className="input" required value={line.glAccountId} onChange={(e) => {
+                    const account = selectableBudgetAccounts.find((a: any) => a.id === e.target.value);
                     updateBudgetLine(index, "glAccountId", e.target.value);
+                    updateBudgetLine(index, "classificationCode", account?.subType ?? "");
                   }}><option value="">Select GL account</option>{selectableBudgetAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} — {a.name} ({a.type})</option>)}</select>
                   <input className="input" required placeholder="Description" value={line.description} onChange={(e) => updateBudgetLine(index, "description", e.target.value)} />
-                  <input className="input" required placeholder="ZFRM Appendix 5 line / approved code" value={line.classificationCode} onChange={(e) => updateBudgetLine(index, "classificationCode", e.target.value)} />
+                  <input className="input" readOnly placeholder="GL SubType (from account)" value={line.classificationCode} />
+                  <input className="input" placeholder="ZFRM Appendix 5 category / Treasury code" required={budgetVersionDraft.classificationBasis.toLowerCase().includes("zfrm")} value={line.treasuryClassificationCode} onChange={(e) => updateBudgetLine(index, "treasuryClassificationCode", e.target.value)} />
                   <input className="input" placeholder="Notes reference (Appendix 5)" value={line.noteReference} onChange={(e) => updateBudgetLine(index, "noteReference", e.target.value)} />
                   <input className="input" type="number" min="0" step="0.01" required placeholder="Amount" value={line.amount} onChange={(e) => updateBudgetLine(index, "amount", Number(e.target.value))} />
                   <button type="button" className="btn-secondary" disabled={budgetLines.length === 1} onClick={() => setBudgetLines((current) => current.filter((_, i) => i !== index))}>Remove</button>
@@ -882,11 +886,11 @@ export default function PublicSectorPage() {
               )}
               <div className="overflow-x-auto">
                 <table className="table-base min-w-[1100px]">
-                  <thead><tr><th>Classification</th><th>Notes</th><th>Fund centre / level</th><th>Cost centre</th><th>Account</th><th className="text-right">Original</th><th className="text-right">Final</th><th className="text-right">Actual (comparable)</th><th className="text-right">Variance</th><th>Comment Ref</th><th>Original-to-final explanation</th><th>Final-to-actual explanation</th></tr></thead>
+                  <thead><tr><th>Treasury classification</th><th>GL SubType</th><th>Notes</th><th>Fund centre / level</th><th>Cost centre</th><th>Account</th><th className="text-right">Original</th><th className="text-right">Final</th><th className="text-right">Actual (comparable)</th><th className="text-right">Variance</th><th>Comment Ref</th><th>Original-to-final explanation</th><th>Final-to-actual explanation</th></tr></thead>
                   <tbody>
                     {budgetComparison.lines.map((line: any, index: number) => (
                       <tr key={`${line.accountCode}-${line.fundCentreCode}-${line.costCentreCode}-${index}`}>
-                        <td>{line.classificationCode}</td><td>{line.noteReference ?? "—"}</td>
+                        <td>{line.treasuryClassificationCode ?? "—"}</td><td>{line.classificationCode}</td><td>{line.noteReference ?? "—"}</td>
                         <td><span className="font-mono">{line.fundCentreCode}</span><br />{line.fundCentreName}<div className="text-xs text-slate-500">{line.fundCentreLevel}</div></td>
                         <td>{line.costCentreCode ? <><span className="font-mono">{line.costCentreCode}</span><br />{line.costCentreName}</> : "—"}</td>
                         <td><span className="font-mono">{line.accountCode}</span><br />{line.accountName}</td>
@@ -899,7 +903,7 @@ export default function PublicSectorPage() {
                         <td>{budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId && x.varianceAmount === line.variance && x.status === "Approved")?.explanation ?? (line.variance ? "Explanation required" : "—")}</td>
                       </tr>
                     ))}
-                    {budgetComparison.lines.length === 0 && <tr><td colSpan={12} className="text-center text-slate-500">No budget lines are available.</td></tr>}
+                    {budgetComparison.lines.length === 0 && <tr><td colSpan={13} className="text-center text-slate-500">No budget lines are available.</td></tr>}
                   </tbody>
                 </table>
               </div>
