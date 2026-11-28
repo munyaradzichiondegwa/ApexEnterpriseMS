@@ -761,5 +761,110 @@ namespace ApexERP.Tests
                 await Assert.ThrowsAsync<DbUpdateException>(() => ctx.SaveChangesAsync());
             }
         }
+        // ---- IPSAS 24 tax provenance: posted invoices retain the exact validated tax GL accounts -----------------------
+
+        [PostgresFact]
+        public async Task AR_and_AP_postings_retain_company_scoped_tax_control_accounts()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var company = Guid.NewGuid();
+            var accounts = new Dictionary<string, GlAccount>
+            {
+                ["ar"] = new() { CompanyId = company, Code = "1100", Name = "AR Control", Type = GlAccountType.Asset },
+                ["ap"] = new() { CompanyId = company, Code = "2000", Name = "AP Control", Type = GlAccountType.Liability },
+                ["income"] = new() { CompanyId = company, Code = "4000", Name = "Revenue", Type = GlAccountType.Income },
+                ["expense"] = new() { CompanyId = company, Code = "5000", Name = "Expense", Type = GlAccountType.Expense },
+                ["vatOut"] = new() { CompanyId = company, Code = "2100", Name = "VAT Output", Type = GlAccountType.Liability },
+                ["vatIn"] = new() { CompanyId = company, Code = "1300", Name = "VAT Input", Type = GlAccountType.Asset },
+                ["wht"] = new() { CompanyId = company, Code = "2230", Name = "WHT Payable", Type = GlAccountType.Liability }
+            };
+            var customerId = Guid.NewGuid();
+            var supplierId = Guid.NewGuid();
+            var taxCodeId = Guid.NewGuid();
+            await using (var seed = db.NewContext(company))
+            {
+                seed.GlAccounts.AddRange(accounts.Values);
+                seed.Customers.Add(new Customer { Id = customerId, CompanyId = company, Code = "C001", Name = "Test customer" });
+                seed.Suppliers.Add(new Supplier { Id = supplierId, CompanyId = company, Code = "S001", Name = "Test supplier", WhtApplicable = true, WhtRate = 0.10m });
+                seed.TaxCodes.Add(new TaxCode
+                {
+                    Id = taxCodeId, CompanyId = company, Code = "VAT15", Name = "VAT 15%", Rate = 0.15m,
+                    Type = TaxType.VAT, IsActive = true, EffectiveFrom = new DateTime(2026, 1, 1)
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            Guid arInvoiceId;
+            await using (var ctx = db.NewContext(company))
+            {
+                var ar = new ArService(ctx, Gl(ctx));
+                var invoice = await ar.CreateInvoiceAsync(company, customerId, Oct15, "USD", 1m,
+                    new[] { new ArInvoiceLineRequest("Service", 1m, 100m, taxCodeId, accounts["income"].Id) },
+                    accounts["vatOut"].Id);
+                arInvoiceId = invoice.Id;
+                await ar.PostInvoiceAsync(company, invoice.Id, accounts["ar"].Id, accounts["vatOut"].Id);
+            }
+
+            Guid apInvoiceId;
+            await using (var ctx = db.NewContext(company))
+            {
+                var ap = new ApService(ctx, Gl(ctx));
+                var invoice = await ap.CreateInvoiceAsync(company, supplierId, Oct15, "USD", 1m,
+                    new[] { new ApInvoiceLineRequest("Supplies", 1m, 100m, taxCodeId, accounts["expense"].Id) });
+                apInvoiceId = invoice.Id;
+                await ap.PostInvoiceAsync(company, invoice.Id, accounts["ap"].Id, accounts["vatIn"].Id, accounts["wht"].Id);
+            }
+
+            await using (var verify = db.NewContext(company))
+            {
+                var arInvoice = await verify.ArInvoices.SingleAsync(x => x.Id == arInvoiceId);
+                Assert.Equal(accounts["vatOut"].Id, arInvoice.VatOutputAccountId);
+                var apInvoice = await verify.ApInvoices.SingleAsync(x => x.Id == apInvoiceId);
+                Assert.Equal(accounts["vatIn"].Id, apInvoice.VatInputAccountId);
+                Assert.Equal(accounts["wht"].Id, apInvoice.WhtPayableAccountId);
+            }
+        }
+
+        [PostgresFact]
+        public async Task AR_VAT_posting_rejects_wrong_type_or_foreign_company_tax_accounts()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var company = Guid.NewGuid();
+            var otherCompany = Guid.NewGuid();
+            var income = new GlAccount { CompanyId = company, Code = "4000", Name = "Revenue", Type = GlAccountType.Income };
+            var arControl = new GlAccount { CompanyId = company, Code = "1100", Name = "AR Control", Type = GlAccountType.Asset };
+            var foreignVat = new GlAccount { CompanyId = otherCompany, Code = "2100", Name = "Foreign VAT", Type = GlAccountType.Liability };
+            var customer = new Customer { CompanyId = company, Code = "C001", Name = "Test customer" };
+            var tax = new TaxCode { CompanyId = company, Code = "VAT15", Name = "VAT 15%", Rate = 0.15m, Type = TaxType.VAT, IsActive = true, EffectiveFrom = new DateTime(2026, 1, 1) };
+            await using (var seed = db.NewContext(null))
+            {
+                seed.GlAccounts.AddRange(income, arControl, foreignVat);
+                seed.Customers.Add(customer);
+                seed.TaxCodes.Add(tax);
+                await seed.SaveChangesAsync();
+            }
+
+            Guid invoiceId;
+            await using (var ctx = db.NewContext(company))
+            {
+                var ar = new ArService(ctx, Gl(ctx));
+                var invoice = await ar.CreateInvoiceAsync(company, customer.Id, Oct15, "USD", 1m,
+                    new[] { new ArInvoiceLineRequest("Service", 1m, 100m, tax.Id, income.Id) }, income.Id);
+                invoiceId = invoice.Id;
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    ar.PostInvoiceAsync(company, invoice.Id, arControl.Id, income.Id));
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    ar.PostInvoiceAsync(company, invoice.Id, arControl.Id, foreignVat.Id));
+            }
+
+            await using (var verify = db.NewContext(company))
+            {
+                var invoice = await verify.ArInvoices.SingleAsync(x => x.Id == invoiceId);
+                Assert.Equal(InvoiceStatus.Draft, invoice.Status);
+                Assert.Null(invoice.VatOutputAccountId);
+                Assert.Null(invoice.JournalEntryId);
+            }
+        }
+
     }
 }
