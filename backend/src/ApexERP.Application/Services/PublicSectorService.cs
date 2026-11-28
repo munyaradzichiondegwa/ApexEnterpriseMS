@@ -47,13 +47,16 @@ namespace ApexERP.Application.Services
         public sealed record BudgetComparisonLine(int LineNumber, string Description, string FundCentreCode,
             string FundCentreName, string AccountCode, string AccountName, string ClassificationCode,
             decimal OriginalBudget, decimal? FinalBudget, decimal? ActualOnComparableBasis,
-            decimal? Variance, decimal? VariancePercent, string? OriginalToFinalExplanation);
+            decimal? Variance, decimal? VariancePercent, string? OriginalToFinalExplanation,
+            Guid BudgetVersionLineId);
         public sealed record BudgetComparisonReport(Guid OriginalBudgetVersionId, Guid? FinalBudgetVersionId,
             int FinancialYear, string Currency, string AccountingBasis, string ClassificationBasis,
             string EntityScope, DateTime PeriodStart, DateTime PeriodEnd, bool FinalBudgetAvailable,
             bool ComparableActualsAvailable, string ComparabilityMessage,
             IReadOnlyList<BudgetComparisonLine> Lines,
-            IReadOnlyList<PublicSectorBudgetReconciliation> Reconciliations);
+            IReadOnlyList<PublicSectorBudgetReconciliation> Reconciliations,
+            IReadOnlyList<PublicSectorBudgetVarianceExplanation> VarianceExplanations,
+            bool VarianceExplanationsComplete);
 
         public async Task<PublicSectorBudgetVersion> CreateBudgetVersionAsync(Guid companyId, int financialYear,
             PublicSectorBudgetVersionKind kind, string currency, AccountingBasis accountingBasis,
@@ -1093,16 +1096,117 @@ namespace ApexERP.Application.Services
                     finalAmount.HasValue && actual.HasValue && finalAmount.Value != 0m
                         ? Math.Round(variance!.Value / finalAmount.Value * 100m, 2) : null,
                     dimension.OriginalLine == null ? "Line introduced in the final approved budget." :
-                    dimension.FinalLine == null ? "Line removed from the final approved budget." : final?.AmendmentReason));
+                    dimension.FinalLine == null ? "Line removed from the final approved budget." : final?.AmendmentReason,
+                    (dimension.FinalLine ?? dimension.OriginalLine!).Id));
             }
 
             var reconciliations = await _db.PublicSectorBudgetReconciliations
                 .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear && x.Status == PublicSectorBudgetReconciliationStatus.Approved)
                 .OrderBy(x => x.Type).ThenBy(x => x.Description).ToListAsync(ct);
+            var varianceExplanations = await _db.PublicSectorBudgetVarianceExplanations
+                .Where(x => x.CompanyId == companyId && x.BudgetVersionId == final!.Id)
+                .OrderBy(x => x.CreatedAt).ToListAsync(ct);
+            var explanationComplete = comparable && rows.Where(x =>
+                x.ActualOnComparableBasis.HasValue && x.Variance.HasValue && x.Variance.Value != 0m)
+                .All(line => varianceExplanations.Any(explanation =>
+                    explanation.BudgetVersionLineId == line.BudgetVersionLineId &&
+                    explanation.Status == "Approved" && explanation.VarianceAmount == line.Variance!.Value));
             return new BudgetComparisonReport(original.Id, final?.Id, financialYear, original.Currency,
                 original.AccountingBasis.ToString(), original.ClassificationBasis, original.EntityScope,
                 original.PeriodStart, original.PeriodEnd, final != null, comparable,
-                comparabilityMessage, rows, reconciliations);
+                comparabilityMessage, rows, reconciliations, varianceExplanations, explanationComplete);
+        }
+
+
+        private async Task<BudgetComparisonLine> GetCurrentBudgetVarianceLineAsync(
+            Guid companyId, Guid budgetVersionId, Guid budgetVersionLineId, CancellationToken ct)
+        {
+            var version = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
+                x.Id == budgetVersionId && x.CompanyId == companyId &&
+                x.Status == PublicSectorBudgetVersionStatus.Approved, ct)
+                ?? throw new InvalidOperationException("An approved final budget version is required.");
+            var report = await GetBudgetComparisonAsync(companyId, version.FinancialYear, ct);
+            if (report.FinalBudgetVersionId != budgetVersionId || !report.ComparableActualsAvailable)
+                throw new InvalidOperationException("Variance explanations require the current approved final budget and comparable actuals.");
+            return report.Lines.FirstOrDefault(x => x.BudgetVersionLineId == budgetVersionLineId)
+                ?? throw new InvalidOperationException("The budget line is not part of the current final budget comparison.");
+        }
+
+        public async Task<PublicSectorBudgetVarianceExplanation> CreateBudgetVarianceExplanationAsync(
+            Guid companyId, Guid budgetVersionId, Guid budgetVersionLineId,
+            string explanation, string evidenceReference, Guid actorId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(explanation) || string.IsNullOrWhiteSpace(evidenceReference))
+                throw new InvalidOperationException("A variance explanation and supporting evidence reference are required.");
+            var line = await GetCurrentBudgetVarianceLineAsync(companyId, budgetVersionId, budgetVersionLineId, ct);
+            if (!line.Variance.HasValue || line.Variance.Value == 0m)
+                throw new InvalidOperationException("A variance explanation is only required for a non-zero final-budget-to-actual variance.");
+            if (await _db.PublicSectorBudgetVarianceExplanations.AnyAsync(x =>
+                x.CompanyId == companyId && x.BudgetVersionLineId == budgetVersionLineId, ct))
+                throw new InvalidOperationException("A variance explanation already exists for this approved budget line. Rejected explanations remain as audit history; create a new approved budget version if the variance basis changes.");
+            var item = new PublicSectorBudgetVarianceExplanation
+            {
+                CompanyId = companyId, BudgetVersionId = budgetVersionId,
+                BudgetVersionLineId = budgetVersionLineId, VarianceAmount = line.Variance.Value,
+                Explanation = explanation.Trim(), EvidenceReference = evidenceReference.Trim(),
+                Status = "Draft", CreatedBy = actorId
+            };
+            _db.PublicSectorBudgetVarianceExplanations.Add(item);
+            _audit.Record(companyId, actorId, "PublicSectorBudgetVarianceExplanation.Created", "PublicSector",
+                nameof(PublicSectorBudgetVarianceExplanation), item.Id, null,
+                new { item.BudgetVersionId, item.BudgetVersionLineId, item.VarianceAmount,
+                    item.Explanation, item.EvidenceReference });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorBudgetVarianceExplanation> SubmitBudgetVarianceExplanationAsync(
+            Guid companyId, Guid explanationId, Guid actorId, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorBudgetVarianceExplanations.FirstOrDefaultAsync(x =>
+                x.Id == explanationId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Budget variance explanation not found.");
+            if (item.Status != "Draft" || item.CreatedBy != actorId)
+                throw new InvalidOperationException("Only the preparer may submit a draft variance explanation.");
+            var current = await GetCurrentBudgetVarianceLineAsync(companyId, item.BudgetVersionId, item.BudgetVersionLineId, ct);
+            if (current.Variance != item.VarianceAmount)
+                throw new InvalidOperationException("The actual variance has changed since the explanation was prepared. Recreate the explanation against the current comparison.");
+            item.Status = "PendingReview";
+            item.SubmittedBy = actorId;
+            item.SubmittedAt = DateTime.UtcNow;
+            _audit.Record(companyId, actorId, "PublicSectorBudgetVarianceExplanation.Submitted", "PublicSector",
+                nameof(PublicSectorBudgetVarianceExplanation), item.Id, new { Status = "Draft" },
+                new { item.Status, item.SubmittedBy, item.SubmittedAt });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorBudgetVarianceExplanation> ReviewBudgetVarianceExplanationAsync(
+            Guid companyId, Guid explanationId, Guid reviewerId, bool accepted,
+            string? reviewNote, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorBudgetVarianceExplanations.FirstOrDefaultAsync(x =>
+                x.Id == explanationId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Budget variance explanation not found.");
+            if (item.Status != "PendingReview" || item.CreatedBy == reviewerId || item.SubmittedBy == reviewerId)
+                throw new InvalidOperationException("A pending variance explanation requires an independent reviewer.");
+            if (!accepted && string.IsNullOrWhiteSpace(reviewNote))
+                throw new InvalidOperationException("A reason is required when rejecting a variance explanation.");
+            if (accepted)
+            {
+                var current = await GetCurrentBudgetVarianceLineAsync(companyId, item.BudgetVersionId, item.BudgetVersionLineId, ct);
+                if (current.Variance != item.VarianceAmount)
+                    throw new InvalidOperationException("The actual variance changed after submission. Reject and recreate the explanation against the current comparison.");
+            }
+            item.Status = accepted ? "Approved" : "Rejected";
+            item.ReviewedBy = reviewerId;
+            item.ReviewedAt = DateTime.UtcNow;
+            item.ReviewNote = string.IsNullOrWhiteSpace(reviewNote) ? null : reviewNote.Trim();
+            _audit.Record(companyId, reviewerId, "PublicSectorBudgetVarianceExplanation.Reviewed", "PublicSector",
+                nameof(PublicSectorBudgetVarianceExplanation), item.Id, new { Status = "PendingReview" },
+                new { item.Status, item.ReviewedBy, item.ReviewedAt, item.ReviewNote });
+            await _db.SaveChangesAsync(ct);
+            return item;
         }
 
         public async Task<PublicSectorBudgetAllocation> CreateBudgetAllocationAsync(Guid companyId, Guid fundCentreId,
