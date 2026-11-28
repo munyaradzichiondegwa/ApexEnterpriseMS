@@ -1185,15 +1185,18 @@ namespace ApexERP.Application.Services
                         x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
                     throw new InvalidOperationException("The source AR invoice must have a posted revenue journal.");
                 var invoicedRevenue = await _db.JournalLines.Where(x =>
-                    x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == line.GlAccountId)
+                    x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == line.GlAccountId &&
+                    x.FundCentreId == line.FundCentreId && x.CostCentreId == line.CostCentreId)
                     .SumAsync(x => x.Credit - x.Debit, ct);
                 if (invoicedRevenue != invoice.Total)
                     throw new InvalidOperationException("The posted AR invoice journal does not support the exact revenue classification and amount.");
-                var bank = receipt.BankAccountId.HasValue
-                    ? await _db.BankAccounts.FirstOrDefaultAsync(x => x.Id == receipt.BankAccountId.Value && x.CompanyId == companyId, ct)
-                    : null;
+                var receiptBankCandidates = await _db.BankAccounts.Where(x =>
+                    x.CompanyId == companyId && x.Currency == receipt.Currency &&
+                    _db.JournalLines.Any(j => j.JournalEntryId == receipt.JournalEntryId.Value &&
+                        j.GlAccountId == x.GlAccountId && j.Debit - j.Credit == receipt.Amount)).ToListAsync(ct);
+                var bank = receiptBankCandidates.Count == 1 ? receiptBankCandidates[0] : null;
                 if (bank == null)
-                    throw new InvalidOperationException("The AR receipt must identify a company bank account for cash evidence.");
+                    throw new InvalidOperationException("The posted AR receipt must identify exactly one company bank account through its bank GL journal leg and currency.");
                 var bankLeg = await _db.JournalLines.Where(x =>
                     x.JournalEntryId == receipt.JournalEntryId.Value && x.GlAccountId == bank.GlAccountId)
                     .SumAsync(x => x.Debit - x.Credit, ct);
@@ -1239,11 +1242,13 @@ namespace ApexERP.Application.Services
                     .SumAsync(x => x.Debit - x.Credit, ct);
                 if (invoicedExpense != invoice.Total)
                     throw new InvalidOperationException("The posted AP invoice journal does not support the exact expenditure classification and amount.");
-                var bank = payment.BankAccountId.HasValue
-                    ? await _db.BankAccounts.FirstOrDefaultAsync(x => x.Id == payment.BankAccountId.Value && x.CompanyId == companyId, ct)
-                    : null;
+                var paymentBankCandidates = await _db.BankAccounts.Where(x =>
+                    x.CompanyId == companyId && x.Currency == payment.Currency &&
+                    _db.JournalLines.Any(j => j.JournalEntryId == payment.JournalEntryId.Value &&
+                        j.GlAccountId == x.GlAccountId && j.Credit - j.Debit == payment.Amount)).ToListAsync(ct);
+                var bank = paymentBankCandidates.Count == 1 ? paymentBankCandidates[0] : null;
                 if (bank == null)
-                    throw new InvalidOperationException("The AP payment must identify a company bank account for cash evidence.");
+                    throw new InvalidOperationException("The posted AP payment must identify exactly one company bank account through its bank GL journal leg and currency.");
                 var bankLeg = await _db.JournalLines.Where(x =>
                     x.JournalEntryId == payment.JournalEntryId.Value && x.GlAccountId == bank.GlAccountId)
                     .SumAsync(x => x.Credit - x.Debit, ct);
@@ -1388,9 +1393,11 @@ namespace ApexERP.Application.Services
                 if (invoiceLines.Count != 1 || invoiceLines[0].GlAccountId != actual.GlAccountId ||
                     invoiceLines[0].LineVat != 0m || invoiceLines[0].LineTotal != actual.Amount ||
                     actual.CostCentreId.HasValue) return false;
-                var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
-                    x.Id == receipt.BankAccountId.Value && x.CompanyId == companyId &&
-                    x.Currency == actual.Currency, ct);
+                var receiptBankCandidates = await _db.BankAccounts.Where(x =>
+                    x.CompanyId == companyId && x.Currency == actual.Currency &&
+                    _db.JournalLines.Any(j => j.JournalEntryId == receipt.JournalEntryId.Value &&
+                        j.GlAccountId == x.GlAccountId && j.Debit - j.Credit == receipt.Amount)).ToListAsync(ct);
+                var bank = receiptBankCandidates.Count == 1 ? receiptBankCandidates[0] : null;
                 if (bank == null) return false;
                 var receiptPosted = await _db.JournalEntries.AnyAsync(x =>
                     x.Id == receipt.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct);
@@ -1398,7 +1405,8 @@ namespace ApexERP.Application.Services
                     x.Id == invoice.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct);
                 if (!receiptPosted || !invoicePosted) return false;
                 var revenue = await _db.JournalLines.Where(x =>
-                    x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId)
+                    x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId &&
+                    x.FundCentreId == actual.FundCentreId && x.CostCentreId == actual.CostCentreId)
                     .SumAsync(x => x.Credit - x.Debit, ct);
                 var bankLeg = await _db.JournalLines.Where(x =>
                     x.JournalEntryId == receipt.JournalEntryId.Value && x.GlAccountId == bank.GlAccountId)
@@ -1428,9 +1436,11 @@ namespace ApexERP.Application.Services
                 var invoiceLines = await _db.ApInvoiceLines.Where(x => x.ApInvoiceId == invoice.Id).ToListAsync(ct);
                 if (invoiceLines.Count != 1 || invoiceLines[0].GlAccountId != actual.GlAccountId ||
                     invoiceLines[0].LineTotal != actual.Amount || actual.CostCentreId.HasValue) return false;
-                var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
-                    x.Id == payment.BankAccountId.Value && x.CompanyId == companyId &&
-                    x.Currency == actual.Currency, ct);
+                var paymentBankCandidates = await _db.BankAccounts.Where(x =>
+                    x.CompanyId == companyId && x.Currency == actual.Currency &&
+                    _db.JournalLines.Any(j => j.JournalEntryId == payment.JournalEntryId.Value &&
+                        j.GlAccountId == x.GlAccountId && j.Credit - j.Debit == payment.Amount)).ToListAsync(ct);
+                var bank = paymentBankCandidates.Count == 1 ? paymentBankCandidates[0] : null;
                 if (bank == null) return false;
                 var paymentPosted = await _db.JournalEntries.AnyAsync(x =>
                     x.Id == payment.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct);
