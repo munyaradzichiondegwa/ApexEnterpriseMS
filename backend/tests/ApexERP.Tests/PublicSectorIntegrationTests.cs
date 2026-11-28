@@ -1415,8 +1415,10 @@ namespace ApexERP.Tests
             Assert.Equal(120m, apActual.Amount);
             Assert.Equal(80m, apActual2.Amount);
             Assert.Equal("PAY-SETTLE-001", apActual.SourceReference);
-            Assert.Equal(PublicSectorBudgetActualStatus.Draft, arActual.Status);
+            Assert.Equal(PublicSectorBudgetActualStatus.PendingCertification, arActual.Status);
+            Assert.Equal(PublicSectorBudgetActualStatus.Draft, arActual2.Status);
             Assert.Equal(PublicSectorBudgetActualStatus.Draft, apActual.Status);
+            Assert.Equal(PublicSectorBudgetActualStatus.Draft, apActual2.Status);
 
             foreach (var item in new[] { arActual2, apActual, apActual2 })
                 await service.SubmitBudgetExecutionActualAsync(companyId, item.Id, preparerId);
