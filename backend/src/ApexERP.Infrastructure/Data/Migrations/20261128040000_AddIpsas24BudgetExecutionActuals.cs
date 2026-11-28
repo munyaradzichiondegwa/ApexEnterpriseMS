@@ -76,15 +76,20 @@ BEGIN
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'Budget execution actual evidence is immutable; use a reversal event.' USING ERRCODE = 'restrict_violation';
     END IF;
-    IF (to_jsonb(NEW) - 'Status' - 'CertifiedBy' - 'CertifiedAt' - 'UpdatedAt' - 'UpdatedBy') IS DISTINCT FROM
-       (to_jsonb(OLD) - 'Status' - 'CertifiedBy' - 'CertifiedAt' - 'UpdatedAt' - 'UpdatedBy') THEN
-        RAISE EXCEPTION 'Budget execution actual source evidence cannot be edited.' USING ERRCODE = 'restrict_violation';
-    END IF;
-    IF NEW."Status" <> OLD."Status" AND NOT (
-        (OLD."Status" = 0 AND NEW."Status" = 1) OR
-        (OLD."Status" = 1 AND NEW."Status" IN (2, 3))
-    ) THEN
-        RAISE EXCEPTION 'Invalid budget actual status transition from % to %.', OLD."Status", NEW."Status" USING ERRCODE = 'restrict_violation';
+    IF NEW."Status" = OLD."Status" THEN
+        IF (to_jsonb(NEW) - 'UpdatedAt' - 'UpdatedBy') IS DISTINCT FROM
+           (to_jsonb(OLD) - 'UpdatedAt' - 'UpdatedBy') THEN
+            RAISE EXCEPTION 'Budget execution actual evidence and certification are immutable.' USING ERRCODE = 'restrict_violation';
+        END IF;
+    ELSE
+        IF (to_jsonb(NEW) - 'Status' - 'CertifiedBy' - 'CertifiedAt' - 'UpdatedAt' - 'UpdatedBy') IS DISTINCT FROM
+           (to_jsonb(OLD) - 'Status' - 'CertifiedBy' - 'CertifiedAt' - 'UpdatedAt' - 'UpdatedBy') THEN
+            RAISE EXCEPTION 'Budget execution actual source evidence cannot be edited.' USING ERRCODE = 'restrict_violation';
+        END IF;
+        IF NOT ((OLD."Status" = 0 AND NEW."Status" = 1) OR
+                (OLD."Status" = 1 AND NEW."Status" IN (2, 3))) THEN
+            RAISE EXCEPTION 'Invalid budget actual status transition from % to %.', OLD."Status", NEW."Status" USING ERRCODE = 'restrict_violation';
+        END IF;
     END IF;
     RETURN NEW;
 END;
