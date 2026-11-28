@@ -1127,34 +1127,136 @@ namespace ApexERP.Application.Services
             string currency;
             DateTime sourceDate;
             string sourceReference;
-            if (sourceKind != PublicSectorBudgetActualSourceKind.BankTransaction)
-                throw new InvalidOperationException("Only reconciled bank transactions with a directly mapped posted cash journal are enabled in this phase. AR/AP settlement allocation mapping is not yet implemented.");
-            var source = await _db.BankTransactions.FirstOrDefaultAsync(x =>
-                x.Id == sourceRecordId && x.CompanyId == companyId && x.IsReconciled, ct)
-                ?? throw new InvalidOperationException("A reconciled bank transaction is required as cash evidence.");
-            if (!source.JournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(x =>
-                x.Id == source.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
-                throw new InvalidOperationException("The reconciled bank transaction must be linked to a posted journal entry.");
             if (eventKind != PublicSectorBudgetActualEventKind.CashReceipt &&
                 eventKind != PublicSectorBudgetActualEventKind.CashPayment)
                 throw new InvalidOperationException("A supported cash receipt or cash payment event type is required.");
             var isReceipt = eventKind == PublicSectorBudgetActualEventKind.CashReceipt;
-            amount = isReceipt ? source.Credit : source.Debit;
-            if (amount <= 0m || (isReceipt ? source.Debit != 0m : source.Credit != 0m))
-                throw new InvalidOperationException("The bank transaction direction and amount do not match the selected cash event type.");
-            // Cash receipts/payments may map to revenue/expense or balance-sheet accounts (for example, borrowing or capital acquisitions). The configured cash-flow section, not the GL normal-balance type, determines the statement classification.
-            var mappedJournalAmount = await _db.JournalLines.Where(x =>
-                x.JournalEntryId == source.JournalEntryId.Value && x.GlAccountId == line.GlAccountId &&
-                x.FundCentreId == line.FundCentreId && x.CostCentreId == line.CostCentreId)
-                .SumAsync(x => isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
-            if (mappedJournalAmount != amount)
-                throw new InvalidOperationException("The posted journal does not contain an exact matching amount for this budget line, Fund Centre and cost centre. The source cannot be assigned to an unsupported budget dimension.");
-            var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
-                x.Id == source.BankAccountId && x.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("The source bank account is not available to this company.");
-            currency = bank.Currency;
-            sourceDate = source.TransactionDate;
-            sourceReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
+
+            if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
+            {
+                var source = await _db.BankTransactions.FirstOrDefaultAsync(x =>
+                    x.Id == sourceRecordId && x.CompanyId == companyId && x.IsReconciled, ct)
+                    ?? throw new InvalidOperationException("A reconciled bank transaction is required as cash evidence.");
+                if (!source.JournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(x =>
+                    x.Id == source.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                    throw new InvalidOperationException("The reconciled bank transaction must be linked to a posted journal entry.");
+                amount = isReceipt ? source.Credit : source.Debit;
+                if (amount <= 0m || (isReceipt ? source.Debit != 0m : source.Credit != 0m))
+                    throw new InvalidOperationException("The bank transaction direction and amount do not match the selected cash event type.");
+                var mappedJournalAmount = await _db.JournalLines.Where(x =>
+                    x.JournalEntryId == source.JournalEntryId.Value && x.GlAccountId == line.GlAccountId &&
+                    x.FundCentreId == line.FundCentreId && x.CostCentreId == line.CostCentreId)
+                    .SumAsync(x => isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
+                if (mappedJournalAmount != amount)
+                    throw new InvalidOperationException("The posted journal does not contain an exact matching amount for this budget line, Fund Centre and cost centre.");
+                var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
+                    x.Id == source.BankAccountId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The source bank account is not available to this company.");
+                currency = bank.Currency;
+                sourceDate = source.TransactionDate;
+                sourceReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
+            }
+            else if (sourceKind == PublicSectorBudgetActualSourceKind.ArReceipt && isReceipt)
+            {
+                var receipt = await _db.ArReceipts.FirstOrDefaultAsync(x =>
+                    x.Id == sourceRecordId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The AR receipt was not found in this company.");
+                if (!receipt.JournalEntryId.HasValue ||
+                    !await _db.JournalEntries.AnyAsync(x => x.Id == receipt.JournalEntryId.Value &&
+                        x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                    throw new InvalidOperationException("The AR receipt must be posted to the general ledger before budget capture.");
+                var allocations = await _db.ArReceiptAllocations.Where(x => x.ArReceiptId == receipt.Id).ToListAsync(ct);
+                if (allocations.Count != 1 || allocations[0].AmountApplied != receipt.Amount)
+                    throw new InvalidOperationException("Only a fully allocated AR receipt applied to one invoice is supported. Split or unapplied receipts require an approved allocation adapter.");
+                var invoice = await _db.ArInvoices.FirstOrDefaultAsync(x =>
+                    x.Id == allocations[0].ArInvoiceId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The allocated AR invoice is not available to this company.");
+                var invoiceLines = await _db.ArInvoiceLines.Where(x => x.ArInvoiceId == invoice.Id).ToListAsync(ct);
+                if (invoice.CustomerId != receipt.CustomerId || invoice.Status != InvoiceStatus.Paid ||
+                    invoice.FundCentreId != line.FundCentreId || invoiceLines.Count != 1 ||
+                    invoice.VatAmount != 0m || invoiceLines[0].LineVat != 0m ||
+                    invoiceLines[0].GlAccountId != line.GlAccountId ||
+                    invoiceLines[0].LineTotal != receipt.Amount || invoice.Total != receipt.Amount ||
+                    line.CostCentreId.HasValue)
+                    throw new InvalidOperationException("AR cash capture requires one fully settled, tax-free invoice line with an explicit matching Fund Centre and GL budget mapping; cost-centre and multi-line allocations are not yet supported.");
+                if (!invoice.JournalEntryId.HasValue ||
+                    !await _db.JournalEntries.AnyAsync(x => x.Id == invoice.JournalEntryId.Value &&
+                        x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                    throw new InvalidOperationException("The source AR invoice must have a posted revenue journal.");
+                var invoicedRevenue = await _db.JournalLines.Where(x =>
+                    x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == line.GlAccountId)
+                    .SumAsync(x => x.Credit - x.Debit, ct);
+                if (invoicedRevenue != invoice.Total)
+                    throw new InvalidOperationException("The posted AR invoice journal does not support the exact revenue classification and amount.");
+                var bank = receipt.BankAccountId.HasValue
+                    ? await _db.BankAccounts.FirstOrDefaultAsync(x => x.Id == receipt.BankAccountId.Value && x.CompanyId == companyId, ct)
+                    : null;
+                if (bank == null)
+                    throw new InvalidOperationException("The AR receipt must identify a company bank account for cash evidence.");
+                var bankLeg = await _db.JournalLines.Where(x =>
+                    x.JournalEntryId == receipt.JournalEntryId.Value && x.GlAccountId == bank.GlAccountId)
+                    .SumAsync(x => x.Debit - x.Credit, ct);
+                if (bankLeg != receipt.Amount)
+                    throw new InvalidOperationException("The posted AR receipt journal does not contain the exact bank debit for the receipt amount.");
+                amount = receipt.Amount;
+                currency = receipt.Currency;
+                sourceDate = receipt.ReceiptDate;
+                sourceReference = string.IsNullOrWhiteSpace(receipt.ReceiptNo) ? receipt.Id.ToString("N") : receipt.ReceiptNo;
+            }
+            else if (sourceKind == PublicSectorBudgetActualSourceKind.ApPayment && !isReceipt)
+            {
+                var payment = await _db.ApPayments.FirstOrDefaultAsync(x =>
+                    x.Id == sourceRecordId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The AP payment was not found in this company.");
+                if (!payment.JournalEntryId.HasValue ||
+                    !await _db.JournalEntries.AnyAsync(x => x.Id == payment.JournalEntryId.Value &&
+                        x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                    throw new InvalidOperationException("The AP payment must be posted to the general ledger before budget capture.");
+                if (!payment.PreparedBy.HasValue || !payment.AuthorisedBy.HasValue ||
+                    payment.PreparedBy == payment.AuthorisedBy || !payment.AuthorisedAt.HasValue)
+                    throw new InvalidOperationException("The AP payment requires a recorded independent authorisation before budget capture.");
+                var allocations = await _db.ApPaymentAllocations.Where(x => x.ApPaymentId == payment.Id).ToListAsync(ct);
+                if (allocations.Count != 1 || allocations[0].AmountApplied != payment.Amount)
+                    throw new InvalidOperationException("Only a fully allocated AP payment applied to one invoice is supported. Split, partial and withholding-tax settlements require an approved allocation adapter.");
+                var invoice = await _db.ApInvoices.FirstOrDefaultAsync(x =>
+                    x.Id == allocations[0].ApInvoiceId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The allocated AP invoice is not available to this company.");
+                var invoiceLines = await _db.ApInvoiceLines.Where(x => x.ApInvoiceId == invoice.Id).ToListAsync(ct);
+                if (invoice.SupplierId != payment.SupplierId || invoice.Status != InvoiceStatus.Paid ||
+                    invoice.FundCentreId != line.FundCentreId || invoiceLines.Count != 1 ||
+                    invoice.VatAmount != 0m || invoice.WhtAmount != 0m ||
+                    invoiceLines[0].GlAccountId != line.GlAccountId ||
+                    invoiceLines[0].LineTotal != payment.Amount || invoice.Total != payment.Amount ||
+                    line.CostCentreId.HasValue)
+                    throw new InvalidOperationException("AP cash capture requires one fully settled, tax-free invoice line with an explicit matching Fund Centre and GL budget mapping; cost-centre and multi-line allocations are not yet supported.");
+                if (!invoice.JournalEntryId.HasValue ||
+                    !await _db.JournalEntries.AnyAsync(x => x.Id == invoice.JournalEntryId.Value &&
+                        x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                    throw new InvalidOperationException("The source AP invoice must have a posted expense journal.");
+                var invoicedExpense = await _db.JournalLines.Where(x =>
+                    x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == line.GlAccountId)
+                    .SumAsync(x => x.Debit - x.Credit, ct);
+                if (invoicedExpense != invoice.Total)
+                    throw new InvalidOperationException("The posted AP invoice journal does not support the exact expenditure classification and amount.");
+                var bank = payment.BankAccountId.HasValue
+                    ? await _db.BankAccounts.FirstOrDefaultAsync(x => x.Id == payment.BankAccountId.Value && x.CompanyId == companyId, ct)
+                    : null;
+                if (bank == null)
+                    throw new InvalidOperationException("The AP payment must identify a company bank account for cash evidence.");
+                var bankLeg = await _db.JournalLines.Where(x =>
+                    x.JournalEntryId == payment.JournalEntryId.Value && x.GlAccountId == bank.GlAccountId)
+                    .SumAsync(x => x.Credit - x.Debit, ct);
+                if (bankLeg != payment.Amount)
+                    throw new InvalidOperationException("The posted AP payment journal does not contain the exact bank credit for the payment amount.");
+                amount = payment.Amount;
+                currency = payment.Currency;
+                sourceDate = payment.PaymentDate;
+                sourceReference = string.IsNullOrWhiteSpace(payment.PaymentNo) ? payment.Id.ToString("N") : payment.PaymentNo;
+            }
+            else
+            {
+                throw new InvalidOperationException("The selected cash event type is not supported by the specified source adapter.");
+            }
 
             if (effectiveDate.Date != sourceDate.Date)
                 throw new InvalidOperationException("The budget effective date must match the reconciled bank transaction date. Report timing differences through the separately approved IPSAS 24 reconciliation workflow.");
