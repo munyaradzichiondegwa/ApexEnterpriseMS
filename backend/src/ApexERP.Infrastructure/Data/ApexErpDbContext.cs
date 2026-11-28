@@ -388,8 +388,8 @@ namespace ApexERP.Infrastructure.Data
                  .HasIndex(x => new { x.CompanyId, x.BudgetVersionId })
                 .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
             modelBuilder.Entity<PublicSectorBudgetVarianceExplanation>()
-                .HasIndex(x => new { x.CompanyId, x.BudgetVersionLineId }).IsUnique()
-                .HasDatabaseName("UX_PublicSectorBudgetVarianceExplanation_Line");
+                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionLineId })
+                .HasDatabaseName("IX_PublicSectorBudgetVarianceExplanation_Line");
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
                 .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId, x.BudgetExecutionActualId })
                 .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
