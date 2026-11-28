@@ -13,7 +13,7 @@ public sealed class BankStatementEvidenceValidatorTests
 
     private static BankStatementEvidenceEnvelope Envelope(
         string? digest = null,
-        BankStatementAuthenticationMethod method = BankStatementAuthenticationMethod.TrustedBankApi,
+        BankStatementAuthenticationMethod method = BankStatementAuthenticationMethod.IndependentBankConfirmation,
         bool verified = true,
         long? byteLength = null) =>
         new(
