@@ -3737,6 +3737,42 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashSourceSubmission", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("ExpectedCashSourceId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<DateTime>("PeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<int>("RecordCount").HasColumnType("integer");
+                    b.Property<decimal>("ControlTotal").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("OpeningBalance").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("ClosingBalance").HasColumnType("numeric(20,6)");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ReviewedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ReviewedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ReviewNote").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("CompanyId", "ExpectedCashSourceId")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorCashSourceSubmission_Source");
+                    b.ToTable("PublicSectorCashSourceSubmissions", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+                            t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_RecordCount", "\"RecordCount\" >= 0");
+                            t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Currency", "char_length(\"Currency\") = 3");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
@@ -3799,6 +3835,22 @@ namespace ApexERP.Infrastructure.Data.Migrations
                             t.HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Counts",
                                 "\"ObservedBankTransactionCount\" >= 0 AND \"ObservedArReceiptCount\" >= 0 AND \"ObservedApPaymentCount\" >= 0");
                         });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashSourceSubmission", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", null)
+                        .WithMany()
+                        .HasForeignKey("ExpectedCashSourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashSourceSubmission_ExpectedSource")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashSourceSubmission_BudgetVersion")
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
