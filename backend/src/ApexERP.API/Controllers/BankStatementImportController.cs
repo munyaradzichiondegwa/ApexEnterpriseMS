@@ -69,7 +69,7 @@ public sealed class BankStatementImportController : ApiControllerBase
             var sha = Convert.ToHexString(SHA256.HashData(originalBytes)).ToLowerInvariant();
             var mediaType = string.IsNullOrWhiteSpace(req.File.ContentType)
                 ? "text/csv" : req.File.ContentType.Trim();
-            var fileName = Path.GetFileName(req.File.FileName.Replace('\\\\', '/'));
+            var fileName = Path.GetFileName(req.File.FileName.Replace('\\', '/'));
             if (string.IsNullOrWhiteSpace(fileName)) fileName = "bank-statement.csv";
             if (fileName.Length > 255 || mediaType.Length > 128)
                 return BadRequest(new { error = "File name or media type exceeds the supported metadata length." });
