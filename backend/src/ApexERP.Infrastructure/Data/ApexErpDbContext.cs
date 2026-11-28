@@ -678,6 +678,9 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_GlAccount");
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasIndex(x => x.ExpectedCashSourceId)
+                .HasDatabaseName("IX_PublicSectorCashSourceSubmissions_ExpectedCashSourceId");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
                 .HasIndex(x => new { x.CompanyId, x.ExpectedCashSourceId }).IsUnique()
                 .HasDatabaseName("UX_PublicSectorCashSourceSubmission_Source");
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
