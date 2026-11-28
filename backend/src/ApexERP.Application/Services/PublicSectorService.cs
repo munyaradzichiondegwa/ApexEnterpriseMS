@@ -2700,37 +2700,76 @@ namespace ApexERP.Application.Services
                         invoice.Total < allocation.AmountApplied || invoice.Outstanding < 0m ||
                         (invoice.Status == InvoiceStatus.Paid && invoice.Outstanding > 0.000001m) ||
                         (invoice.Status == InvoiceStatus.Partial && invoice.Outstanding <= 0m) ||
-                        invoice.VatAmount != 0m || !invoice.JournalEntryId.HasValue ||
+                        !invoice.JournalEntryId.HasValue ||
                         !await _db.JournalEntries.AnyAsync(x => x.Id == invoice.JournalEntryId.Value &&
                             x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
-                        throw new InvalidOperationException("Split AR capture currently requires fully settled, tax-free invoices with an explicit Fund Centre and posted revenue journals.");
+                        throw new InvalidOperationException("AR capture requires a posted invoice, valid customer settlement and explicit Fund Centre.");
                     var invoiceLines = await _db.ArInvoiceLines.Where(x => x.ArInvoiceId == invoice.Id).ToListAsync(ct);
-                    if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
-                        invoiceLines.Sum(x => x.LineTotal) != invoice.Total)
-                        throw new InvalidOperationException("AR invoice lines must reconcile exactly to the fully settled tax-free invoice total.");
-                    var invoiceDimensions = invoiceLines.Select(x => (x.GlAccountId, x.CostCentreId)).Distinct().ToArray();
-                    if (allocation.AmountApplied < invoice.Total && invoiceDimensions.Length > 1)
-                        throw new InvalidOperationException("A partial AR settlement across multiple GL/cost-centre allocations requires explicit settlement-line allocation.");
-                    var expectedByAccount = allocation.AmountApplied < invoice.Total
-                        ? invoiceDimensions[0].GlAccountId == line.GlAccountId &&
-                            invoiceDimensions[0].CostCentreId == line.CostCentreId ? allocation.AmountApplied : 0m
-                        : invoiceLines.Where(x => x.GlAccountId == line.GlAccountId &&
-                            x.CostCentreId == line.CostCentreId).Sum(x => x.LineTotal);
-                    if (invoice.FundCentreId == line.FundCentreId && expectedByAccount > 0m)
+                    var taxComponents = await _db.InvoiceTaxComponents.Where(x => x.CompanyId == companyId &&
+                        x.InvoiceKind == "AR" && x.InvoiceId == invoice.Id).ToListAsync(ct);
+                    if (invoiceLines.Count == 0 || invoiceLines.Sum(x => x.LineTotal) != invoice.Total ||
+                        taxComponents.Sum(x => x.Amount) != invoice.VatAmount)
+                        throw new InvalidOperationException("AR invoice lines and immutable tax-component snapshots must reconcile to the posted invoice.");
+                    foreach (var taxGroup in taxComponents.GroupBy(x => x.JournalLineId))
                     {
-                        var postedRevenue = await _db.JournalLines.Where(x =>
-                            x.JournalEntryId == invoice.JournalEntryId.Value &&
-                            x.GlAccountId == line.GlAccountId && x.FundCentreId == line.FundCentreId &&
-                            x.CostCentreId == line.CostCentreId)
-                            .SumAsync(x => x.Credit - x.Debit, ct);
-                        if (postedRevenue != invoiceLines.Where(x => x.GlAccountId == line.GlAccountId &&
-                            x.CostCentreId == line.CostCentreId).Sum(x => x.LineTotal))
-                            throw new InvalidOperationException("The posted AR invoice revenue journal does not support the selected GL/Fund Centre allocation.");
-                        amount += expectedByAccount;
+                        var taxJournalLine = await _db.JournalLines.SingleOrDefaultAsync(x =>
+                            x.Id == taxGroup.Key && x.JournalEntryId == invoice.JournalEntryId.Value &&
+                            x.TaxCodeId == taxGroup.First().TaxCodeId && x.GlAccountId == taxGroup.First().GlAccountId, ct);
+                        if (taxJournalLine == null || taxJournalLine.Credit - taxJournalLine.Debit != taxGroup.Sum(x => x.Amount))
+                            throw new InvalidOperationException("AR tax components do not reconcile to their exact posted journal line.");
+                    }
+                    var componentAllocations = await _db.SettlementComponentAllocations.Where(x =>
+                        x.CompanyId == companyId && x.SettlementKind == "AR" &&
+                        x.SettlementAllocationId == allocation.Id && x.InvoiceId == invoice.Id).ToListAsync(ct);
+                    if (componentAllocations.Count == 0 || componentAllocations.Sum(x => x.AmountApplied) != allocation.AmountApplied)
+                        throw new InvalidOperationException("AR receipt settlement must be explicitly allocated to invoice lines and tax components.");
+                    foreach (var componentAllocation in componentAllocations)
+                    {
+                        Guid componentGl;
+                        Guid componentFund;
+                        Guid? componentCost;
+                        if (componentAllocation.ComponentKind == SettlementComponentKind.InvoiceLine)
+                        {
+                            var invoiceLine = invoiceLines.SingleOrDefault(x => x.Id == componentAllocation.InvoiceLineId)
+                                ?? throw new InvalidOperationException("AR settlement references an invoice line outside its invoice.");
+                            componentGl = invoiceLine.GlAccountId;
+                            componentFund = invoice.FundCentreId.Value;
+                            componentCost = invoiceLine.CostCentreId;
+                            var postedRevenue = await _db.JournalLines.Where(x =>
+                                x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == componentGl &&
+                                x.FundCentreId == componentFund && x.CostCentreId == componentCost)
+                                .SumAsync(x => x.Credit - x.Debit, ct);
+                            if (postedRevenue != invoiceLines.Where(x => x.GlAccountId == componentGl &&
+                                x.CostCentreId == componentCost).Sum(x => x.LineSubtotal))
+                                throw new InvalidOperationException("The AR invoice revenue journal does not support the selected invoice-line dimensions.");
+                        }
+                        else
+                        {
+                            var tax = taxComponents.SingleOrDefault(x => x.Id == componentAllocation.TaxComponentId)
+                                ?? throw new InvalidOperationException("AR settlement references a tax component outside its invoice.");
+                            var policy = await GetApprovedTaxBudgetPolicyAsync(companyId, tax, receipt.ReceiptDate, ct);
+                            if (policy.Treatment == TaxBudgetTreatment.ExcludeFromBudgetActual) continue;
+                            if (policy.Treatment == TaxBudgetTreatment.SeparateClassification)
+                            {
+                                componentGl = policy.BudgetGlAccountId!.Value;
+                                componentFund = policy.FundCentreId!.Value;
+                                componentCost = policy.CostCentreId;
+                            }
+                            else
+                            {
+                                var invoiceLine = invoiceLines.Single(x => x.Id == tax.InvoiceLineId);
+                                componentGl = invoiceLine.GlAccountId;
+                                componentFund = invoice.FundCentreId.Value;
+                                componentCost = invoiceLine.CostCentreId;
+                            }
+                        }
+                        if (componentGl == line.GlAccountId && componentFund == line.FundCentreId &&
+                            componentCost == line.CostCentreId)
+                            amount += componentAllocation.AmountApplied;
                     }
                 }
                 if (amount <= 0m)
-                    throw new InvalidOperationException("The selected budget line has no supported AR invoice-line allocation. VAT and withholding-tax allocations still require explicit tax-line mapping.");
+                    throw new InvalidOperationException("The selected budget line has no amount under the approved AR tax-treatment policy.");
                 var receiptBankCandidates = await _db.BankAccounts.Where(x =>
                     x.CompanyId == companyId && x.Currency == receipt.Currency &&
                     _db.JournalLines.Any(j => j.JournalEntryId == receipt.JournalEntryId.Value &&
