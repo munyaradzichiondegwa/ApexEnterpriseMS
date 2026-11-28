@@ -1607,16 +1607,21 @@ namespace ApexERP.Application.Services
                 var registerAttestation = await _db.PublicSectorExpectedCashSourceRegisterAttestations
                     .Where(x => x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id)
                     .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+                var sourceMappingsComplete = await AreExpectedCashSourceMappingsCompleteAsync(
+                    companyId, actualVersion.Id, ct);
                 var registerCompletenessCertified = registerAttestation != null &&
                     registerAttestation.Status == "Certified" &&
                     registerAttestation.CertifiedBy.HasValue && registerAttestation.CertifiedAt.HasValue &&
                     registerAttestation.ExpectedSourceCount == expectedSources.Count &&
                     registerAttestation.EntityScope == actualVersion.EntityScope &&
-                    sourceRegisterApproved && everyExpectedSourceReviewed && noOrphanOrUnreviewedSubmissions;
+                    sourceRegisterApproved && everyExpectedSourceReviewed &&
+                    noOrphanOrUnreviewedSubmissions && sourceMappingsComplete;
                 if (!sourceRegisterApproved)
                     comparabilityIssues.Add("The approved expected cash-source register is missing or contains unapproved entries.");
                 if (!everyExpectedSourceReviewed || !noOrphanOrUnreviewedSubmissions)
                     comparabilityIssues.Add("One or more expected cash sources lack independently reviewed source control totals or record-level reconciliation.");
+                if (!sourceMappingsComplete)
+                    comparabilityIssues.Add("The expected-source register omits a company bank account or an AR/AP control-account mapping discovered from company master data.");
                 if (!registerCompletenessCertified)
                     comparabilityIssues.Add("Independent expected-source register completeness certification is missing, stale or inconsistent with the approved budget scope.");
 
@@ -1624,7 +1629,7 @@ namespace ApexERP.Application.Services
                     companyId, actualVersion.Id, ct);
                 var cashSourceControlsComplete = sourceRegisterApproved && everyExpectedSourceReviewed &&
                     noOrphanOrUnreviewedSubmissions && liveSourcePopulationsComplete &&
-                    registerCompletenessCertified && liveSourceRegisterComplete;
+                    sourceMappingsComplete && registerCompletenessCertified && liveSourceRegisterComplete;
                 if (!liveSourcePopulationsComplete || !liveSourceRegisterComplete)
                     comparabilityIssues.Add("The live source record population, control total, currency or independent certification no longer agrees with the reviewed source reconciliation.");
                 if (uncapturedMovements == 0 && missingArSettlementCoverage == 0 &&
