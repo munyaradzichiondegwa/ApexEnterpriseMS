@@ -2840,6 +2840,8 @@ namespace ApexERP.Application.Services
                         if (taxJournalLine == null || postedTaxAmount != taxGroup.Sum(x => x.Amount))
                             throw new InvalidOperationException("AP tax components do not reconcile to their exact posted journal line.");
                     }
+                    foreach (var whtComponent in taxComponents.Where(x => x.TaxType == TaxType.WHT))
+                        await GetApprovedTaxBudgetPolicyAsync(companyId, whtComponent, payment.PaymentDate, ct);
                     var componentAllocations = await _db.SettlementComponentAllocations.Where(x =>
                         x.CompanyId == companyId && x.SettlementKind == "AP" &&
                         x.SettlementAllocationId == allocation.Id && x.InvoiceId == invoice.Id).ToListAsync(ct);
@@ -3475,6 +3477,11 @@ namespace ApexERP.Application.Services
                         var postedTax = journalTax == null ? 0m : taxGroup.First().TaxType == TaxType.WHT
                             ? journalTax.Credit - journalTax.Debit : journalTax.Debit - journalTax.Credit;
                         if (journalTax == null || postedTax != taxGroup.Sum(x => x.Amount)) return false;
+                    }
+                    foreach (var whtComponent in taxComponents.Where(x => x.TaxType == TaxType.WHT))
+                    {
+                        try { await GetApprovedTaxBudgetPolicyAsync(companyId, whtComponent, payment.PaymentDate, ct); }
+                        catch (InvalidOperationException) { return false; }
                     }
                     var details = await _db.SettlementComponentAllocations.Where(x =>
                         x.CompanyId == companyId && x.SettlementKind == "AP" &&
