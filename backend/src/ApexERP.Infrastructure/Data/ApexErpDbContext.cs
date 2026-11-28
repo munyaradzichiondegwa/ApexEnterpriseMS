@@ -385,7 +385,10 @@ namespace ApexERP.Infrastructure.Data
                 .IsUnique().HasFilter("\"IsExcluded\" = TRUE")
                 .HasDatabaseName("UX_CashSourceReconciliationLine_Exclusion");
             modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
-                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionId })
+                .HasIndex(x => x.BudgetVersionId)
+                .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersionId");
+            modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId })
                 .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
             modelBuilder.Entity<PublicSectorBudgetVarianceExplanation>()
                  .HasIndex(x => new { x.CompanyId, x.BudgetVersionLineId })
