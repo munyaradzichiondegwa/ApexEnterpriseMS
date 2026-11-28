@@ -217,13 +217,12 @@ namespace ApexERP.Application.Services
         public async Task<PublicSectorBudgetReconciliation> CreateBudgetReconciliationAsync(Guid companyId,
             int financialYear, PublicSectorBudgetReconciliationType type, string description, string statementSection,
             decimal operatingAmount, decimal investingAmount, decimal financingAmount, string supportingReference,
-            Guid actorId, CancellationToken ct = default, decimal revenueAmount = 0m, decimal expenseAmount = 0m)
+            Guid actorId, CancellationToken ct = default, decimal revenueAmount = 0m, decimal expenseAmount = 0m,
+            bool isNoDifferenceAttestation = false)
         {
             if (financialYear < 2000 || financialYear > 2200 || string.IsNullOrWhiteSpace(description) ||
-                string.IsNullOrWhiteSpace(statementSection) || string.IsNullOrWhiteSpace(supportingReference) ||
-                (revenueAmount == 0m && expenseAmount == 0m && operatingAmount == 0m &&
-                    investingAmount == 0m && financingAmount == 0m))
-                throw new InvalidOperationException("A valid year, description, statement section, supporting reference and non-zero reconciliation amount are required.");
+                string.IsNullOrWhiteSpace(statementSection) || string.IsNullOrWhiteSpace(supportingReference))
+                throw new InvalidOperationException("A valid year, description, statement section and supporting reference are required.");
             var approvedBudget = await _db.PublicSectorBudgetVersions.Where(x =>
                     x.CompanyId == companyId && x.FinancialYear == financialYear &&
                     x.Status == PublicSectorBudgetVersionStatus.Approved)
@@ -233,9 +232,16 @@ namespace ApexERP.Application.Services
             if (approvedBudget.AccountingBasis != AccountingBasis.Accrual &&
                 approvedBudget.AccountingBasis != AccountingBasis.Cash)
                 throw new InvalidOperationException("This budget accounting basis does not yet have an approved IPSAS 24 reconciliation adapter.");
-            if (approvedBudget.AccountingBasis == AccountingBasis.Cash &&
-                (revenueAmount != 0m || expenseAmount != 0m))
-                throw new InvalidOperationException("Cash-basis IPSAS 24 reconciliations must reconcile net cash flows by operating, investing and financing activities; revenue and expense reconciliation totals apply to accrual-basis budgets only.");
+            var allAmountsZero = revenueAmount == 0m && expenseAmount == 0m &&
+                operatingAmount == 0m && investingAmount == 0m && financingAmount == 0m;
+            if (allAmountsZero != isNoDifferenceAttestation)
+                throw new InvalidOperationException("A zero-value reconciliation must be explicitly recorded as a no-difference attestation; a normal reconciliation must contain a signed adjustment.");
+            if (isNoDifferenceAttestation &&
+                !new[] { "Revenue", "Expense" }.Contains(statementSection.Trim(), StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A no-difference attestation must explicitly cover Revenue or Expense.");
+            // Cash-budget actuals are on the budget's cash basis. Revenue/expense adjustments
+            // reconcile those comparable amounts to accrual financial-statement actuals;
+            // operating/investing/financing adjustments remain available for the separate cash-flow bridge.
             var reconciliation = new PublicSectorBudgetReconciliation
             {
                 CompanyId = companyId, FinancialYear = financialYear, Type = type,
@@ -243,6 +249,7 @@ namespace ApexERP.Application.Services
                 RevenueAmount = revenueAmount, ExpenseAmount = expenseAmount,
                 OperatingAmount = operatingAmount, InvestingAmount = investingAmount,
                 FinancingAmount = financingAmount, SupportingReference = supportingReference.Trim(),
+                IsNoDifferenceAttestation = isNoDifferenceAttestation,
                 Status = PublicSectorBudgetReconciliationStatus.Draft, CreatedBy = actorId
             };
             _db.PublicSectorBudgetReconciliations.Add(reconciliation);
@@ -252,7 +259,7 @@ namespace ApexERP.Application.Services
                     reconciliation.StatementSection, reconciliation.RevenueAmount,
                     reconciliation.ExpenseAmount, reconciliation.OperatingAmount,
                     reconciliation.InvestingAmount, reconciliation.FinancingAmount,
-                    reconciliation.SupportingReference });
+                    reconciliation.SupportingReference, reconciliation.IsNoDifferenceAttestation });
             await _db.SaveChangesAsync(ct);
             return reconciliation;
         }
