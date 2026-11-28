@@ -81,6 +81,21 @@ namespace ApexERP.Application.Services
                 envelope.OriginalBytes.Length);
         }
 
+        public static BankStatementEvidenceValidation ValidateStoredBytes(
+            ReadOnlyMemory<byte> originalBytes, string? expectedSha256, long declaredByteLength)
+        {
+            if (originalBytes.IsEmpty || declaredByteLength != originalBytes.Length)
+                return Reject("Stored statement bytes are empty or their byte length no longer matches the retained metadata.");
+            if (!TryParseSha256(expectedSha256, out var expectedDigest))
+                return Reject("Stored statement SHA-256 metadata is malformed.");
+            var actualDigest = SHA256.HashData(originalBytes.Span);
+            if (!CryptographicOperations.FixedTimeEquals(expectedDigest, actualDigest))
+                return Reject("Retained statement bytes no longer match their original SHA-256 digest.");
+            return new BankStatementEvidenceValidation(
+                true, "Retained statement bytes match their original digest.",
+                Convert.ToHexString(actualDigest).ToLowerInvariant(), originalBytes.Length);
+        }
+
         public static BankStatementEvidenceValidation Validate(
             BankStatementEvidenceEnvelope envelope,
             IReadOnlySet<Guid> existingImportBatchIds,
