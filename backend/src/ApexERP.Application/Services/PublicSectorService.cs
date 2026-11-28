@@ -1872,6 +1872,64 @@ namespace ApexERP.Application.Services
                 var pendingCashActuals = cashActuals.Count(x =>
                     x.Status == PublicSectorBudgetActualStatus.Draft ||
                     x.Status == PublicSectorBudgetActualStatus.PendingCertification);
+                var pendingModifiedCashEvents = await _db.ModifiedCashRecognitionLedgerEvents.CountAsync(x =>
+                    x.CompanyId == companyId && x.EventDate >= actualVersion.PeriodStart &&
+                    x.EventDate < actualVersion.PeriodEnd &&
+                    (x.Status == ModifiedCashLedgerEventStatus.Draft ||
+                     x.Status == ModifiedCashLedgerEventStatus.PendingCertification), ct);
+                if (pendingModifiedCashEvents > 0)
+                    comparabilityIssues.Add($"Modified-cash recognition certification is incomplete: {pendingModifiedCashEvents} ledger events remain draft or pending certification.");
+
+                var modifiedCashEvents = await (
+                    from ledger in _db.ModifiedCashRecognitionLedgerEvents
+                    join policy in _db.ModifiedCashRecognitionPolicies on ledger.PolicyId equals policy.Id
+                    join mapping in _db.ModifiedCashRecognitionMappings on
+                        new { ledger.PolicyId, ledger.SourceEventKind } equals
+                        new { mapping.PolicyId, mapping.SourceEventKind }
+                    where ledger.CompanyId == companyId &&
+                        ledger.Status == ModifiedCashLedgerEventStatus.Certified &&
+                        ledger.EventDate >= actualVersion.PeriodStart &&
+                        ledger.EventDate < actualVersion.PeriodEnd &&
+                        policy.CompanyId == companyId &&
+                        policy.BudgetVersionId == actualVersion.Id &&
+                        policy.Status == ModifiedCashPolicyStatus.Approved &&
+                        policy.Treatment == ModifiedCashRecognitionTreatment.IncludeInBudgetActual
+                    select new { Ledger = ledger, Policy = policy, Mapping = mapping }
+                ).ToListAsync(ct);
+                var invalidModifiedCashEvents = 0;
+                foreach (var captured in modifiedCashEvents)
+                {
+                    var ledger = captured.Ledger;
+                    var commitment = await _db.Commitments.FirstOrDefaultAsync(x =>
+                        x.Id == ledger.CommitmentId && x.CompanyId == companyId, ct);
+                    var receipt = await _db.GoodsReceiptLines.Where(x => x.Id == ledger.SourceEventId)
+                        .Join(_db.GoodsReceipts.Where(x => x.CompanyId == companyId),
+                            line => line.GoodsReceiptId, header => header.Id,
+                            (line, header) => new { Line = line, Header = header })
+                        .SingleOrDefaultAsync(ct);
+                    var valid = ledger.EventKind == ModifiedCashLedgerEventKind.Recognition &&
+                        commitment != null && receipt != null &&
+                        receipt.Header.PurchaseOrderId == commitment.PurchaseOrderId &&
+                        decimal.Round(receipt.Line.QuantityReceived * receipt.Line.UnitCost, 6,
+                            MidpointRounding.AwayFromZero) == ledger.Amount &&
+                        receipt.Header.ReceiptDate == ledger.EventDate &&
+                        ledger.EventDate >= captured.Policy.ReportingPeriodStart &&
+                        ledger.EventDate < captured.Policy.ReportingPeriodEnd &&
+                        ledger.EventDate >= captured.Policy.EffectiveFrom &&
+                        (!captured.Policy.EffectiveTo.HasValue || ledger.EventDate < captured.Policy.EffectiveTo.Value) &&
+                        ledger.EvidenceAcceptedAt <= captured.Policy.ReportingPeriodEnd.AddDays(
+                            captured.Policy.PostPeriodRecognitionWindowDays) &&
+                        captured.Mapping.CompanyId == companyId &&
+                        captured.Mapping.BudgetVersionLineId != Guid.Empty &&
+                        await _db.PublicSectorBudgetVersionLines.AnyAsync(x =>
+                            x.Id == captured.Mapping.BudgetVersionLineId &&
+                            x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id &&
+                            x.FundCentreId == commitment!.FundCentreId, ct);
+                    if (!valid) invalidModifiedCashEvents++;
+                }
+                if (invalidModifiedCashEvents > 0)
+                    comparabilityIssues.Add($"Modified-cash recognition evidence is stale or invalid for {invalidModifiedCashEvents} certified ledger events.");
+
                 var certifiedActuals = cashActuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
                 var invalidCertifiedCashActuals = 0;
                 foreach (var certifiedActual in certifiedActuals)
@@ -1976,6 +2034,15 @@ namespace ApexERP.Application.Services
                         .GroupBy(x => x.BudgetVersionLineId))
                         cashActualsByBudgetLine[group.Key] = group.Sum(x =>
                             x.ReversalOfId.HasValue ? -x.Amount : x.Amount);
+                    foreach (var group in modifiedCashEvents.GroupBy(x => x.Mapping.BudgetVersionLineId))
+                    {
+                        var modifiedCashAmount = group.Sum(x =>
+                            x.Ledger.EventKind == ModifiedCashLedgerEventKind.Recognition
+                                ? x.Ledger.Amount : -x.Ledger.Amount);
+                        cashActualsByBudgetLine[group.Key] =
+                            (cashActualsByBudgetLine.TryGetValue(group.Key, out var capturedAmount)
+                                ? capturedAmount : 0m) + modifiedCashAmount;
+                    }
                 }
             }
             if (companyProfile == null)
