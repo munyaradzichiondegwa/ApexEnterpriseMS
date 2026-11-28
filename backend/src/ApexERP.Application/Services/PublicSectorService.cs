@@ -3274,13 +3274,14 @@ namespace ApexERP.Application.Services
                 details.Sum(x => x.AmountApplied) != source.Debit)
                 throw new InvalidOperationException("WHT bank remittance must be fully allocated to posted WHT tax components.");
 
+            var componentIds = details.Select(d => d.TaxComponentId!.Value).ToArray();
             var components = await _db.InvoiceTaxComponents.Where(x => x.CompanyId == companyId &&
-                x.InvoiceKind == "AP" && details.Select(d => d.TaxComponentId!.Value).Contains(x.Id)).ToListAsync(ct);
+                x.InvoiceKind == "AP" && componentIds.Contains(x.Id)).ToListAsync(ct);
             if (components.Count != details.Count || components.Any(x => x.TaxType != TaxType.WHT))
                 throw new InvalidOperationException("WHT remittance allocations contain missing or non-WHT tax components.");
-            var invoices = await _db.ApInvoices.Where(x => x.CompanyId == companyId &&
-                components.Select(t => t.InvoiceId).Distinct().Contains(x.Id)).ToListAsync(ct);
-            if (invoices.Count != components.Select(x => x.InvoiceId).Distinct().Count())
+            var invoiceIds = components.Select(t => t.InvoiceId).Distinct().ToArray();
+            var invoices = await _db.ApInvoices.Where(x => x.CompanyId == companyId && invoiceIds.Contains(x.Id)).ToListAsync(ct);
+            if (invoices.Count != invoiceIds.Length)
                 throw new InvalidOperationException("A remitted WHT component has no company AP invoice.");
 
             foreach (var accountGroup in details.GroupBy(d => components.Single(t => t.Id == d.TaxComponentId).GlAccountId))
