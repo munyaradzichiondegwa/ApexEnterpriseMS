@@ -14,7 +14,7 @@ public interface IStatutoryPackActivationAdapter
 {
     string JurisdictionCode { get; }
     void Validate(StatutoryPackDocument document);
-    Task ActivateAsync(StatutoryPackDocument document, CancellationToken ct);
+    Task ActivateAsync(Guid companyId, StatutoryPackDocument document, CancellationToken ct);
 }
 
 /// <summary>Zimbabwe tax/payroll activation. This is deliberately not a generic tax mapper.</summary>
@@ -38,8 +38,8 @@ public sealed class ZimbabweStatutoryPackActivationAdapter : IStatutoryPackActiv
         ValidateJurisdictionRules(document);
     }
 
-    public Task ActivateAsync(StatutoryPackDocument document, CancellationToken ct) =>
-        ApplyApprovedRulesAsync(document, ct);
+    public Task ActivateAsync(Guid companyId, StatutoryPackDocument document, CancellationToken ct) =>
+        ApplyApprovedRulesAsync(companyId, document, ct);
 
     private static void ValidateJurisdictionRules(StatutoryPackDocument document)
     {
