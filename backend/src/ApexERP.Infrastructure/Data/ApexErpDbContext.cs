@@ -823,7 +823,7 @@ namespace ApexERP.Infrastructure.Data
                 .HasOne<PublicSectorBudgetVersionLine>().WithMany().HasForeignKey(x => x.BudgetVersionLineId)
                 .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashMapping_BudgetLine");
             modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
-                .HasIndex(x => new { x.CompanyId, x.PolicyId, x.SourceEventId, x.EventKind }).IsUnique()
+                .HasIndex(x => new { x.CompanyId, x.SourceEventId, x.EventKind }).IsUnique()
                 .HasDatabaseName("UX_ModifiedCashLedger_SourceEvent");
             modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
                 .HasIndex(x => x.OriginalEventId).IsUnique().HasFilter("\"OriginalEventId\" IS NOT NULL")
