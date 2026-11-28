@@ -403,6 +403,8 @@ namespace ApexERP.Infrastructure.Data
             {
                 t.HasCheckConstraint("CK_InvoiceTaxComponents_Amounts", "\"TaxableBase\" >= 0 AND \"Rate\" >= 0 AND \"Amount\" > 0");
                 t.HasCheckConstraint("CK_InvoiceTaxComponents_Kind", "\"InvoiceKind\" IN ('AR','AP')");
+                t.HasCheckConstraint("CK_InvoiceTaxComponents_TaxCode",
+                    "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
             });
             modelBuilder.Entity<SettlementComponentAllocation>().Property(x => x.SettlementKind).HasMaxLength(2);
             modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.VersionNumber }).IsUnique();
@@ -414,17 +416,23 @@ namespace ApexERP.Infrastructure.Data
                 t.HasCheckConstraint("CK_SettlementComponentAllocations_Component",
                     "((\"ComponentKind\" = 0 AND \"InvoiceLineId\" IS NOT NULL AND \"TaxComponentId\" IS NULL) OR (\"ComponentKind\" = 1 AND \"InvoiceLineId\" IS NULL AND \"TaxComponentId\" IS NOT NULL))");
                 t.HasCheckConstraint("CK_SettlementComponentAllocations_Amount", "\"AmountApplied\" > 0");
+                t.HasCheckConstraint("CK_SettlementComponentAllocations_TaxRemittance",
+                    "\"SettlementKind\" <> 'TX' OR \"ComponentKind\" = 1");
             });
             modelBuilder.Entity<TaxAccountMapping>().ToTable(t =>
             {
                 t.HasCheckConstraint("CK_TaxAccountMappings_Version", "\"VersionNumber\" > 0");
                 t.HasCheckConstraint("CK_TaxAccountMappings_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                t.HasCheckConstraint("CK_TaxAccountMappings_Purpose",
+                    "((\"Purpose\" IN ('AR-VAT-OUTPUT','AP-VAT-INPUT') AND \"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"Purpose\" = 'AP-WHT-PAYABLE' AND \"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
             });
             modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().ToTable(t =>
             {
                 t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Version", "\"VersionNumber\" > 0");
                 t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
                 t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Separate", "\"Treatment\" <> 2 OR \"BudgetGlAccountId\" IS NOT NULL");
+                t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_TaxCode",
+                    "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
             });
             modelBuilder.Entity<SettlementComponentAllocation>().ToTable(t =>
             {
