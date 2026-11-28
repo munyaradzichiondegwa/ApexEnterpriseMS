@@ -781,8 +781,8 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<ApInvoiceLine>()
                 .HasOne<CostCentre>().WithMany().HasForeignKey(x => x.CostCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetReconciliation>()
-                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.StatementPeriodStart, x.StatementPeriodEnd, x.StatementEntityScope, x.Type, x.StatementSection, x.Description }).IsUnique()
-                .HasDatabaseName("UX_PublicSectorBudgetRecon_ScopeDescription");
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.StatementPeriodStart, x.StatementPeriodEnd, x.StatementEntityScope, x.Type, x.StatementSection, x.SourceFingerprint }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorBudgetRecon_SourceScope");
             modelBuilder.Entity<PublicSectorBudgetReconciliation>().Property(x => x.SourceFingerprint).HasMaxLength(128);
             modelBuilder.Entity<PublicSectorBudgetReconciliation>()
                 .HasCheckConstraint("CK_PublicSectorBudgetRecon_StatementPeriod",
