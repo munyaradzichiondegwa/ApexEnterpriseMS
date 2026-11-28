@@ -738,6 +738,8 @@ namespace ApexERP.API.Controllers
             // transaction-level reconciliation, including zero-record submissions.
             var recordLevelSourceReconciliationComplete = expectedSourceRegisterPresent &&
                 allExpectedSourceSubmissionsReviewed && noUnreviewedSourceSubmissions;
+            var liveSourceRegisterComplete = await _publicSector.HasCompleteCashSourceRegisterAsync(
+                CompanyId, version.Id, ct);
             var sourceCoverageComplete = (noSourceBackedCashActuals
                     ? certifiedZeroActivity
                     : true) &&
@@ -745,7 +747,7 @@ namespace ApexERP.API.Controllers
                 missingApSettlementCoverage == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0 &&
                 registeredSourceSubmissionCoverageComplete &&
                 recordLevelSourceReconciliationComplete &&
-                expectedSourceRegisterCompletenessCertified;
+                expectedSourceRegisterCompletenessCertified && liveSourceRegisterComplete;
             var operatingBridgeDifference = operatingDifference - operatingAdjustment;
             var investingBridgeDifference = investingDifference - investingAdjustment;
             var financingBridgeDifference = financingDifference - financingAdjustment;
@@ -769,6 +771,7 @@ namespace ApexERP.API.Controllers
                 RegisteredSourceSubmissionCoverageComplete = registeredSourceSubmissionCoverageComplete,
                 RecordLevelSourceReconciliationComplete = recordLevelSourceReconciliationComplete,
                 ExpectedSourceRegisterCompletenessCertified = expectedSourceRegisterCompletenessCertified,
+                LiveSourceRegisterComplete = liveSourceRegisterComplete,
                 ExpectedSourceRegisterAttestationStatus = registerAttestation?.Status,
                 ExpectedSourceRegisterAttestationEvidence = registerAttestation?.EvidenceReference,
                 UncapturedOrUnreconciledPostedBankMovements = uncapturedPostedMovements,
