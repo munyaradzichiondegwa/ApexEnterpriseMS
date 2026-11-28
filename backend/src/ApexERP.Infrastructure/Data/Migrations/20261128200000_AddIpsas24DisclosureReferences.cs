@@ -29,6 +29,13 @@ namespace ApexERP.Infrastructure.Data.Migrations
                 table: "PublicSectorBudgetVarianceExplanations",
                 type: "text",
                 nullable: true);
+
+            migrationBuilder.AddColumn<bool>(
+                name: "IsNoDifferenceAttestation",
+                table: "PublicSectorBudgetReconciliations",
+                type: "boolean",
+                nullable: false,
+                defaultValue: false);
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)
@@ -40,6 +47,10 @@ namespace ApexERP.Infrastructure.Data.Migrations
             migrationBuilder.DropColumn(
                 name: "NoteReference",
                 table: "PublicSectorBudgetVersionLines");
+
+            migrationBuilder.DropColumn(
+                name: "IsNoDifferenceAttestation",
+                table: "PublicSectorBudgetReconciliations");
 
             migrationBuilder.DropColumn(
                 name: "CommentReference",
