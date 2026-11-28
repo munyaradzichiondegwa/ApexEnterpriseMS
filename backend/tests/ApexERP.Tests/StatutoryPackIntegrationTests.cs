@@ -10,7 +10,7 @@ namespace ApexERP.Tests;
 public sealed class StatutoryPackIntegrationTests
 {
     [PostgresFact]
-    public async Task Zimbabwe_2026_baseline_is_imported_as_unapproved_draft_with_official_sources()
+    public async Task Zimbabwe_2026_baseline_is_imported_as_unapproved_draft_and_cannot_be_published()
     {
         await using var db = await TestDb.CreateAsync();
         var companyId = Guid.NewGuid();
@@ -36,6 +36,19 @@ public sealed class StatutoryPackIntegrationTests
         Assert.Equal(0.155m, rules.RootElement.GetProperty("vat").GetProperty("standardRate").GetDecimal());
         Assert.Equal(0.03m, rules.RootElement.GetProperty("paye").GetProperty("aidsLevyRate").GetDecimal());
         Assert.Equal("baseline-only", rules.RootElement.GetProperty("coverage").GetString());
+
+        var reviewer = Guid.NewGuid();
+        var approver = Guid.NewGuid();
+        await service.ReviewAsync(companyId, "ZW", 1, reviewer);
+        await service.ApproveAsync(companyId, "ZW", 1, approver);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.PublishAsync(companyId, "ZW", 1, Guid.NewGuid()));
+
+        var stillApproved = Assert.Single(await service.ListAsync(companyId, "ZW"));
+        Assert.Equal("Approved", stillApproved.Status);
+        Assert.Empty(await ctx.PayeTaxBands.Where(x => x.CompanyId == companyId).ToListAsync());
+        Assert.Empty(await ctx.StatutoryRates.Where(x => x.CompanyId == companyId).ToListAsync());
+        Assert.Empty(await ctx.TaxCodes.Where(x => x.CompanyId == companyId).ToListAsync());
     }
 
     [PostgresFact]
