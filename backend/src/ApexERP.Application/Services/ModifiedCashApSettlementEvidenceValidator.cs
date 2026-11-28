@@ -66,7 +66,7 @@ public static class ModifiedCashApSettlementEvidenceValidator
         var bankJournalCredit = await db.JournalLines.Where(x =>
             x.JournalEntryId == payment.JournalEntryId.Value &&
             x.GlAccountId == bankAccount.GlAccountId)
-            .SumAsync(x => x.Credit - x.Debit, ct);
+            .SumAsync(x => x.BaseCredit - x.BaseDebit, ct);
         if (bankJournalCredit != payment.Amount)
             return null;
 
