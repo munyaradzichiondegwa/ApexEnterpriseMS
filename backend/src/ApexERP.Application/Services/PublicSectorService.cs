@@ -448,8 +448,8 @@ namespace ApexERP.Application.Services
                         item.StatementPeriodStart, item.StatementPeriodEnd, item.StatementEntityScope);
                     var candidate = comparison.AutomaticReconciliationCandidates.SingleOrDefault(x =>
                         x.Type == item.Type && x.StatementSection == item.StatementSection);
-                    if (!comparison.ComparableActualsAvailable || candidate == null ||
-                        candidate.SourceFingerprint != item.SourceFingerprint ||
+                    if (!comparison.ComparableActualsAvailable || comparison.FinalBudgetVersionId != item.BudgetVersionId ||
+                        candidate == null || candidate.SourceFingerprint != item.SourceFingerprint ||
                         (item.IsNoDifferenceAttestation
                             ? candidate.ExpectedAdjustment != 0m
                             : item.StatementSection == "Revenue"
