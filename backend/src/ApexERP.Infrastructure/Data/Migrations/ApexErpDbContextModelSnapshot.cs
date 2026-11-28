@@ -3732,7 +3732,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("FundCentreId");
                     b.HasIndex("GlAccountId");
                     b.HasIndex("CompanyId", "SourceKind", "SourceRecordId", "BudgetVersionLineId")
-                        .IsUnique().HasFilter("\\\"ReversalOfId\\\" IS NULL")
+                        .IsUnique().HasFilter("\\\"ReversalOfId\\\" IS NULL AND \\\"Status\\\" <> 4")
                         .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_SourceAllocation");
                     b.HasIndex("ReversalOfId").IsUnique()
                         .HasFilter("\\\"ReversalOfId\\\" IS NOT NULL")
