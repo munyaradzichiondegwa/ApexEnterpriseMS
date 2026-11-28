@@ -675,7 +675,7 @@ namespace ApexERP.Infrastructure.Data
                 .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_GlAccount");
             modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.PeriodStart, x.PeriodEnd })
-                .IsUnique();
+                .IsUnique().HasDatabaseName("UX_PublicSectorCashPeriodAttestation_Period");
             modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
                 .HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Period", "\"PeriodEnd\" > \"PeriodStart\"");
             modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
