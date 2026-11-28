@@ -319,17 +319,21 @@ namespace ApexERP.Application.Services
         public Task<ApPayment> PayAndAllocateAsync(Guid companyId, Guid supplierId, DateTime paymentDate,
             string currency, decimal amount, PaymentMethod method, Guid bankGlAccountId, Guid apControlAccountId,
             Dictionary<Guid, decimal> allocations, CancellationToken ct = default,
-            IReadOnlyCollection<SettlementComponentInput>? componentAllocations = null)
+            IReadOnlyCollection<SettlementComponentInput>? componentAllocations = null,
+            string? bankReference = null)
         {
+            if (!string.IsNullOrWhiteSpace(bankReference) && bankReference.Trim().Length > 160)
+                throw new InvalidOperationException("The external bank reference cannot exceed 160 characters.");
             return _db.InTransactionAsync(token => PayAndAllocateCoreAsync(
                     companyId, supplierId, paymentDate, currency, amount, method, bankGlAccountId,
-                    apControlAccountId, allocations, token, componentAllocations), ct);
+                    apControlAccountId, allocations, token, componentAllocations, bankReference), ct);
         }
 
         private async Task<ApPayment> PayAndAllocateCoreAsync(Guid companyId, Guid supplierId, DateTime paymentDate,
             string currency, decimal amount, PaymentMethod method, Guid bankGlAccountId, Guid apControlAccountId,
             Dictionary<Guid, decimal> allocations, CancellationToken ct,
-            IReadOnlyCollection<SettlementComponentInput>? componentAllocations = null)
+            IReadOnlyCollection<SettlementComponentInput>? componentAllocations = null,
+            string? bankReference = null)
         {
             if (allocations.Values.Sum() > amount)
                 throw new InvalidOperationException("Total allocated amount exceeds the payment amount.");
@@ -348,7 +352,8 @@ namespace ApexERP.Application.Services
                 PaymentDate = paymentDate,
                 Currency = currency,
                 Amount = amount,
-                PaymentMethod = method
+                PaymentMethod = method,
+                BankReference = string.IsNullOrWhiteSpace(bankReference) ? null : bankReference.Trim()
             };
 
             // Preserve the originating bank account on the AP payment so statutory
@@ -400,7 +405,7 @@ namespace ApexERP.Application.Services
                     Description = $"AP payment {paymentNo}",
                     Debit = amount,
                     Credit = 0m,
-                    Reference = paymentNo,
+                    Reference = payment.BankReference ?? paymentNo,
                     IsReconciled = false,
                     JournalEntryId = je.Id
                 });
