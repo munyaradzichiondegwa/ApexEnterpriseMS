@@ -717,6 +717,8 @@ namespace ApexERP.Tests
             Assert.True(report.ComparableActualsAvailable, report.ComparabilityMessage);
             Assert.True(report.OriginalToFinalExplanationsComplete);
             Assert.Equal(3, report.Lines.Count);
+            Assert.Equal("Vote", report.Lines[0].FundCentreLevel);
+            Assert.Equal(string.Empty, report.Lines[0].CostCentreCode);
             var expense = Assert.Single(report.Lines, x => x.AccountCode == "5100");
             Assert.Equal(100m, expense.OriginalBudget);
             Assert.Equal(120m, expense.FinalBudget);
