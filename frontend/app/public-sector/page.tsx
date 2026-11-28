@@ -489,10 +489,13 @@ export default function PublicSectorPage() {
     } catch (err) { setError(extractErrorMessage(err)); }
   }
 
+  const requiresZfrmClassification = budgetDraft.classificationBasis.toLowerCase().includes("zfrm") ||
+    budgetDraft.classificationBasis.toLowerCase().includes("zimbabwe financial reporting manual");
   const selectableBudgetAccounts = budgetAccounts.filter((a: any) =>
-    a.type === "Income" || a.type === "Expense" ||
-    (budgetDraft.accountingBasis === "Cash" &&
-      ["Operating", "Investing", "Financing"].includes(a.cashFlowCategory))
+    (a.type === "Income" || a.type === "Expense" ||
+      (budgetDraft.accountingBasis === "Cash" &&
+        ["Operating", "Investing", "Financing"].includes(a.cashFlowCategory))) &&
+    (!requiresZfrmClassification || a.type === "Income" || a.type === "Expense")
   );
   const fmt = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
