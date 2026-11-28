@@ -445,6 +445,8 @@ namespace ApexERP.Application.Services
                 x.Status == PublicSectorBudgetActualStatus.Certified).ToListAsync(ct);
             foreach (var actual in actuals)
             {
+                if (actual.CashFlowSection is not (CashFlowCategory.Operating or CashFlowCategory.Investing or CashFlowCategory.Financing))
+                    throw new InvalidOperationException("Every certified cash actual must be classified as Operating, Investing or Financing before the cash-flow bridge can be prepared.");
                 if (!await IsCertifiedCashActualSourceValidAsync(companyId, actual, ct))
                     throw new InvalidOperationException("A certified cash actual is stale or no longer source-valid; reverse and replace it before preparing the cash-flow bridge.");
             }
