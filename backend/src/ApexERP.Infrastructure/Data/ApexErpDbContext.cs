@@ -176,6 +176,7 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<PublicSectorBudgetVersionLine> PublicSectorBudgetVersionLines => Set<PublicSectorBudgetVersionLine>();
         public DbSet<PublicSectorBudgetReconciliation> PublicSectorBudgetReconciliations => Set<PublicSectorBudgetReconciliation>();
         public DbSet<PublicSectorBudgetExecutionActual> PublicSectorBudgetExecutionActuals => Set<PublicSectorBudgetExecutionActual>();
+        public DbSet<PublicSectorCashPeriodAttestation> PublicSectorCashPeriodAttestations => Set<PublicSectorCashPeriodAttestation>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
@@ -502,6 +503,7 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<PublicSectorBudgetVersionLine>(modelBuilder);
             ApplyTenantFilter<PublicSectorBudgetReconciliation>(modelBuilder);
             ApplyTenantFilter<PublicSectorBudgetExecutionActual>(modelBuilder);
+            ApplyTenantFilter<PublicSectorCashPeriodAttestation>(modelBuilder);
             ApplyTenantFilter<Commitment>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
@@ -671,6 +673,17 @@ namespace ApexERP.Infrastructure.Data
                 .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_FundCentre");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_GlAccount");
+            modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.PeriodStart, x.PeriodEnd })
+                .IsUnique();
+            modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
+                .HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+            modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
+                .HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Counts",
+                    "\"ObservedBankTransactionCount\" >= 0 AND \"ObservedArReceiptCount\" >= 0 AND \"ObservedApPaymentCount\" >= 0");
+            modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_CashPeriodAttestation_BudgetVersion");
             modelBuilder.Entity<ArInvoice>()
                 .HasOne<FundCentre>().WithMany().HasForeignKey(a => a.FundCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
