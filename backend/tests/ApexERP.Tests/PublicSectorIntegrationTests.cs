@@ -1683,12 +1683,16 @@ namespace ApexERP.Tests
                 seed.JournalLines.AddRange(
                     new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = revenueGlId, FundCentreId = fundCentreId, Credit = 60m, Debit = 0m, BaseCredit = 60m, BaseDebit = 0m },
                     new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = revenueGl2Id, FundCentreId = fundCentreId, Credit = 40m, Debit = 0m, BaseCredit = 40m, BaseDebit = 0m },
+                    new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = arControlGlId, Debit = 100m, Credit = 0m, BaseDebit = 100m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = arInvoice2JournalId, GlAccountId = revenueGl2Id, FundCentreId = fundCentreId, Credit = 60m, Debit = 0m, BaseCredit = 60m, BaseDebit = 0m },
+                    new JournalLine { JournalEntryId = arInvoice2JournalId, GlAccountId = arControlGlId, Debit = 60m, Credit = 0m, BaseDebit = 60m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = bankGlId, Debit = 130m, Credit = 0m, BaseDebit = 130m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = arControlGlId, Debit = 0m, Credit = 130m, BaseDebit = 0m, BaseCredit = 130m },
                     new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = expenseGlId, FundCentreId = fundCentreId, Debit = 120m, Credit = 0m, BaseDebit = 120m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = expenseGl2Id, FundCentreId = fundCentreId, Debit = 80m, Credit = 0m, BaseDebit = 80m, BaseCredit = 0m },
+                    new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = apControlGlId, Debit = 0m, Credit = 200m, BaseDebit = 0m, BaseCredit = 200m },
                     new JournalLine { JournalEntryId = apInvoice2JournalId, GlAccountId = expenseGl2Id, FundCentreId = fundCentreId, Debit = 120m, Credit = 0m, BaseDebit = 120m, BaseCredit = 0m },
+                    new JournalLine { JournalEntryId = apInvoice2JournalId, GlAccountId = apControlGlId, Debit = 0m, Credit = 120m, BaseDebit = 0m, BaseCredit = 120m },
                     new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = apControlGlId, Debit = 260m, Credit = 0m, BaseDebit = 260m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = bankGlId, Debit = 0m, Credit = 260m, BaseDebit = 0m, BaseCredit = 260m });
                 seed.Customers.Add(new Customer { Id = customerId, CompanyId = companyId, Code = "C-SETTLE", Name = "Settlement Customer", Currency = "USD", ArAccountId = arControlGlId });
