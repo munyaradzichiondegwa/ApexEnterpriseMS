@@ -82,8 +82,9 @@ namespace ApexERP.Domain.Entities
     }
 
     /// <summary>
-    /// An expected bank, receivables, payables or cashbook source for one approved IPSAS 24
-    /// cash-budget reporting period. Approved entries are immutable; changes require a new
+    /// An expected bank, receivables-control or payables-control source for one approved IPSAS 24
+    /// cash-budget reporting period. Cashbook is not accepted until a dedicated adapter exists.
+    /// Approved entries are immutable; changes require a new
     /// controlled register entry rather than editing the approved source population.
     /// </summary>
     public class PublicSectorExpectedCashSource : TenantEntity
