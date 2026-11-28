@@ -1,6 +1,6 @@
 # IPSAS 24 AR/AP tax allocation controls
 
-**Status:** implemented on the feature branch; backend CI verification for the tax/remittance changes and subsequent cash-flow bridge hardening is pending. Migration/model and frontend checks passed in the previously recorded run, but that is not a complete backend acceptance result.  
+**Status:** implemented and verified on the current feature-branch head. The full backend, frontend and migration/RLS/backup CI matrix passed in workflow [#46149077075](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46149077075), including 342/342 backend unit and PostgreSQL integration tests.  
 **Scope:** tax-bearing cash actuals from posted AR receipts, AP supplier payments and separate WHT remittances.
 
 ## Accounting rules enforced
@@ -43,7 +43,7 @@ Tax mappings and budget policies are created as drafts, submitted through the co
 
 ## Acceptance evidence
 
-The PostgreSQL integration suite contains coverage for AR/AP tax posting, exact tax journal-line provenance, explicit settlement allocation evidence, tax policy resolution and WHT remittance allocation. The migration/model and frontend jobs passed in the recorded workflow, but backend verification for the tax/remittance changes and later cash-flow bridge hardening must pass on the current PR head before this package is marked verified.
+The current-head PostgreSQL integration suite verifies AR/AP tax posting, exact tax journal-line provenance, explicit settlement allocation evidence, tax policy resolution and WHT remittance allocation. Workflow #46149077075 passed all 342 backend tests, frontend type-check/tests/production build, migration drift, clean install, hardening, least-privilege RLS boot and backup/restore checks.
 
 ## Release rule
 
