@@ -865,9 +865,25 @@ namespace ApexERP.Tests
             Assert.Equal(40m, line.ActualOnComparableBasis);
             Assert.Equal(60m, line.Variance);
 
-            var postedActual = await ctx.JournalLines.SingleAsync(x => x.GlAccountId == accountId);
-            postedActual.FundCentreId = null;
-            await ctx.SaveChangesAsync();
+            // Posted journal lines are immutable. Add a separate posted transaction with
+            // an intentionally missing Fund Centre to verify that the comparison detects it.
+            await using (var untaggedContext = db.NewContext(companyId))
+            {
+                var untaggedJournal = new JournalEntry
+                {
+                    CompanyId = companyId, EntryNo = "JE-NO-REVISION-UNTAGGED",
+                    Description = "Untagged budget-scope actual", EntryDate = new DateTime(2026, 7, 1),
+                    PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                };
+                untaggedContext.JournalEntries.Add(untaggedJournal);
+                untaggedContext.JournalLines.Add(new JournalLine
+                {
+                    JournalEntryId = untaggedJournal.Id, GlAccountId = accountId,
+                    FundCentreId = null, Debit = 5m, Credit = 0m,
+                    BaseDebit = 5m, BaseCredit = 0m
+                });
+                await untaggedContext.SaveChangesAsync();
+            }
             var blocked = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.False(blocked.ComparableActualsAvailable);
             Assert.Contains("missing or unmatched Fund Centre/cost-centre dimensions", blocked.ComparabilityMessage,
@@ -2064,10 +2080,17 @@ namespace ApexERP.Tests
             await Assert.ThrowsAsync<DbUpdateException>(() => immutableContext.SaveChangesAsync());
 
             await using var frozenContext = db.NewContext(companyId);
-            var frozenService = new PublicSectorService(frozenContext, new AuditService(frozenContext));
-            await Assert.ThrowsAsync<DbUpdateException>(() => frozenService.CreateExpectedCashSourceAsync(
-                companyId, budgetVersionId, "BankAccount", "BANK-SECONDARY-01",
-                "Secondary account", null, true, periodStart, periodEnd, preparerId));
+            // Bypass application validation to exercise the database trigger itself:
+            // a certified completeness attestation must prevent direct inserts too.
+            frozenContext.PublicSectorExpectedCashSources.Add(new PublicSectorExpectedCashSource
+            {
+                CompanyId = companyId, BudgetVersionId = budgetVersionId,
+                SourceKind = "BankAccount", SourceCode = "BANK-SECONDARY-01",
+                SourceName = "Secondary account", SourceIdentifier = approved.SourceIdentifier,
+                IsRequired = true, EffectiveFrom = periodStart, EffectiveTo = periodEnd,
+                Status = "Draft", CreatedBy = preparerId
+            });
+            await Assert.ThrowsAsync<DbUpdateException>(() => frozenContext.SaveChangesAsync());
         }
     }
 }
