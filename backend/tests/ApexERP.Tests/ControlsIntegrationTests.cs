@@ -434,9 +434,13 @@ namespace ApexERP.Tests
                     var context = sp.GetRequiredService<ApexErpDbContext>();
                     Assert.Equal(tenantId, context.CurrentTenantId);
                     Assert.Equal(companyId, context.CurrentCompanyId);
-                    var visibleCompanies = await context.Companies.Select(x => x.Id).ToListAsync(token);
-                    Assert.Equal(new[] { companyId }, visibleCompanies);
-                    return "tenant context verified";
+                    // Tenant scope deliberately exposes all companies in the tenant; company-scoped
+                    // operational records must remain restricted to the claimed company.
+                    var visibleCompanies = await context.Companies.Select(x => x.Id).OrderBy(x => x).ToListAsync(token);
+                    Assert.Equal(new[] { companyA, companyB }.OrderBy(x => x), visibleCompanies);
+                    var visibleExecutions = await context.JobExecutions.Select(x => x.CompanyId).Distinct().ToListAsync(token);
+                    Assert.Equal(new[] { companyId }, visibleExecutions);
+                    return "tenant and company context verified";
                 });
 
             var now = new DateTime(2026, 11, 28, 0, 0, 0, DateTimeKind.Utc);
