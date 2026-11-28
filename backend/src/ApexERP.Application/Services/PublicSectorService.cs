@@ -1245,8 +1245,14 @@ namespace ApexERP.Application.Services
                 throw new InvalidOperationException("The selected cash-flow section does not match the budget line GL account's configured cash-flow classification.");
 
             if (await _db.PublicSectorBudgetExecutionActuals.AnyAsync(x =>
-                x.CompanyId == companyId && x.SourceKind == sourceKind && x.SourceRecordId == sourceRecordId, ct))
-                throw new InvalidOperationException("This source transaction has already been captured for this company.");
+                x.CompanyId == companyId && x.SourceKind == sourceKind &&
+                x.SourceRecordId == sourceRecordId && x.BudgetVersionLineId == line.Id, ct))
+                throw new InvalidOperationException("This source transaction has already been allocated to the selected budget line.");
+            if (await _db.PublicSectorBudgetExecutionActuals.AnyAsync(x =>
+                x.CompanyId == companyId && x.SourceKind == sourceKind &&
+                x.SourceRecordId == sourceRecordId &&
+                x.Status == PublicSectorBudgetActualStatus.Certified, ct))
+                throw new InvalidOperationException("A source transaction cannot receive additional allocations after any allocation has been certified.");
 
             decimal amount;
             string currency;
@@ -1291,29 +1297,46 @@ namespace ApexERP.Application.Services
                         x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
                     throw new InvalidOperationException("The AR receipt must be posted to the general ledger before budget capture.");
                 var allocations = await _db.ArReceiptAllocations.Where(x => x.ArReceiptId == receipt.Id).ToListAsync(ct);
-                if (allocations.Count != 1 || allocations[0].AmountApplied != receipt.Amount)
-                    throw new InvalidOperationException("Only a fully allocated AR receipt applied to one invoice is supported. Split or unapplied receipts require an approved allocation adapter.");
-                var invoice = await _db.ArInvoices.FirstOrDefaultAsync(x =>
-                    x.Id == allocations[0].ArInvoiceId && x.CompanyId == companyId, ct)
-                    ?? throw new InvalidOperationException("The allocated AR invoice is not available to this company.");
-                var invoiceLines = await _db.ArInvoiceLines.Where(x => x.ArInvoiceId == invoice.Id).ToListAsync(ct);
-                if (invoice.CustomerId != receipt.CustomerId || invoice.Status != InvoiceStatus.Paid ||
-                    invoice.FundCentreId != line.FundCentreId || invoiceLines.Count != 1 ||
-                    invoice.VatAmount != 0m || invoiceLines[0].LineVat != 0m ||
-                    invoiceLines[0].GlAccountId != line.GlAccountId ||
-                    invoiceLines[0].LineTotal != receipt.Amount || invoice.Total != receipt.Amount ||
-                    line.CostCentreId.HasValue)
-                    throw new InvalidOperationException("AR cash capture requires one fully settled, tax-free invoice line with an explicit matching Fund Centre and GL budget mapping; cost-centre and multi-line allocations are not yet supported.");
-                if (!invoice.JournalEntryId.HasValue ||
-                    !await _db.JournalEntries.AnyAsync(x => x.Id == invoice.JournalEntryId.Value &&
-                        x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
-                    throw new InvalidOperationException("The source AR invoice must have a posted revenue journal.");
-                var invoicedRevenue = await _db.JournalLines.Where(x =>
-                    x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == line.GlAccountId &&
-                    x.FundCentreId == line.FundCentreId && x.CostCentreId == line.CostCentreId)
-                    .SumAsync(x => x.Credit - x.Debit, ct);
-                if (invoicedRevenue != invoice.Total)
-                    throw new InvalidOperationException("The posted AR invoice journal does not support the exact revenue classification and amount.");
+                if (allocations.Count == 0 || allocations.Any(x => x.AmountApplied <= 0m) ||
+                    allocations.Sum(x => x.AmountApplied) != receipt.Amount)
+                    throw new InvalidOperationException("The AR receipt must be fully allocated across its invoice settlements before IPSAS 24 capture.");
+                var invoiceIds = allocations.Select(x => x.ArInvoiceId).Distinct().ToArray();
+                var invoices = await _db.ArInvoices.Where(x =>
+                    x.CompanyId == companyId && invoiceIds.Contains(x.Id)).ToListAsync(ct);
+                if (invoices.Count != invoiceIds.Length)
+                    throw new InvalidOperationException("Every AR receipt allocation must reference an invoice belonging to this company.");
+                amount = 0m;
+                foreach (var allocation in allocations)
+                {
+                    var invoice = invoices.Single(x => x.Id == allocation.ArInvoiceId);
+                    if (invoice.CustomerId != receipt.CustomerId || invoice.Status != InvoiceStatus.Paid ||
+                        !invoice.FundCentreId.HasValue || invoice.Currency != receipt.Currency ||
+                        invoice.Total != allocation.AmountApplied || invoice.VatAmount != 0m ||
+                        !invoice.JournalEntryId.HasValue ||
+                        !await _db.JournalEntries.AnyAsync(x => x.Id == invoice.JournalEntryId.Value &&
+                            x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                        throw new InvalidOperationException("Split AR capture currently requires fully settled, tax-free invoices with an explicit Fund Centre and posted revenue journals.");
+                    var invoiceLines = await _db.ArInvoiceLines.Where(x => x.ArInvoiceId == invoice.Id).ToListAsync(ct);
+                    if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
+                        invoiceLines.Sum(x => x.LineTotal) != invoice.Total)
+                        throw new InvalidOperationException("AR invoice lines must reconcile exactly to the fully settled tax-free invoice total.");
+                    var expectedByAccount = invoiceLines.Where(x => x.GlAccountId == line.GlAccountId)
+                        .Sum(x => x.LineTotal);
+                    if (invoice.FundCentreId == line.FundCentreId && expectedByAccount > 0m)
+                    {
+                        var postedRevenue = await _db.JournalLines.Where(x =>
+                            x.JournalEntryId == invoice.JournalEntryId.Value &&
+                            x.GlAccountId == line.GlAccountId && x.FundCentreId == line.FundCentreId &&
+                            x.CostCentreId == null)
+                            .SumAsync(x => x.Credit - x.Debit, ct);
+                        if (postedRevenue != invoiceLines.Where(x => x.GlAccountId == line.GlAccountId)
+                            .Sum(x => x.LineTotal))
+                            throw new InvalidOperationException("The posted AR invoice revenue journal does not support the selected GL/Fund Centre allocation.");
+                        amount += expectedByAccount;
+                    }
+                }
+                if (amount <= 0m || line.CostCentreId.HasValue)
+                    throw new InvalidOperationException("The selected budget line has no supported AR invoice-line allocation. Cost-centre, VAT and withholding-tax allocations require explicit line-level mapping.");
                 var receiptBankCandidates = await _db.BankAccounts.Where(x =>
                     x.CompanyId == companyId && x.Currency == receipt.Currency &&
                     _db.JournalLines.Any(j => j.JournalEntryId == receipt.JournalEntryId.Value &&
@@ -1326,7 +1349,6 @@ namespace ApexERP.Application.Services
                     .SumAsync(x => x.Debit - x.Credit, ct);
                 if (bankLeg != receipt.Amount)
                     throw new InvalidOperationException("The posted AR receipt journal does not contain the exact bank debit for the receipt amount.");
-                amount = receipt.Amount;
                 currency = receipt.Currency;
                 sourceDate = receipt.ReceiptDate;
                 sourceReference = string.IsNullOrWhiteSpace(receipt.ReceiptNo) ? receipt.Id.ToString("N") : receipt.ReceiptNo;
@@ -1344,28 +1366,45 @@ namespace ApexERP.Application.Services
                     payment.PreparedBy == payment.AuthorisedBy || !payment.AuthorisedAt.HasValue)
                     throw new InvalidOperationException("The AP payment requires a recorded independent authorisation before budget capture.");
                 var allocations = await _db.ApPaymentAllocations.Where(x => x.ApPaymentId == payment.Id).ToListAsync(ct);
-                if (allocations.Count != 1 || allocations[0].AmountApplied != payment.Amount)
-                    throw new InvalidOperationException("Only a fully allocated AP payment applied to one invoice is supported. Split, partial and withholding-tax settlements require an approved allocation adapter.");
-                var invoice = await _db.ApInvoices.FirstOrDefaultAsync(x =>
-                    x.Id == allocations[0].ApInvoiceId && x.CompanyId == companyId, ct)
-                    ?? throw new InvalidOperationException("The allocated AP invoice is not available to this company.");
-                var invoiceLines = await _db.ApInvoiceLines.Where(x => x.ApInvoiceId == invoice.Id).ToListAsync(ct);
-                if (invoice.SupplierId != payment.SupplierId || invoice.Status != InvoiceStatus.Paid ||
-                    invoice.FundCentreId != line.FundCentreId || invoiceLines.Count != 1 ||
-                    invoice.VatAmount != 0m || invoice.WhtAmount != 0m ||
-                    invoiceLines[0].GlAccountId != line.GlAccountId ||
-                    invoiceLines[0].LineTotal != payment.Amount || invoice.Total != payment.Amount ||
-                    line.CostCentreId.HasValue)
-                    throw new InvalidOperationException("AP cash capture requires one fully settled, tax-free invoice line with an explicit matching Fund Centre and GL budget mapping; cost-centre and multi-line allocations are not yet supported.");
-                if (!invoice.JournalEntryId.HasValue ||
-                    !await _db.JournalEntries.AnyAsync(x => x.Id == invoice.JournalEntryId.Value &&
-                        x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
-                    throw new InvalidOperationException("The source AP invoice must have a posted expense journal.");
-                var invoicedExpense = await _db.JournalLines.Where(x =>
-                    x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == line.GlAccountId)
-                    .SumAsync(x => x.Debit - x.Credit, ct);
-                if (invoicedExpense != invoice.Total)
-                    throw new InvalidOperationException("The posted AP invoice journal does not support the exact expenditure classification and amount.");
+                if (allocations.Count == 0 || allocations.Any(x => x.AmountApplied <= 0m) ||
+                    allocations.Sum(x => x.AmountApplied) != payment.Amount)
+                    throw new InvalidOperationException("The AP payment must be fully allocated across its invoice settlements before IPSAS 24 capture.");
+                var invoiceIds = allocations.Select(x => x.ApInvoiceId).Distinct().ToArray();
+                var invoices = await _db.ApInvoices.Where(x =>
+                    x.CompanyId == companyId && invoiceIds.Contains(x.Id)).ToListAsync(ct);
+                if (invoices.Count != invoiceIds.Length)
+                    throw new InvalidOperationException("Every AP payment allocation must reference an invoice belonging to this company.");
+                amount = 0m;
+                foreach (var allocation in allocations)
+                {
+                    var invoice = invoices.Single(x => x.Id == allocation.ApInvoiceId);
+                    if (invoice.SupplierId != payment.SupplierId || invoice.Status != InvoiceStatus.Paid ||
+                        !invoice.FundCentreId.HasValue || invoice.Currency != payment.Currency ||
+                        invoice.Total != allocation.AmountApplied || invoice.VatAmount != 0m ||
+                        invoice.WhtAmount != 0m || !invoice.JournalEntryId.HasValue ||
+                        !await _db.JournalEntries.AnyAsync(x => x.Id == invoice.JournalEntryId.Value &&
+                            x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                        throw new InvalidOperationException("Split AP capture currently requires fully settled, tax-free invoices with an explicit Fund Centre and posted expense journals.");
+                    var invoiceLines = await _db.ApInvoiceLines.Where(x => x.ApInvoiceId == invoice.Id).ToListAsync(ct);
+                    if (invoiceLines.Count == 0 || invoiceLines.Sum(x => x.LineTotal) != invoice.Total)
+                        throw new InvalidOperationException("AP invoice lines must reconcile exactly to the fully settled tax-free invoice total.");
+                    var expectedByAccount = invoiceLines.Where(x => x.GlAccountId == line.GlAccountId)
+                        .Sum(x => x.LineTotal);
+                    if (invoice.FundCentreId == line.FundCentreId && expectedByAccount > 0m)
+                    {
+                        var postedExpense = await _db.JournalLines.Where(x =>
+                            x.JournalEntryId == invoice.JournalEntryId.Value &&
+                            x.GlAccountId == line.GlAccountId && x.FundCentreId == line.FundCentreId &&
+                            x.CostCentreId == null)
+                            .SumAsync(x => x.Debit - x.Credit, ct);
+                        if (postedExpense != invoiceLines.Where(x => x.GlAccountId == line.GlAccountId)
+                            .Sum(x => x.LineTotal))
+                            throw new InvalidOperationException("The posted AP invoice expense journal does not support the selected GL/Fund Centre allocation.");
+                        amount += expectedByAccount;
+                    }
+                }
+                if (amount <= 0m || line.CostCentreId.HasValue)
+                    throw new InvalidOperationException("The selected budget line has no supported AP invoice-line allocation. Cost-centre, VAT and withholding-tax allocations require explicit line-level mapping.");
                 var paymentBankCandidates = await _db.BankAccounts.Where(x =>
                     x.CompanyId == companyId && x.Currency == payment.Currency &&
                     _db.JournalLines.Any(j => j.JournalEntryId == payment.JournalEntryId.Value &&
@@ -1378,7 +1417,6 @@ namespace ApexERP.Application.Services
                     .SumAsync(x => x.Credit - x.Debit, ct);
                 if (bankLeg != payment.Amount)
                     throw new InvalidOperationException("The posted AP payment journal does not contain the exact bank credit for the payment amount.");
-                amount = payment.Amount;
                 currency = payment.Currency;
                 sourceDate = payment.PaymentDate;
                 sourceReference = string.IsNullOrWhiteSpace(payment.PaymentNo) ? payment.Id.ToString("N") : payment.PaymentNo;
@@ -1442,6 +1480,19 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("Only a pending budget actual can be certified.");
                 if (actual.CreatedBy == certifierId)
                     throw new InvalidOperationException("The person who captured the budget actual cannot certify it.");
+                if (actual.SourceKind is PublicSectorBudgetActualSourceKind.ArReceipt or PublicSectorBudgetActualSourceKind.ApPayment)
+                {
+                    var sourceAllocations = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
+                        x.CompanyId == companyId && x.SourceKind == actual.SourceKind &&
+                        x.SourceRecordId == actual.SourceRecordId).ToListAsync(token);
+                    var sourceAmount = actual.SourceKind == PublicSectorBudgetActualSourceKind.ArReceipt
+                        ? await _db.ArReceipts.Where(x => x.Id == actual.SourceRecordId && x.CompanyId == companyId)
+                            .Select(x => (decimal?)x.Amount).FirstOrDefaultAsync(token)
+                        : await _db.ApPayments.Where(x => x.Id == actual.SourceRecordId && x.CompanyId == companyId)
+                            .Select(x => (decimal?)x.Amount).FirstOrDefaultAsync(token);
+                    if (!sourceAmount.HasValue || sourceAllocations.Sum(x => x.Amount) != sourceAmount.Value)
+                        throw new InvalidOperationException("All invoice-line allocations for this receipt/payment must be captured and reconcile exactly to the source cash amount before any allocation can be certified.");
+                }
                 actual.Status = PublicSectorBudgetActualStatus.Certified;
                 actual.CertifiedBy = certifierId;
                 actual.CertifiedAt = DateTime.UtcNow;
