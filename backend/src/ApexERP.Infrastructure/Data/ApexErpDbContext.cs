@@ -64,6 +64,8 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<JournalLine> JournalLines => Set<JournalLine>();
         public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
         public DbSet<TaxCode> TaxCodes => Set<TaxCode>();
+        public DbSet<TaxAccountMapping> TaxAccountMappings => Set<TaxAccountMapping>();
+        public DbSet<InvoiceTaxComponent> InvoiceTaxComponents => Set<InvoiceTaxComponent>();
         public DbSet<PayeTaxBand> PayeTaxBands => Set<PayeTaxBand>();
         public DbSet<DividendDeclaration> DividendDeclarations => Set<DividendDeclaration>();
         public DbSet<FinancialStatementNote> FinancialStatementNotes => Set<FinancialStatementNote>();
@@ -182,6 +184,8 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<PublicSectorCashSourceReconciliationLine> PublicSectorCashSourceReconciliationLines => Set<PublicSectorCashSourceReconciliationLine>();
         public DbSet<PublicSectorExpectedCashSourceRegisterAttestation> PublicSectorExpectedCashSourceRegisterAttestations => Set<PublicSectorExpectedCashSourceRegisterAttestation>();
         public DbSet<PublicSectorBudgetVarianceExplanation> PublicSectorBudgetVarianceExplanations => Set<PublicSectorBudgetVarianceExplanation>();
+        public DbSet<PublicSectorTaxBudgetPolicy> PublicSectorTaxBudgetPolicies => Set<PublicSectorTaxBudgetPolicy>();
+        public DbSet<SettlementComponentAllocation> SettlementComponentAllocations => Set<SettlementComponentAllocation>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
@@ -390,6 +394,19 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionId })
                 .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
+            modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.VersionNumber }).IsUnique();
+            modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo });
+            modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.InvoiceKind, x.InvoiceId, x.JournalLineId }).IsUnique();
+            modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.TaxAccountMappingId, x.InvoiceId });
+            modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.VersionNumber }).IsUnique();
+            modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo });
+            modelBuilder.Entity<SettlementComponentAllocation>().HasIndex(x => new { x.CompanyId, x.SettlementKind, x.SettlementAllocationId, x.InvoiceLineId, x.TaxComponentId }).IsUnique();
+            modelBuilder.Entity<SettlementComponentAllocation>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_SettlementComponentAllocation_Component",
+                    "((\\"ComponentKind\\" = 0 AND \\"InvoiceLineId\\" IS NOT NULL AND \\"TaxComponentId\\" IS NULL) OR (\\"ComponentKind\\" = 1 AND \\"InvoiceLineId\\" IS NULL AND \\"TaxComponentId\\" IS NOT NULL))");
+                t.HasCheckConstraint("CK_SettlementComponentAllocation_Amount", "\\"AmountApplied\\" > 0");
+            });
             modelBuilder.Entity<PublicSectorBudgetVarianceExplanation>()
                  .HasIndex(x => new { x.CompanyId, x.BudgetVersionLineId })
                 .HasDatabaseName("IX_PublicSectorBudgetVarianceExplanation_Line");
@@ -527,6 +544,8 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<JournalEntry>(modelBuilder);
             ApplyTenantFilter<ExchangeRate>(modelBuilder);
             ApplyTenantFilter<TaxCode>(modelBuilder);
+            ApplyTenantFilter<TaxAccountMapping>(modelBuilder);
+            ApplyTenantFilter<InvoiceTaxComponent>(modelBuilder);
             ApplyTenantFilter<PayeTaxBand>(modelBuilder);
             ApplyTenantFilter<Customer>(modelBuilder);
             ApplyTenantFilter<ArInvoice>(modelBuilder);
@@ -577,6 +596,8 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<PublicSectorCashSourceReconciliationLine>(modelBuilder);
             ApplyTenantFilter<PublicSectorExpectedCashSourceRegisterAttestation>(modelBuilder);
             ApplyTenantFilter<PublicSectorBudgetVarianceExplanation>(modelBuilder);
+            ApplyTenantFilter<PublicSectorTaxBudgetPolicy>(modelBuilder);
+            ApplyTenantFilter<SettlementComponentAllocation>(modelBuilder);
             ApplyTenantFilter<Commitment>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
