@@ -468,8 +468,8 @@ export default function PublicSectorPage() {
               {budgetComparisonLoading ? "Loading…" : "Refresh statement"}
             </button>
             {budgetComparison && <button className="btn-secondary" onClick={exportBudgetComparison}
-              disabled={!budgetComparison.comparableActualsAvailable || !budgetComparison.varianceExplanationsComplete || !budgetComparison.originalToFinalExplanationsComplete}
-              title={!budgetComparison.comparableActualsAvailable ? "Comparable actuals are not available." : !budgetComparison.originalToFinalExplanationsComplete ? "Classify and explain changes from the original to final budget before export." : !budgetComparison.varianceExplanationsComplete ? "Approve all non-zero variance explanations before export." : "Export the reconciled IPSAS 24 comparison."}>Export CSV</button>}
+              disabled={!budgetComparison.comparableActualsAvailable || !budgetComparison.varianceExplanationsComplete || !budgetComparison.originalToFinalExplanationsComplete || (budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled)}
+              title={!budgetComparison.comparableActualsAvailable ? "Comparable actuals are not available." : !budgetComparison.originalToFinalExplanationsComplete ? "Classify and explain changes from the original to final budget before export." : !budgetComparison.varianceExplanationsComplete ? "Approve all non-zero variance explanations before export." : budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled ? "Complete the independently reviewed Statement of Cash Flows bridge before export." : "Export the reconciled IPSAS 24 comparison."}>Export CSV</button>}
           </div>
           {budgetComparisonLoading && <p className="text-sm text-slate-500">Loading approved budget versions and ledger actuals…</p>}
           <form onSubmit={createBudgetVersion} className="rounded-lg border p-4 space-y-3">
@@ -812,6 +812,9 @@ export default function PublicSectorPage() {
               <div className="border rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h3 className="font-semibold">Final budget-to-actual variance explanations</h3>
+                  <span className={budgetComparison.originalToFinalExplanationsComplete ? "text-sm text-green-700" : "text-sm text-amber-700"}>
+                    {budgetComparison.originalToFinalExplanationsComplete ? "Original-to-final budget changes classified and explained" : "Original-to-final amendment classification outstanding"}
+                  </span>
                   <span className={budgetComparison.originalToFinalExplanationsComplete ? "text-sm text-green-700" : "text-sm text-amber-700"}>
                     {budgetComparison.originalToFinalExplanationsComplete ? "Original-to-final budget changes classified and explained" : "Original-to-final amendment classification outstanding"}
                   </span>
