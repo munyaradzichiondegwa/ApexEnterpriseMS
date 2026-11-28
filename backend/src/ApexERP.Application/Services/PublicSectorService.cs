@@ -3269,6 +3269,8 @@ namespace ApexERP.Application.Services
                 return null;
             }
             if (source.Debit <= 0m || source.Credit != 0m || details.Count == 0 ||
+                details.Any(x => x.ComponentKind != SettlementComponentKind.TaxComponent ||
+                    !x.TaxComponentId.HasValue || x.InvoiceLineId.HasValue || x.AmountApplied <= 0m) ||
                 details.Sum(x => x.AmountApplied) != source.Debit)
                 throw new InvalidOperationException("WHT bank remittance must be fully allocated to posted WHT tax components.");
 
@@ -3297,6 +3299,8 @@ namespace ApexERP.Application.Services
             {
                 var component = components.Single(x => x.Id == detail.TaxComponentId);
                 var invoice = invoices.Single(x => x.Id == component.InvoiceId);
+                if (!invoice.FundCentreId.HasValue)
+                    throw new InvalidOperationException("WHT remittance requires the originating AP invoice to retain its Fund Centre.");
                 var prior = await _db.SettlementComponentAllocations.Where(x =>
                     x.CompanyId == companyId && x.SettlementKind == "TX" &&
                     x.TaxComponentId == component.Id && x.SettlementAllocationId != source.Id)
