@@ -1048,6 +1048,11 @@ namespace ApexERP.Tests
                     Debit = 75m, Credit = 0m, Reference = "BANK-REF-001",
                     IsReconciled = true, JournalEntryId = journalId
                 });
+                seed.JournalLines.Add(new JournalLine
+                {
+                    JournalEntryId = journalId, GlAccountId = accountId, FundCentreId = fundCentreId,
+                    Debit = 75m, Credit = 0m, BaseDebit = 75m, BaseCredit = 0m
+                });
                 var version = new PublicSectorBudgetVersion
                 {
                     Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
