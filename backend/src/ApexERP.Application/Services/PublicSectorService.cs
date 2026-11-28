@@ -547,15 +547,15 @@ namespace ApexERP.Application.Services
             Math.Abs(left - right) <= 0.000001m;
 
         private static bool AreCashSourceSubmissionBalancesReconciled(
-            PublicSectorExpectedCashSource expected, PublicSectorCashSourceSubmission submission,
+            PublicSectorExpectedCashSource expected, decimal openingBalance, decimal closingBalance,
             ExpectedCashSourcePopulation population)
         {
             if (expected.SourceKind == "BankAccount") return true;
             return population.OpeningSubledgerBalance.HasValue &&
                 population.ClosingSubledgerBalance.HasValue &&
                 population.OpeningGlBalance.HasValue && population.ClosingGlBalance.HasValue &&
-                CloseEnough(submission.OpeningBalance, population.OpeningSubledgerBalance.Value) &&
-                CloseEnough(submission.ClosingBalance, population.ClosingSubledgerBalance.Value) &&
+                CloseEnough(openingBalance, population.OpeningSubledgerBalance.Value) &&
+                CloseEnough(closingBalance, population.ClosingSubledgerBalance.Value) &&
                 CloseEnough(population.OpeningSubledgerBalance.Value, population.OpeningGlBalance.Value) &&
                 CloseEnough(population.ClosingSubledgerBalance.Value, population.ClosingGlBalance.Value);
         }
@@ -614,7 +614,7 @@ namespace ApexERP.Application.Services
                 var closingSubledger = await GetArControlSubledgerBalanceAsync(
                     companyId, sourceId, normalisedControlCurrency, periodEnd, ct);
                 var openingGl = await GetControlGlBalanceAsync(
-                    companyId, sourceId, normalisedControlCurrency, periodStart, liability: false, ct);
+                    companyId, sourceId, normalisedControlCurrency, periodStart, liability: false, ct: ct);
                 var closingGl = await GetControlGlBalanceAsync(
                     companyId, sourceId, normalisedControlCurrency, periodEnd, liability: false, ct);
                 return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
@@ -646,7 +646,7 @@ namespace ApexERP.Application.Services
                 var closingSubledger = await GetApControlSubledgerBalanceAsync(
                     companyId, sourceId, normalisedControlCurrency, periodEnd, ct);
                 var openingGl = await GetControlGlBalanceAsync(
-                    companyId, sourceId, normalisedControlCurrency, periodStart, liability: true, ct);
+                    companyId, sourceId, normalisedControlCurrency, periodStart, liability: true, ct: ct);
                 var closingGl = await GetControlGlBalanceAsync(
                     companyId, sourceId, normalisedControlCurrency, periodEnd, liability: true, ct);
                 return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
