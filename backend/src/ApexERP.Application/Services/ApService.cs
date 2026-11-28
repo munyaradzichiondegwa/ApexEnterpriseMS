@@ -281,7 +281,7 @@ namespace ApexERP.Application.Services
                                 CompanyId = companyId, InvoiceKind = "AP", InvoiceId = invoice.Id,
                                 InvoiceLineId = invoiceLine.Id, TaxCodeId = taxCodeId, TaxType = TaxType.VAT,
                                 TaxableBase = invoiceLine.LineSubtotal,
-                                Rate = invoiceLine.LineSubtotal == 0m ? 0m : invoiceLine.LineVat / invoiceLine.LineSubtotal,
+                                Rate = await _db.TaxCodes.Where(x => x.Id == taxCodeId && x.CompanyId == companyId).Select(x => x.Rate).SingleAsync(token),
                                 Amount = invoiceLine.LineVat, GlAccountId = mapping.GlAccountId,
                                 TaxAccountMappingId = mapping.Id, MappingVersionNumber = mapping.VersionNumber,
                                 JournalEntryId = journal.Id, JournalLineId = journalLine.Id
@@ -298,7 +298,7 @@ namespace ApexERP.Application.Services
                         .SingleAsync(token);
                     var journalLine = journal.Lines.Single(x => x.GlAccountId == mapping.GlAccountId &&
                         x.Credit == invoice.WhtAmount && x.TaxCodeId == null);
-                    var rate = invoice.Subtotal == 0m ? 0m : invoice.WhtAmount / invoice.Subtotal;
+                    var rate = await _db.Suppliers.Where(x => x.Id == invoice.SupplierId && x.CompanyId == companyId).Select(x => x.WhtRate).SingleAsync(token);
                     _db.InvoiceTaxComponents.Add(new InvoiceTaxComponent
                     {
                         CompanyId = companyId, InvoiceKind = "AP", InvoiceId = invoice.Id,
