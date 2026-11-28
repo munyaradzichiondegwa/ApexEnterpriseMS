@@ -149,26 +149,24 @@ public sealed class ZimbabweDswtWithholdingRegisterService
         var payment = await _db.ApPayments.FirstOrDefaultAsync(
             x => x.CompanyId == companyId && x.Id == apPaymentId, ct)
             ?? throw new InvalidOperationException("The linked AP payment does not exist in this company.");
-        if (payment.Amount != grossPaymentAmount)
-            throw new InvalidOperationException("The AP payment must equal the gross payment before intermediary withholding, not the supplier's net remittance.");
-        if (!string.Equals(payment.Currency, currency, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The AP payment currency does not match the DSWT payment currency.");
-        if (!payment.BankAccountId.HasValue)
-            throw new InvalidOperationException("The AP payment must identify its originating bank account before DSWT reconciliation.");
-        var bank = await _db.BankAccounts.FirstOrDefaultAsync(
-            x => x.CompanyId == companyId && x.Id == payment.BankAccountId.Value, ct)
-            ?? throw new InvalidOperationException("The AP payment's bank account does not exist in this company.");
-        if (!string.Equals(bank.Currency, payment.Currency, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The AP payment and originating bank account currencies do not match.");
-        if (!payment.JournalEntryId.HasValue ||
-            !await _db.JournalEntries.AnyAsync(x => x.CompanyId == companyId &&
-                x.Id == payment.JournalEntryId.Value && x.Status == JournalStatus.Posted, ct))
-            throw new InvalidOperationException("The AP payment must have a posted GL journal before DSWT reconciliation.");
+        var bank = payment.BankAccountId.HasValue
+            ? await _db.BankAccounts.FirstOrDefaultAsync(
+                x => x.CompanyId == companyId && x.Id == payment.BankAccountId.Value, ct)
+            : null;
+        if (payment.BankAccountId.HasValue && bank == null)
+            throw new InvalidOperationException("The AP payment's bank account does not exist in this company.");
+        var journalPosted = payment.JournalEntryId.HasValue &&
+            await _db.JournalEntries.AnyAsync(x => x.CompanyId == companyId &&
+                x.Id == payment.JournalEntryId.Value && x.Status == JournalStatus.Posted, ct);
         var supplier = await _db.Suppliers.FirstOrDefaultAsync(
             x => x.CompanyId == companyId && x.Id == payment.SupplierId, ct)
             ?? throw new InvalidOperationException("The AP payment supplier does not exist in this company.");
-        if (!string.Equals(supplier.Name.Trim(), supplierName.Trim(), StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The AP payment supplier does not match the DSWT supplier.");
+
+        ZimbabweDswtApPaymentReconciliationValidator.EnsureValid(
+            grossPaymentAmount, currency, supplierName,
+            new ZimbabweDswtApPaymentEvidence(
+                payment.Amount, payment.Currency, supplier.Name,
+                bank != null, bank?.Currency, journalPosted));
     }
 
     public async Task<ZimbabweDswtWithholdingRecord> IssueCertificateAsync(
