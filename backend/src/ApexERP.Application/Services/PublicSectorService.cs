@@ -1907,24 +1907,42 @@ namespace ApexERP.Application.Services
                             line => line.GoodsReceiptId, header => header.Id,
                             (line, header) => new { Line = line, Header = header })
                         .SingleOrDefaultAsync(ct);
-                    var valid = ledger.EventKind == ModifiedCashLedgerEventKind.Recognition &&
-                        commitment != null && receipt != null &&
-                        receipt.Header.PurchaseOrderId == commitment.PurchaseOrderId &&
-                        decimal.Round(receipt.Line.QuantityReceived * receipt.Line.UnitCost, 6,
-                            MidpointRounding.AwayFromZero) == ledger.Amount &&
-                        receipt.Header.ReceiptDate == ledger.EventDate &&
-                        ledger.EventDate >= captured.Policy.ReportingPeriodStart &&
-                        ledger.EventDate < captured.Policy.ReportingPeriodEnd &&
-                        ledger.EventDate >= captured.Policy.EffectiveFrom &&
-                        (!captured.Policy.EffectiveTo.HasValue || ledger.EventDate < captured.Policy.EffectiveTo.Value) &&
-                        ledger.EvidenceAcceptedAt <= captured.Policy.ReportingPeriodEnd.AddDays(
-                            captured.Policy.PostPeriodRecognitionWindowDays) &&
+                    var mappingValid = commitment != null &&
                         captured.Mapping.CompanyId == companyId &&
                         captured.Mapping.BudgetVersionLineId != Guid.Empty &&
                         await _db.PublicSectorBudgetVersionLines.AnyAsync(x =>
                             x.Id == captured.Mapping.BudgetVersionLineId &&
                             x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id &&
                             x.FundCentreId == commitment!.FundCentreId, ct);
+                    var sourceValid = commitment != null && receipt != null &&
+                        receipt.Header.PurchaseOrderId == commitment.PurchaseOrderId &&
+                        decimal.Round(receipt.Line.QuantityReceived * receipt.Line.UnitCost, 6,
+                            MidpointRounding.AwayFromZero) == ledger.Amount &&
+                        receipt.Header.ReceiptDate == ledger.EventDate;
+                    var policyPeriodValid = ledger.EventDate >= captured.Policy.ReportingPeriodStart &&
+                        ledger.EventDate < captured.Policy.ReportingPeriodEnd &&
+                        ledger.EventDate >= captured.Policy.EffectiveFrom &&
+                        (!captured.Policy.EffectiveTo.HasValue || ledger.EventDate < captured.Policy.EffectiveTo.Value) &&
+                        ledger.EvidenceAcceptedAt <= captured.Policy.ReportingPeriodEnd.AddDays(
+                            captured.Policy.PostPeriodRecognitionWindowDays);
+                    var valid = false;
+                    if (ledger.EventKind == ModifiedCashLedgerEventKind.Recognition)
+                        valid = sourceValid && policyPeriodValid && mappingValid;
+                    else if (ledger.EventKind == ModifiedCashLedgerEventKind.Reversal &&
+                        ledger.OriginalEventId.HasValue)
+                    {
+                        var original = await _db.ModifiedCashRecognitionLedgerEvents.FirstOrDefaultAsync(x =>
+                            x.Id == ledger.OriginalEventId.Value && x.CompanyId == companyId &&
+                            x.Status == ModifiedCashLedgerEventStatus.Certified &&
+                            x.EventKind == ModifiedCashLedgerEventKind.Recognition &&
+                            !x.OriginalEventId.HasValue, ct);
+                        valid = sourceValid && policyPeriodValid && mappingValid &&
+                            original != null && commitment != null && commitment.RealisedAmount == 0m &&
+                            original.PolicyId == ledger.PolicyId &&
+                            original.CommitmentId == ledger.CommitmentId &&
+                            original.SourceEventId == ledger.SourceEventId &&
+                            original.Amount == ledger.Amount && original.EventDate == ledger.EventDate;
+                    }
                     if (!valid) invalidModifiedCashEvents++;
                 }
                 if (invalidModifiedCashEvents > 0)
