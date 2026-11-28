@@ -48,9 +48,9 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             throw new ArgumentException("The intermediary payment reference is required.", nameof(request));
         if (string.IsNullOrWhiteSpace(request.IntermediaryName) || string.IsNullOrWhiteSpace(request.SupplierName))
             throw new ArgumentException("Intermediary and supplier names are required.", nameof(request));
-        if (request.SupplierCountryCode?.Length != 2 || request.SupplierCountryCode.Any(c => !char.IsAsciiLetter(c)))
+        if (string.IsNullOrWhiteSpace(request.SupplierCountryCode) || request.SupplierCountryCode.Length != 2 || request.SupplierCountryCode.Any(c => !char.IsAsciiLetter(c)))
             throw new ArgumentException("Supplier country must be a two-letter ISO country code.", nameof(request));
-        if (request.Currency?.Length != 3 || request.Currency.Any(c => !char.IsAsciiLetter(c)))
+        if (string.IsNullOrWhiteSpace(request.Currency) || request.Currency.Length != 3 || request.Currency.Any(c => !char.IsAsciiLetter(c)))
             throw new ArgumentException("Currency must be a three-letter ISO currency code.", nameof(request));
         if (request.WithheldAt == default || request.WithheldAt.Date < new DateTime(2026, 1, 1))
             throw new ArgumentException("The actual withholding date must be on or after 1 January 2026.", nameof(request));
@@ -117,6 +117,8 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             ?? throw new InvalidOperationException("DSWT record not found in this company.");
         if (record.Status != ZimbabweDswtRecordStatus.Recorded)
             throw new InvalidOperationException("A certificate can only be issued once for a recorded withholding.");
+        if (issuedAt < record.WithheldAt)
+            throw new InvalidOperationException("The certificate issue date cannot precede the withholding date.");
         var certificate = certificateNumber.Trim();
         if (await _db.ZimbabweDswtWithholdingRecords.AnyAsync(x =>
             x.CompanyId == companyId && x.CertificateNumber == certificate, ct))
@@ -139,8 +141,8 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             ?? throw new InvalidOperationException("DSWT record not found in this company.");
         if (record.Status != ZimbabweDswtRecordStatus.CertificateIssued)
             throw new InvalidOperationException("Only certificate-issued withholding can be marked as remitted.");
-        if (remittedAt < record.WithheldAt)
-            throw new InvalidOperationException("The ZIMRA remittance date cannot precede the withholding date.");
+        if (remittedAt < record.WithheldAt || (record.CertificateIssuedAt.HasValue && remittedAt < record.CertificateIssuedAt.Value))
+            throw new InvalidOperationException("The ZIMRA remittance date cannot precede the withholding or certificate issue date.");
 
         record.RemittedToZimraAt = remittedAt;
         record.EvidenceReference = string.IsNullOrWhiteSpace(record.EvidenceReference)
