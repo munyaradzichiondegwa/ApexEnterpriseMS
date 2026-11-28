@@ -1011,8 +1011,12 @@ namespace ApexERP.Application.Services
                     line.CompanyId == companyId && line.BudgetExecutionActualId == actual.Id &&
                     _db.PublicSectorCashSourceSubmissions.Any(submission =>
                         submission.Id == line.CashSourceSubmissionId && submission.CompanyId == companyId &&
-                        submission.Status != "Rejected" && submission.RecordLevelStatus != "Rejected"), ct))
-                    throw new InvalidOperationException("A certified budget actual cannot be reconciled more than once in an active source submission.");
+                        submission.Status != "Rejected" && submission.RecordLevelStatus != "Rejected" &&
+                        submission.SubmissionRevision == _db.PublicSectorCashSourceSubmissions
+                            .Where(latest => latest.CompanyId == companyId &&
+                                latest.ExpectedCashSourceId == submission.ExpectedCashSourceId)
+                            .Max(latest => latest.SubmissionRevision)), ct))
+                    throw new InvalidOperationException("A certified budget actual cannot be reconciled more than once in the latest active source revision.");
                 var existing = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
                     x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId &&
                     x.SourceRecordId == sourceRecordId).ToListAsync(ct);
