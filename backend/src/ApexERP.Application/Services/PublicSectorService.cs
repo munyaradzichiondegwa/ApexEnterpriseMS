@@ -443,6 +443,32 @@ namespace ApexERP.Application.Services
                         .Select(x => x.JournalEntryId!.Value))
                     .Distinct().ToArrayAsync(ct);
 
+                // Every posted AR receipt/AP payment in the period must be represented by
+                // its own certified source actual, or by a certified bank actual from the
+                // same settlement journal. Otherwise a partial source capture could make
+                // the period appear complete merely because some cash actuals exist.
+                var capturedBankJournalIds = capturedSourceIds.Length == 0
+                    ? Array.Empty<Guid>()
+                    : await _db.BankTransactions.Where(x => x.CompanyId == companyId &&
+                            capturedSourceIds.Contains(x.Id) && x.JournalEntryId.HasValue)
+                        .Select(x => x.JournalEntryId!.Value).Distinct().ToArrayAsync(ct);
+                var postedArReceipts = await _db.ArReceipts.Where(x =>
+                        x.CompanyId == companyId && x.ReceiptDate >= actualVersion.PeriodStart &&
+                        x.ReceiptDate < actualVersion.PeriodEnd && x.JournalEntryId.HasValue &&
+                        _db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
+                            j.CompanyId == companyId && j.Status == JournalStatus.Posted))
+                    .Select(x => new { x.Id, JournalEntryId = x.JournalEntryId!.Value }).ToListAsync(ct);
+                var postedApPayments = await _db.ApPayments.Where(x =>
+                        x.CompanyId == companyId && x.PaymentDate >= actualVersion.PeriodStart &&
+                        x.PaymentDate < actualVersion.PeriodEnd && x.JournalEntryId.HasValue &&
+                        _db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
+                            j.CompanyId == companyId && j.Status == JournalStatus.Posted))
+                    .Select(x => new { x.Id, JournalEntryId = x.JournalEntryId!.Value }).ToListAsync(ct);
+                var missingArSettlementCoverage = postedArReceipts.Count(x =>
+                    !arReceiptIds.Contains(x.Id) && !capturedBankJournalIds.Contains(x.JournalEntryId));
+                var missingApSettlementCoverage = postedApPayments.Count(x =>
+                    !apPaymentIds.Contains(x.Id) && !capturedBankJournalIds.Contains(x.JournalEntryId));
+
                 // A reconciled bank movement may be represented by its posted AR receipt/AP
                 // payment source. Match those settlements through their posted journal identity;
                 // do not require duplicate capture of the same underlying cash movement.
@@ -464,12 +490,17 @@ namespace ApexERP.Application.Services
 
                 if (uncapturedMovements > 0)
                     comparabilityIssues.Add($"Cash actual source coverage is incomplete: {uncapturedMovements} posted bank movements are unreconciled or have not been captured.");
+                if (missingArSettlementCoverage > 0)
+                    comparabilityIssues.Add($"Cash actual source coverage is incomplete: {missingArSettlementCoverage} posted AR receipts are neither captured directly nor covered by a captured bank settlement.");
+                if (missingApSettlementCoverage > 0)
+                    comparabilityIssues.Add($"Cash actual source coverage is incomplete: {missingApSettlementCoverage} posted AP payments are neither captured directly nor covered by a captured bank settlement.");
                 if (pendingCashActuals > 0)
                     comparabilityIssues.Add($"Cash actual certification is incomplete: {pendingCashActuals} actual records remain draft or pending certification.");
                 if (invalidCertifiedCashActuals > 0)
                     comparabilityIssues.Add($"Cash actual evidence has changed or is no longer valid for {invalidCertifiedCashActuals} certified records.");
 
-                if (uncapturedMovements == 0 && pendingCashActuals == 0 && invalidCertifiedCashActuals == 0)
+                if (uncapturedMovements == 0 && missingArSettlementCoverage == 0 &&
+                    missingApSettlementCoverage == 0 && pendingCashActuals == 0 && invalidCertifiedCashActuals == 0)
                 {
                     foreach (var group in cashActuals.GroupBy(x => x.BudgetVersionLineId))
                         cashActualsByBudgetLine[group.Key] = group.Sum(x => x.Amount);
