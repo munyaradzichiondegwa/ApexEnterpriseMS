@@ -29,7 +29,7 @@ public sealed class AddIpsas24CertifiedActualReversals : Migration
             table: "PublicSectorBudgetExecutionActuals",
             columns: new[] { "CompanyId", "SourceKind", "SourceRecordId", "BudgetVersionLineId" },
             unique: true,
-            filter: "\"ReversalOfId\" IS NULL");
+            filter: "\"ReversalOfId\" IS NULL AND \"Status\" <> 4");
 
         migrationBuilder.CreateIndex(
             name: "UX_PublicSectorBudgetExecutionActual_OneReversal",
