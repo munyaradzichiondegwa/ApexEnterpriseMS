@@ -113,6 +113,8 @@ namespace ApexERP.Domain.Entities
         /// <summary>Grants & NGO (Module 15): auto-tags this line to a grant so expenditure rolls up
         /// into that grant's budget-vs-actual and donor reporting automatically.</summary>
         public Guid? GrantId { get; set; }
+        /// <summary>Tax-code provenance for tax journal legs; null for non-tax and code-less WHT legs.</summary>
+        public Guid? TaxCodeId { get; set; }
     }
 
     /// <summary>Daily exchange rates (ZIMRA official + manual override) used for FX translation.</summary>
