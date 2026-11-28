@@ -880,7 +880,7 @@ namespace ApexERP.Application.Services
                             batch.UploadedBy == batch.AuthenticatedBy ||
                             batch.UploadedBy == batch.CompletenessCertifiedBy ||
                             batch.AuthenticatedBy == batch.CompletenessCertifiedBy ||
-                            batch.ByteLength != batch.OriginalBytes.LongLength ||
+                            batch.ByteLength <= 0 ||
                             batch.Sha256.Length != 64 || !batch.Sha256.All(Uri.IsHexDigit) ||
                             batch.OpeningBalance + batch.TotalCredits - batch.TotalDebits != batch.ClosingBalance ||
                             !string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase))
