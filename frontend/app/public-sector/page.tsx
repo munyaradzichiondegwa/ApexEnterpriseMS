@@ -24,7 +24,8 @@ export default function PublicSectorPage() {
   const [registerAttestationEvidence, setRegisterAttestationEvidence] = useState("");
   const [expectedSourceDraft, setExpectedSourceDraft] = useState({ sourceKind: "BankAccount", sourceCode: "", sourceName: "", sourceIdentifier: "", isRequired: true });
   const [sourceSubmissionDraft, setSourceSubmissionDraft] = useState({ expectedCashSourceId: "", recordCount: 0, controlTotal: 0, openingBalance: 0, closingBalance: 0, currency: "USD", evidenceReference: "" });
-  const [recordLineDraft, setRecordLineDraft] = useState({ sourceRecordId: "", sourceReference: "", budgetExecutionActualId: "", isExcluded: false, exclusionReason: "" });
+  const [recordLineDraft, setRecordLineDraft] = useState({ submissionId: "", sourceRecordId: "", sourceReference: "", budgetExecutionActualId: "", isExcluded: false, exclusionReason: "" });
+  const [reconciliationLines, setReconciliationLines] = useState<any[]>([]);
   const [zeroActivityEvidence, setZeroActivityEvidence] = useState("");
   const [cashActualReconciliation, setCashActualReconciliation] = useState<any | null>(null);
   const [cashBankTransactions, setCashBankTransactions] = useState<any[]>([]);
@@ -275,14 +276,20 @@ export default function PublicSectorPage() {
     } catch (err) { setError(extractErrorMessage(err)); }
   }
 
-  const selectedExpectedSource = expectedCashSources.find((x: any) => x.id === sourceSubmissionDraft.expectedCashSourceId);
-  const selectedReconciliationSubmission = cashSourceSubmissions.find((x: any) => x.id === recordLineDraft.submissionId);
   const selectedSourceKind = expectedCashSources.find((x: any) =>
     x.id === cashSourceSubmissions.find((s: any) => s.id === recordLineDraft.submissionId)?.expectedCashSourceId
   )?.sourceKind;
   const sourceRecordsForReconciliation = selectedSourceKind === "BankAccount" ? cashBankTransactions
     : selectedSourceKind === "ReceivablesControl" ? cashArReceipts
     : selectedSourceKind === "PayablesControl" ? cashApPayments : [];
+
+  async function loadReconciliationLines(submissionId: string) {
+    if (!submissionId) { setReconciliationLines([]); return; }
+    try {
+      const response = await api.get(`/public-sector/cash-source-submissions/${submissionId}/reconciliation-lines`);
+      setReconciliationLines(response.data);
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
 
   async function addSourceReconciliationLine(e: React.FormEvent) {
     e.preventDefault();
@@ -297,6 +304,7 @@ export default function PublicSectorPage() {
       });
       setMsg("Source transaction mapping recorded.");
       setRecordLineDraft({ ...recordLineDraft, sourceRecordId: "", sourceReference: "", budgetExecutionActualId: "", exclusionReason: "" });
+      await loadReconciliationLines(recordLineDraft.submissionId);
       await loadCashActuals();
     } catch (err) { setError(extractErrorMessage(err)); }
   }
@@ -529,6 +537,114 @@ export default function PublicSectorPage() {
               </div>
               <div className="md:col-span-3"><button className="btn-primary" disabled={!approvedBudgetVersions.length || !(cashActualDraft.sourceKind === "BankTransaction" ? cashBankTransactions.length : cashActualDraft.sourceKind === "ArReceipt" ? cashArReceipts.length : cashApPayments.length)}>Capture cash actual</button></div>
             </form>
+
+            <div className="border rounded-lg p-4 space-y-4">
+              <div>
+                <h4 className="font-semibold">Expected source register and transaction reconciliation</h4>
+                <p className="text-xs text-slate-500">Register every bank account, receivables-control and payables-control population for this budget period. Each source must have reviewed period controls, record-by-record allocation or a reasoned exclusion, and independent register-completeness certification. Cashbook imports require a separate adapter and are not enabled here.</p>
+              </div>
+              <form onSubmit={createExpectedCashSource} className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <select className="input" value={expectedSourceDraft.sourceKind} onChange={(e) => setExpectedSourceDraft({ ...expectedSourceDraft, sourceKind: e.target.value })}>
+                  <option value="BankAccount">Bank account</option><option value="ReceivablesControl">Receivables control</option><option value="PayablesControl">Payables control</option>
+                </select>
+                <input className="input" required placeholder="Source code" value={expectedSourceDraft.sourceCode} onChange={(e) => setExpectedSourceDraft({ ...expectedSourceDraft, sourceCode: e.target.value })} />
+                <input className="input" required placeholder="Source name" value={expectedSourceDraft.sourceName} onChange={(e) => setExpectedSourceDraft({ ...expectedSourceDraft, sourceName: e.target.value })} />
+                <input className="input" placeholder="Bank account ID (optional)" value={expectedSourceDraft.sourceIdentifier} onChange={(e) => setExpectedSourceDraft({ ...expectedSourceDraft, sourceIdentifier: e.target.value })} />
+                <button className="btn-secondary md:col-span-4" disabled={!approvedBudgetVersions.length}>Add expected source</button>
+              </form>
+              <div className="overflow-x-auto">
+                <table className="table-base">
+                  <thead><tr><th>Source</th><th>Type</th><th>Required</th><th>Status</th><th>Action</th></tr></thead>
+                  <tbody>{expectedCashSources.map((source: any) => (
+                    <tr key={source.id}>
+                      <td>{source.sourceCode} — {source.sourceName}</td><td>{source.sourceKind}</td><td>{source.isRequired ? "Yes" : "No"}</td><td>{source.status}</td>
+                      <td>{source.status === "Draft" ? <button type="button" className="btn-secondary" onClick={() => expectedSourceAction(source.id, "submit")}>Submit</button> : source.status === "PendingApproval" ? <button type="button" className="btn-secondary" onClick={() => expectedSourceAction(source.id, "approve")}>Approve</button> : "—"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              <form onSubmit={createSourceSubmission} className="grid grid-cols-1 md:grid-cols-4 gap-2 border-t pt-3">
+                <select className="input md:col-span-2" required value={sourceSubmissionDraft.expectedCashSourceId} onChange={(e) => {
+                  const source = expectedCashSources.find((x: any) => x.id === e.target.value);
+                  const version = approvedBudgetVersions[0];
+                  setSourceSubmissionDraft({ ...sourceSubmissionDraft, expectedCashSourceId: e.target.value, currency: version?.currency ?? "USD" });
+                }}>
+                  <option value="">Select approved expected source</option>
+                  {expectedCashSources.filter((x: any) => x.status === "Approved").map((source: any) => <option key={source.id} value={source.id}>{source.sourceCode} — {source.sourceName}</option>)}
+                </select>
+                <input className="input" type="number" min="0" step="1" required placeholder="Record count" value={sourceSubmissionDraft.recordCount} onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, recordCount: Number(e.target.value) })} />
+                <input className="input" type="number" min="0" step="0.01" required placeholder="Control total" value={sourceSubmissionDraft.controlTotal} onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, controlTotal: Number(e.target.value) })} />
+                <input className="input" type="number" step="0.01" required placeholder="Opening balance" value={sourceSubmissionDraft.openingBalance} onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, openingBalance: Number(e.target.value) })} />
+                <input className="input" type="number" step="0.01" required placeholder="Closing balance" value={sourceSubmissionDraft.closingBalance} onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, closingBalance: Number(e.target.value) })} />
+                <input className="input" required maxLength={3} placeholder="Currency" value={sourceSubmissionDraft.currency} onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, currency: e.target.value.toUpperCase() })} />
+                <input className="input" required placeholder="Evidence reference" value={sourceSubmissionDraft.evidenceReference} onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, evidenceReference: e.target.value })} />
+                <button className="btn-secondary md:col-span-4" disabled={!expectedCashSources.some((x: any) => x.id === sourceSubmissionDraft.expectedCashSourceId && x.status === "Approved")}>Create source control submission</button>
+              </form>
+              <div className="overflow-x-auto">
+                <table className="table-base">
+                  <thead><tr><th>Source</th><th>Records / total</th><th>Control review</th><th>Record reconciliation</th><th>Action</th></tr></thead>
+                  <tbody>{cashSourceSubmissions.map((submission: any) => {
+                    const source = expectedCashSources.find((x: any) => x.id === submission.expectedCashSourceId);
+                    return <tr key={submission.id}>
+                      <td>{source?.sourceCode ?? submission.expectedCashSourceId}</td>
+                      <td>{submission.recordCount} / {submission.currency} {fmt(submission.controlTotal)}</td>
+                      <td>{submission.status}</td><td>{submission.recordLevelStatus}</td>
+                      <td className="flex gap-1 flex-wrap">
+                        {submission.status === "Draft" && <button type="button" className="btn-secondary" onClick={() => sourceSubmissionAction(submission.id, "submit")}>Submit</button>}
+                        {submission.status === "PendingReview" && <button type="button" className="btn-secondary" onClick={() => sourceSubmissionAction(submission.id, "review")}>Review</button>}
+                        {submission.status === "Reviewed" && submission.recordLevelStatus === "NotStarted" && <button type="button" className="btn-secondary" onClick={() => { setRecordLineDraft({ ...recordLineDraft, submissionId: submission.id, sourceRecordId: "", sourceReference: "" }); loadReconciliationLines(submission.id); }}>Reconcile records</button>}
+                        {submission.recordLevelStatus === "PendingReview" && <button type="button" className="btn-secondary" onClick={() => sourceRecordReconciliationAction(submission.id, "review")}>Review records</button>}
+                        {submission.status === "Reviewed" && submission.recordLevelStatus === "NotStarted" && <button type="button" className="btn-secondary" onClick={() => sourceRecordReconciliationAction(submission.id, "submit")}>Submit records</button>}
+                      </td>
+                    </tr>;
+                  })}</tbody>
+                </table>
+              </div>
+              {recordLineDraft.submissionId && (
+                <div className="border-t pt-3 space-y-3">
+                  <h5 className="font-medium">Transaction mapping — {cashSourceSubmissions.find((x: any) => x.id === recordLineDraft.submissionId)?.status}</h5>
+                  <form onSubmit={addSourceReconciliationLine} className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                    <select className="input md:col-span-2" required value={recordLineDraft.sourceRecordId} onChange={(e) => {
+                      const source = sourceRecordsForReconciliation.find((x: any) => x.id === e.target.value);
+                      const reference = source?.reference || source?.receiptNo || source?.paymentNo || source?.id || "";
+                      setRecordLineDraft({ ...recordLineDraft, sourceRecordId: e.target.value, sourceReference: reference });
+                    }}>
+                      <option value="">Select source transaction</option>
+                      {sourceRecordsForReconciliation.map((source: any) => <option key={source.id} value={source.id}>{source.reference || source.receiptNo || source.paymentNo || source.id} · {fmt(source.amount ?? source.debit ?? source.credit ?? 0)}</option>)}
+                    </select>
+                    <input className="input" required placeholder="Source reference" value={recordLineDraft.sourceReference} onChange={(e) => setRecordLineDraft({ ...recordLineDraft, sourceReference: e.target.value })} />
+                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={recordLineDraft.isExcluded} onChange={(e) => setRecordLineDraft({ ...recordLineDraft, isExcluded: e.target.checked })} /> Exclude with reason</label>
+                    {!recordLineDraft.isExcluded && <select className="input md:col-span-2" required value={recordLineDraft.budgetExecutionActualId} onChange={(e) => setRecordLineDraft({ ...recordLineDraft, budgetExecutionActualId: e.target.value })}>
+                      <option value="">Select certified actual allocation</option>
+                      {budgetExecutionActuals.filter((x: any) => x.status === "Certified" && x.sourceRecordId === recordLineDraft.sourceRecordId).map((actual: any) => <option key={actual.id} value={actual.id}>{actual.sourceReference} · {actual.currency} {fmt(actual.amount)} · {actual.cashFlowSection}</option>)}
+                    </select>}
+                    {recordLineDraft.isExcluded && <input className="input md:col-span-2" required placeholder="Reason for exclusion" value={recordLineDraft.exclusionReason} onChange={(e) => setRecordLineDraft({ ...recordLineDraft, exclusionReason: e.target.value })} />}
+                    <button className="btn-secondary md:col-span-4" disabled={!recordLineDraft.sourceRecordId}>Add allocation / exclusion</button>
+                  </form>
+                  <div className="overflow-x-auto">
+                    <table className="table-base"><thead><tr><th>Source record</th><th>Source amount</th><th>Actual allocation</th><th>Exclusion</th></tr></thead>
+                      <tbody>{reconciliationLines.map((line: any) => <tr key={line.id}><td>{line.sourceReference}</td><td>{fmt(line.sourceAmount)}</td><td>{line.allocatedAmount ? fmt(line.allocatedAmount) : "—"}</td><td>{line.isExcluded ? line.exclusionReason : "—"}</td></tr>)}
+                        {reconciliationLines.length === 0 && <tr><td colSpan={4} className="text-slate-500 text-center">No transaction mappings entered yet.</td></tr>}</tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              <div className="border-t pt-3 space-y-2">
+                <h5 className="font-medium">Independent expected-source register completeness certification</h5>
+                <p className="text-xs text-slate-500">The evidence reference must identify the signed management inventory or other authoritative population evidence used to establish that no bank account, receivables/payables control population or reporting source has been omitted.</p>
+                {!registerAttestation && <div className="flex gap-2 flex-wrap">
+                  <input className="input flex-1" required placeholder="Signed source inventory evidence reference" value={registerAttestationEvidence} onChange={(e) => setRegisterAttestationEvidence(e.target.value)} />
+                  <button type="button" className="btn-secondary" disabled={!expectedCashSources.length || !registerAttestationEvidence.trim()} onClick={() => registerAttestationAction("create")}>Create attestation</button>
+                </div>}
+                {registerAttestation && <div className="flex items-center gap-2 flex-wrap text-sm">
+                  <span>Status: <strong>{registerAttestation.status}</strong></span>
+                  <span>Sources declared: {registerAttestation.expectedSourceCount}</span>
+                  <span>Evidence: {registerAttestation.evidenceReference}</span>
+                  {registerAttestation.status === "Draft" && <button type="button" className="btn-secondary" onClick={() => registerAttestationAction("submit")}>Submit</button>}
+                  {registerAttestation.status === "PendingCertification" && <button type="button" className="btn-secondary" onClick={() => registerAttestationAction("review")}>Certify</button>}
+                </div>}
+              </div>
+            </div>
             <div className="border rounded-lg p-4 space-y-3 mb-4">
               <div>
                 <h4 className="font-semibold">Period completeness — nil activity declaration</h4>
