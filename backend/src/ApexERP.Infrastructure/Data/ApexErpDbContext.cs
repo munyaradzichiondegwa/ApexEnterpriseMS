@@ -190,6 +190,8 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<ModifiedCashRecognitionPolicy> ModifiedCashRecognitionPolicies => Set<ModifiedCashRecognitionPolicy>();
         public DbSet<ModifiedCashRecognitionMapping> ModifiedCashRecognitionMappings => Set<ModifiedCashRecognitionMapping>();
         public DbSet<ModifiedCashRecognitionLedgerEvent> ModifiedCashRecognitionLedgerEvents => Set<ModifiedCashRecognitionLedgerEvent>();
+        public DbSet<BankStatementImportBatch> BankStatementImportBatches => Set<BankStatementImportBatch>();
+        public DbSet<BankStatementImportedTransaction> BankStatementImportedTransactions => Set<BankStatementImportedTransaction>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
         public DbSet<AssetVerificationBatch> AssetVerificationBatches => Set<AssetVerificationBatch>();
@@ -636,6 +638,8 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<ModifiedCashRecognitionPolicy>(modelBuilder);
             ApplyTenantFilter<ModifiedCashRecognitionMapping>(modelBuilder);
             ApplyTenantFilter<ModifiedCashRecognitionLedgerEvent>(modelBuilder);
+            ApplyTenantFilter<BankStatementImportBatch>(modelBuilder);
+            ApplyTenantFilter<BankStatementImportedTransaction>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
             ApplyTenantFilter<AssetRevaluation>(modelBuilder);
@@ -843,6 +847,76 @@ namespace ApexERP.Infrastructure.Data
                 .HasOne<ModifiedCashRecognitionLedgerEvent>().WithMany().HasForeignKey(x => x.OriginalEventId)
                 .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashLedger_OriginalEvent");
 
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.SourceInstitution).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.SourceAccountReference).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.StatementReference).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.OriginalFileName).HasMaxLength(255);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.MediaType).HasMaxLength(128);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.ParserVersion).HasMaxLength(64);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.Sha256).HasMaxLength(64);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.AuthenticationEvidenceReference).HasMaxLength(1000);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .HasIndex(x => new { x.CompanyId, x.BankAccountId, x.StatementReference }).IsUnique()
+                .HasDatabaseName("UX_BankStatementBatch_StatementIdentity");
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .HasIndex(x => new { x.CompanyId, x.BankAccountId, x.PeriodStart, x.PeriodEnd })
+                .HasDatabaseName("IX_BankStatementBatch_AccountPeriod");
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .HasCheckConstraint("CK_BankStatementBatch_Period", "\"PeriodEnd\" > \"PeriodStart\"")
+                .HasCheckConstraint("CK_BankStatementBatch_ByteLength", "\"ByteLength\" > 0")
+                .HasCheckConstraint("CK_BankStatementBatch_Totals",
+                    "\"TotalDebits\" >= 0 AND \"TotalCredits\" >= 0 AND \"TransactionCount\" >= 0");
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .HasOne<BankAccount>().WithMany().HasForeignKey(x => x.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementBatch_BankAccount");
+
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.ExternalTransactionId).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.Description).HasMaxLength(500);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.Reference).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.Currency).HasMaxLength(3);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.TransactionFingerprint).HasMaxLength(64);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.ExclusionReason).HasMaxLength(1000);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasIndex(x => new { x.CompanyId, x.BankAccountId, x.ExternalTransactionId }).IsUnique()
+                .HasDatabaseName("UX_BankStatementTransaction_ExternalIdentity");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasIndex(x => new { x.CompanyId, x.BankAccountId, x.TransactionFingerprint }).IsUnique()
+                .HasDatabaseName("UX_BankStatementTransaction_Fingerprint");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasIndex(x => x.MatchedBankTransactionId).IsUnique()
+                .HasFilter("\"MatchedBankTransactionId\" IS NOT NULL")
+                .HasDatabaseName("UX_BankStatementTransaction_MatchedBankTransaction");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasIndex(x => new { x.CompanyId, x.ImportBatchId, x.Status })
+                .HasDatabaseName("IX_BankStatementTransaction_BatchStatus");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasCheckConstraint("CK_BankStatementTransaction_Amounts",
+                    "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0)")
+                .HasCheckConstraint("CK_BankStatementTransaction_SourceLine", "\"SourceLineNumber\" > 1");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasOne<BankStatementImportBatch>().WithMany().HasForeignKey(x => x.ImportBatchId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementTransaction_Batch");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasOne<BankAccount>().WithMany().HasForeignKey(x => x.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementTransaction_BankAccount");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasOne<BankTransaction>().WithMany().HasForeignKey(x => x.MatchedBankTransactionId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementTransaction_MatchedBankTransaction");
+
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasIndex(x => new { x.CompanyId, x.SourceKind, x.SourceRecordId, x.BudgetVersionLineId })
                 .IsUnique().HasFilter("\"ReversalOfId\" IS NULL AND \"Status\" <> 4")
@@ -1042,6 +1116,50 @@ namespace ApexERP.Infrastructure.Data
                     entry.Property(x => x.Status).OriginalValue == ModifiedCashLedgerEventStatus.Certified)
                     throw new InvalidOperationException("Certified modified-cash ledger events are immutable; correct them through a separately certified reversal.");
             }
+            foreach (var entry in ChangeTracker.Entries<BankStatementImportBatch>())
+            {
+                if (entry.State == EntityState.Deleted)
+                    throw new InvalidOperationException("Original bank statement files and import batches are retained and cannot be deleted.");
+                if (entry.State == EntityState.Modified)
+                {
+                    var allowed = new HashSet<string>
+                    {
+                        nameof(BankStatementImportBatch.AuthenticationMethod),
+                        nameof(BankStatementImportBatch.AuthenticationEvidenceReference),
+                        nameof(BankStatementImportBatch.AuthenticationWorkflowId),
+                        nameof(BankStatementImportBatch.AuthenticatedBy),
+                        nameof(BankStatementImportBatch.AuthenticatedAt),
+                        nameof(BankStatementImportBatch.Status),
+                        nameof(BankStatementImportBatch.CompletenessCertifiedBy),
+                        nameof(BankStatementImportBatch.CompletenessCertifiedAt),
+                        nameof(BaseEntity.UpdatedAt), nameof(BaseEntity.UpdatedBy)
+                    };
+                    if (entry.Properties.Any(p => p.IsModified && !allowed.Contains(p.Metadata.Name)))
+                        throw new InvalidOperationException("Original bank statement bytes, digest and source metadata are immutable.");
+                }
+            }
+            foreach (var entry in ChangeTracker.Entries<BankStatementImportedTransaction>())
+            {
+                if (entry.State == EntityState.Deleted)
+                    throw new InvalidOperationException("Imported bank statement transactions cannot be deleted.");
+                if (entry.State == EntityState.Modified)
+                {
+                    var allowed = new HashSet<string>
+                    {
+                        nameof(BankStatementImportedTransaction.Status),
+                        nameof(BankStatementImportedTransaction.MatchedBankTransactionId),
+                        nameof(BankStatementImportedTransaction.MatchedBy),
+                        nameof(BankStatementImportedTransaction.MatchedAt),
+                        nameof(BankStatementImportedTransaction.ExclusionReason),
+                        nameof(BankStatementImportedTransaction.ExcludedBy),
+                        nameof(BankStatementImportedTransaction.ExcludedAt),
+                        nameof(BaseEntity.UpdatedAt), nameof(BaseEntity.UpdatedBy)
+                    };
+                    if (entry.Properties.Any(p => p.IsModified && !allowed.Contains(p.Metadata.Name)))
+                        throw new InvalidOperationException("Imported bank statement transaction source data is immutable.");
+                }
+            }
+
             foreach (var entry in ChangeTracker.Entries<JournalLine>())
             {
                 if (entry.State is EntityState.Modified or EntityState.Deleted)
