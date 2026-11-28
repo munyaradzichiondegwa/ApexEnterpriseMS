@@ -641,9 +641,9 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorBudgetVersionLine>()
                 .HasOne<PublicSectorBudgetVersion>().WithMany(x => x.Lines).HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Cascade);
             modelBuilder.Entity<PublicSectorBudgetVersionLine>()
-                .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_FundCentre");
+                .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetVersionLine>()
-                .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_GlAccount");
+                .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetVersionLine>()
                 .HasOne<CostCentre>().WithMany().HasForeignKey(x => x.CostCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetReconciliation>()
@@ -668,9 +668,9 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasOne<PublicSectorBudgetVersionLine>().WithMany().HasForeignKey(x => x.BudgetVersionLineId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_BudgetLine");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
-                .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict);
+                .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_FundCentre");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
-                .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict);
+                .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_GlAccount");
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
                 .HasOne<FundCentre>().WithMany().HasForeignKey(a => a.FundCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
