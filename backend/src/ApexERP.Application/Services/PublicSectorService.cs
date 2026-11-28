@@ -3307,7 +3307,7 @@ namespace ApexERP.Application.Services
                     if (!invoicePosted) return false;
                     var expense = await _db.JournalLines.Where(x =>
                         x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId &&
-                        x.FundCentreId == actual.FundCentreId && x.CostCentreId == null)
+                        x.FundCentreId == actual.FundCentreId && x.CostCentreId == actual.CostCentreId)
                         .SumAsync(x => x.Debit - x.Credit, ct);
                     if (expense != postedLineAmount) return false;
                     expectedAllocation += lineAmount;
