@@ -351,6 +351,22 @@ namespace ApexERP.Application.Services
                 PaymentMethod = method
             };
 
+            // Preserve the originating bank account on the AP payment so statutory
+            // withholding evidence can be reconciled to the correct cash account.
+            var bankAccounts = await _db.BankAccounts
+                .Where(x => x.CompanyId == companyId && x.GlAccountId == bankGlAccountId)
+                .OrderBy(x => x.Id)
+                .Take(2)
+                .ToListAsync(ct);
+            if (bankAccounts.Count > 1)
+                throw new InvalidOperationException("The selected bank GL account maps to more than one bank account; AP payment origin is ambiguous.");
+            if (bankAccounts.Count == 1)
+            {
+                if (!string.Equals(bankAccounts[0].Currency, currency, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The selected bank account currency does not match the AP payment currency.");
+                payment.BankAccountId = bankAccounts[0].Id;
+            }
+
             foreach (var (invoiceId, appliedAmount) in allocations)
             {
                 var invoice = await _db.ApInvoices.FirstOrDefaultAsync(i => i.Id == invoiceId && i.CompanyId == companyId, ct)
