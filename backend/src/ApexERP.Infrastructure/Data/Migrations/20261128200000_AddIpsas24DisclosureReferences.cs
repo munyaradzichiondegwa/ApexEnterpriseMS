@@ -19,6 +19,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
+                name: "TreasuryClassificationCode",
+                table: "PublicSectorBudgetVersionLines",
+                type: "text",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
                 name: "CommentReference",
                 table: "PublicSectorBudgetVarianceExplanations",
                 type: "text",
@@ -27,6 +33,10 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropColumn(
+                name: "TreasuryClassificationCode",
+                table: "PublicSectorBudgetVersionLines");
+
             migrationBuilder.DropColumn(
                 name: "NoteReference",
                 table: "PublicSectorBudgetVersionLines");
