@@ -49,6 +49,23 @@ BEGIN
            (NEW."ReversalReason" IS NULL OR length(trim(NEW."ReversalReason")) < 10) THEN
             RAISE EXCEPTION 'A reversal requires a documented reason.' USING ERRCODE = 'restrict_violation';
         END IF;
+        IF NEW."ReversalOfId" IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM "PublicSectorBudgetExecutionActuals" original
+            WHERE original."Id" = NEW."ReversalOfId"
+              AND original."CompanyId" = NEW."CompanyId"
+              AND original."Status" = 2
+              AND original."ReversalOfId" IS NULL
+              AND original."Amount" = NEW."Amount"
+              AND original."BudgetVersionId" = NEW."BudgetVersionId"
+              AND original."BudgetVersionLineId" = NEW."BudgetVersionLineId"
+              AND original."SourceKind" = NEW."SourceKind"
+              AND original."SourceRecordId" = NEW."SourceRecordId"
+              AND original."EventKind" <> NEW."EventKind"
+              AND original."CreatedBy" IS DISTINCT FROM NEW."CreatedBy"
+              AND original."CertifiedBy" IS DISTINCT FROM NEW."CreatedBy"
+        ) THEN
+            RAISE EXCEPTION 'A reversal must compensate an unreversed certified original and cannot reverse another reversal.' USING ERRCODE = 'restrict_violation';
+        END IF;
         RETURN NEW;
     END IF;
     IF TG_OP = 'DELETE' THEN
@@ -68,6 +85,13 @@ BEGIN
                 (OLD."Status" = 1 AND NEW."Status" IN (2, 3)) OR
                 (OLD."Status" = 2 AND NEW."Status" = 4)) THEN
             RAISE EXCEPTION 'Invalid budget actual status transition from % to %.', OLD."Status", NEW."Status" USING ERRCODE = 'restrict_violation';
+        END IF;
+        IF OLD."Status" = 2 AND NEW."Status" = 4 AND NOT EXISTS (
+            SELECT 1 FROM "PublicSectorBudgetExecutionActuals" reversal
+            WHERE reversal."ReversalOfId" = OLD."Id"
+              AND reversal."CompanyId" = OLD."CompanyId"
+        ) THEN
+            RAISE EXCEPTION 'An original actual cannot be marked reversed without a linked compensating event.' USING ERRCODE = 'restrict_violation';
         END IF;
     END IF;
     RETURN NEW;
