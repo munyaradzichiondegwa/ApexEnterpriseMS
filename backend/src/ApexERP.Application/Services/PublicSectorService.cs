@@ -910,7 +910,6 @@ namespace ApexERP.Application.Services
                 if (statementDebits != rows.Sum(x => x.Debit) ||
                         statementCredits != rows.Sum(x => x.Credit))
                         throw new InvalidOperationException($"Bank source {expected.SourceCode} statement totals no longer agree with the live bank population.");
-                }
                 var records = rows.ToDictionary(x => x.Id, x => new ExpectedCashSourceRecord(
                     Math.Max(x.Debit, x.Credit),
                     string.IsNullOrWhiteSpace(x.Reference) ? x.Id.ToString("N") : x.Reference!,
