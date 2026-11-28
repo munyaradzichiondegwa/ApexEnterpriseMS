@@ -233,7 +233,7 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                     x.CompanyId == CompanyId && x.CommitmentId == commitment.Id &&
                     x.Status == ModifiedCashLedgerEventStatus.Certified).ToListAsync(token);
                 var netRecognised = ledger.Sum(x => x.EventKind == ModifiedCashLedgerEventKind.Recognition ? x.Amount : -x.Amount);
-                var remainingCommitment = commitment.Amount - commitment.RealisedAmount - netRecognised;
+                var remainingCommitment = commitment.Amount - netRecognised;
                 if (amount > remainingCommitment)
                     throw new InvalidOperationException("The goods-receipt obligation exceeds the unrecognised, unliquidated commitment balance.");
                 var result = new ModifiedCashRecognitionLedgerEvent
@@ -287,8 +287,11 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                 var commitment = await _db.Commitments.SingleOrDefaultAsync(x =>
                     x.Id == original.CommitmentId && x.CompanyId == CompanyId, token)
                     ?? throw new InvalidOperationException("The source commitment no longer exists.");
-                if (commitment.RealisedAmount != 0m)
-                    throw new InvalidOperationException("A commitment with realised expenditure cannot be fully reversed through this workflow; a linked settlement/liquidation adapter is required.");
+                if (await _db.ApInvoices.AnyAsync(x => x.CompanyId == CompanyId &&
+                    x.CommitmentId == commitment.Id &&
+                    (x.Status == InvoiceStatus.Posted || x.Status == InvoiceStatus.Paid ||
+                     x.Status == InvoiceStatus.Partial), token))
+                    throw new InvalidOperationException("A commitment with a posted AP invoice cannot be fully reversed. Reverse the originating invoice and any certified cash liquidation first.");
                 var acceptedAt = DateTime.UtcNow;
                 if (acceptedAt > policy.ReportingPeriodEnd.AddDays(policy.PostPeriodRecognitionWindowDays))
                     throw new InvalidOperationException("The reversal evidence falls outside the approved post-period recognition window.");
@@ -395,7 +398,7 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                         x.Status == ModifiedCashLedgerEventStatus.Certified).ToListAsync(token);
                     var recognisedBalance = certified.Sum(x =>
                         x.EventKind == ModifiedCashLedgerEventKind.Recognition ? x.Amount : -x.Amount);
-                    if (ledger.Amount > commitment.Amount - commitment.RealisedAmount - recognisedBalance)
+                    if (ledger.Amount > commitment.Amount - recognisedBalance)
                         throw new InvalidOperationException("The live commitment balance no longer supports this recognition.");
                 }
                 else if (ledger.EventKind == ModifiedCashLedgerEventKind.Reversal)
@@ -414,7 +417,10 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                         original.PolicyId != ledger.PolicyId ||
                         original.SourceEventId != ledger.SourceEventId ||
                         original.Amount != ledger.Amount || original.EventDate != ledger.EventDate ||
-                        commitment.RealisedAmount != 0m ||
+                        await _db.ApInvoices.AnyAsync(x => x.CompanyId == CompanyId &&
+                            x.CommitmentId == commitment.Id &&
+                            (x.Status == InvoiceStatus.Posted || x.Status == InvoiceStatus.Paid ||
+                             x.Status == InvoiceStatus.Partial), token) ||
                         await _db.ModifiedCashRecognitionLedgerEvents.AnyAsync(x =>
                             x.CompanyId == CompanyId && x.OriginalEventId == original.Id && x.Id != ledger.Id, token))
                         throw new InvalidOperationException("The reversal no longer matches an unreversed, unsettled certified recognition event.");
