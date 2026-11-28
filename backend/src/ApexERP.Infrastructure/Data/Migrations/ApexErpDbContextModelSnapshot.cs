@@ -3657,6 +3657,96 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersion", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<int>("VersionNumber").HasColumnType("integer");
+                    b.Property<int>("Kind").HasColumnType("integer");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<int>("AccountingBasis").HasColumnType("integer");
+                    b.Property<string>("ClassificationBasis").IsRequired().HasColumnType("text");
+                    b.Property<string>("EntityScope").IsRequired().HasColumnType("text");
+                    b.Property<DateTime>("PeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<string>("AuthorityReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("AmendmentReason").HasColumnType("text");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "FinancialYear", "Kind", "VersionNumber")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetVersion_Sequence");
+                    b.ToTable("PublicSectorBudgetVersions", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVersion_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVersion_Sequence", "\"VersionNumber\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<Guid>("FundCentreId").HasColumnType("uuid");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<Guid?>("CostCentreId").HasColumnType("uuid");
+                    b.Property<int>("LineNumber").HasColumnType("integer");
+                    b.Property<string>("Description").IsRequired().HasColumnType("text");
+                    b.Property<string>("ClassificationCode").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CostCentreId");
+                    b.HasIndex("FundCentreId");
+                    b.HasIndex("GlAccountId");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "LineNumber")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetVersionLine_Number");
+                    b.ToTable("PublicSectorBudgetVersionLines", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVersionLine_Amount", "\"Amount\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetReconciliation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<int>("Type").HasColumnType("integer");
+                    b.Property<string>("Description").IsRequired().HasColumnType("text");
+                    b.Property<string>("StatementSection").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("OperatingAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("InvestingAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("FinancingAmount").HasColumnType("numeric(20,6)");
+                    b.Property<string>("SupportingReference").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "FinancialYear", "Type", "Description")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetRecon_Description");
+                    b.ToTable("PublicSectorBudgetReconciliations", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
+                                "\"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.GlAccount", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7564,6 +7654,37 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.CostCentre", null)
+                        .WithMany()
+                        .HasForeignKey("CostCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.GlAccount", null)
+                        .WithMany()
+                        .HasForeignKey("GlAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersion", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetAllocation", b =>
