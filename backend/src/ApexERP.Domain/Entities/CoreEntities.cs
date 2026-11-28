@@ -29,6 +29,8 @@ namespace ApexERP.Domain.Entities
         public string Name { get; set; } = string.Empty;
         public string? RegistrationNo { get; set; }
         public string? VatNo { get; set; }
+        /// <summary>Zimbabwe Revenue Authority taxpayer identification number used for DSWT declarations.</summary>
+        public string? ZimbabweTaxpayerTin { get; set; }
         public string BaseCurrency { get; set; } = "USD";
         public string FunctionalCurrency { get; set; } = "USD";
         public int FiscalYearStartMonth { get; set; } = 1;
