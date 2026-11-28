@@ -925,6 +925,28 @@ namespace ApexERP.Infrastructure.Data
         /// </summary>
         private void EnforceLedgerImmutability()
         {
+            foreach (var entry in ChangeTracker.Entries<InvoiceTaxComponent>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted)
+                    throw new InvalidOperationException("Posted invoice tax-component provenance is immutable.");
+            }
+            foreach (var entry in ChangeTracker.Entries<SettlementComponentAllocation>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted)
+                    throw new InvalidOperationException("Cash settlement component allocations are immutable; correct them through reversal and replacement.");
+            }
+            foreach (var entry in ChangeTracker.Entries<TaxAccountMapping>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted &&
+                    entry.Property(x => x.Status).OriginalValue == TaxConfigurationStatus.Approved)
+                    throw new InvalidOperationException("Approved tax-account mappings are immutable. Create a new effective-dated version.");
+            }
+            foreach (var entry in ChangeTracker.Entries<PublicSectorTaxBudgetPolicy>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted &&
+                    entry.Property(x => x.Status).OriginalValue == TaxConfigurationStatus.Approved)
+                    throw new InvalidOperationException("Approved tax budget policies are immutable. Create a new effective-dated version.");
+            }
             foreach (var entry in ChangeTracker.Entries<JournalLine>())
             {
                 if (entry.State is EntityState.Modified or EntityState.Deleted)
