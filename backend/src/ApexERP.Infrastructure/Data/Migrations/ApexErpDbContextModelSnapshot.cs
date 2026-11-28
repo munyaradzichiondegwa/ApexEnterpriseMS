@@ -4032,6 +4032,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<int>("LineNumber").HasColumnType("integer");
                     b.Property<string>("Description").IsRequired().HasColumnType("text");
                     b.Property<string>("ClassificationCode").IsRequired().HasColumnType("text");
+                    b.Property<string>("TreasuryClassificationCode").HasColumnType("text");
                     b.Property<string>("NoteReference").HasColumnType("text");
                     b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
                     b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
