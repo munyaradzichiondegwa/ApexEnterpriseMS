@@ -398,6 +398,13 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.Purpose, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo }).HasDatabaseName("IX_TaxAccountMappings_Effective");
             modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.InvoiceKind, x.InvoiceId, x.JournalLineId, x.InvoiceLineId }).IsUnique();
             modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.TaxAccountMappingId, x.InvoiceId });
+            modelBuilder.Entity<InvoiceTaxComponent>().Property(x => x.InvoiceKind).HasMaxLength(2);
+            modelBuilder.Entity<InvoiceTaxComponent>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_InvoiceTaxComponents_Amounts", "\"TaxableBase\" >= 0 AND \"Rate\" >= 0 AND \"Amount\" > 0");
+                t.HasCheckConstraint("CK_InvoiceTaxComponents_Kind", "\"InvoiceKind\" IN ('AR','AP')");
+            });
+            modelBuilder.Entity<SettlementComponentAllocation>().Property(x => x.SettlementKind).HasMaxLength(2);
             modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.VersionNumber }).IsUnique();
             modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo }).HasDatabaseName("IX_PublicSectorTaxBudgetPolicies_Effective");
             modelBuilder.Entity<SettlementComponentAllocation>().HasIndex(x => new { x.CompanyId, x.SettlementKind, x.SettlementAllocationId, x.InvoiceLineId, x.TaxComponentId }).IsUnique().HasDatabaseName("IX_SettlementComponentAllocations_Allocation");
