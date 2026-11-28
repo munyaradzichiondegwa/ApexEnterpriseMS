@@ -66,6 +66,12 @@ This is in addition to the existing requirement that period bank movements be re
 
 This closes a specific partial-capture gap in the existing source-backed workflow. It does **not** replace the expected-source register and independent source-close process described above: it cannot prove that every expected bank account/cashbook or external source system submitted a complete statement, nor can it support reason-coded exclusions for records outside the current adapters.
 
+### Registered-source submission gate — implementation refinement
+
+The cash-budget-to-Statement-of-Cash-Flows reconciliation endpoint now checks the expected-source register for the selected approved cash budget version. It reports whether a register exists, whether every registered source is approved, how many required sources have independently reviewed submissions, and whether any submitted source remains unreviewed. Missing required submissions, draft/unapproved register entries, rejected submissions and pending submissions prevent source coverage from passing.
+
+This is intentionally a gate over the sources already registered; it is not proof that the register contains every bank account, cashbook, receivables/payables population or reporting unit that should be in scope. The endpoint therefore continues to report the overall bridge as **not reconciled** until a separate independently approved expected-source-register completeness certification is implemented. No caller-supplied declaration or presence of one or more source entries is treated as proof of population completeness.
+
 ### Required completion design
 
 1. Maintain an expected-source register for each company, reporting entity and period. It must identify the bank accounts/cashbooks and AR/AP source populations in scope, with effective dates and accountable owners. The register must be independently approved before period close.
