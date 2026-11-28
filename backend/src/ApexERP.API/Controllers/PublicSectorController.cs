@@ -131,6 +131,16 @@ namespace ApexERP.API.Controllers
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
+        [HttpGet("budget-reconciliations")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetBudgetReconciliations([FromQuery] int year, CancellationToken ct)
+        {
+            if (year < 2000 || year > 2200) return BadRequest(new { error = "A valid financial year is required." });
+            return Ok(await _db.PublicSectorBudgetReconciliations.Where(x =>
+                x.CompanyId == CompanyId && x.FinancialYear == year)
+                .OrderByDescending(x => x.CreatedAt).ToListAsync(ct));
+        }
+
         [HttpPost("budget-reconciliations")]
         [HasPermission(Permissions.PublicSectorBudgetOverride)]
         public async Task<IActionResult> CreateBudgetReconciliation(CreateBudgetReconciliationRequest req, CancellationToken ct)
@@ -157,7 +167,8 @@ namespace ApexERP.API.Controllers
                 if (item == null) return NotFound(new { error = "Budget reconciliation row not found." });
                 if (item.Status != PublicSectorBudgetReconciliationStatus.Draft)
                     return BadRequest(new { error = "Only a draft reconciliation row can be submitted." });
-                var amount = Math.Abs(item.OperatingAmount) + Math.Abs(item.InvestingAmount) + Math.Abs(item.FinancingAmount);
+                var amount = Math.Abs(item.RevenueAmount) + Math.Abs(item.ExpenseAmount) +
+                    Math.Abs(item.OperatingAmount) + Math.Abs(item.InvestingAmount) + Math.Abs(item.FinancingAmount);
                 var workflow = await _db.InTransactionAsync(async token =>
                 {
                     var request = await _approvalChains.SubmitForApprovalAsync(CompanyId,
