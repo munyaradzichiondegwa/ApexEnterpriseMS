@@ -3230,6 +3230,86 @@ namespace ApexERP.Application.Services
             return effectiveRate == actual.ExchangeRateToBudgetCurrency;
         }
 
+
+        private async Task<PublicSectorTaxBudgetPolicy> GetApprovedTaxBudgetPolicyAsync(
+            Guid companyId, InvoiceTaxComponent component, DateTime settlementDate, CancellationToken ct)
+        {
+            DateTime invoiceDate;
+            if (component.InvoiceKind == "AR")
+                invoiceDate = await _db.ArInvoices.Where(x => x.Id == component.InvoiceId && x.CompanyId == companyId).Select(x => x.InvoiceDate).SingleAsync(ct);
+            else if (component.InvoiceKind == "AP")
+                invoiceDate = await _db.ApInvoices.Where(x => x.Id == component.InvoiceId && x.CompanyId == companyId).Select(x => x.InvoiceDate).SingleAsync(ct);
+            else throw new InvalidOperationException("Unknown invoice kind in tax component provenance.");
+
+            var mapping = await _db.TaxAccountMappings.SingleOrDefaultAsync(x =>
+                x.Id == component.TaxAccountMappingId && x.CompanyId == companyId &&
+                x.Status == TaxConfigurationStatus.Approved && x.VersionNumber == component.MappingVersionNumber &&
+                x.GlAccountId == component.GlAccountId && x.TaxType == component.TaxType &&
+                x.TaxCodeId == component.TaxCodeId && x.EffectiveFrom <= invoiceDate &&
+                (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoiceDate), ct);
+            if (mapping == null)
+                throw new InvalidOperationException("The invoice tax component no longer has its exact approved tax-account mapping version.");
+
+            var policies = await _db.PublicSectorTaxBudgetPolicies.Where(x =>
+                x.CompanyId == companyId && x.TaxType == component.TaxType && x.TaxCodeId == component.TaxCodeId &&
+                x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= settlementDate &&
+                (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > settlementDate)).ToListAsync(ct);
+            if (policies.Count != 1)
+                throw new InvalidOperationException("Exactly one approved, effective IPSAS 24 budget-treatment policy is required for each settled tax component.");
+            var policy = policies[0];
+            if (policy.Treatment == TaxBudgetTreatment.SeparateClassification &&
+                (!policy.BudgetGlAccountId.HasValue || !policy.FundCentreId.HasValue ||
+                 !await _db.GlAccounts.AnyAsync(x => x.Id == policy.BudgetGlAccountId.Value && x.CompanyId == companyId && x.IsActive && x.IsPostable, ct) ||
+                 !await _db.FundCentres.AnyAsync(x => x.Id == policy.FundCentreId.Value && x.CompanyId == companyId, ct) ||
+                 (policy.CostCentreId.HasValue && !await _db.CostCentres.AnyAsync(x => x.Id == policy.CostCentreId.Value && x.CompanyId == companyId && x.IsActive, ct))))
+                throw new InvalidOperationException("The approved separate tax classification is no longer valid in this company.");
+            return policy;
+        }
+
+        private async Task<(Guid GlAccountId, Guid FundCentreId, Guid? CostCentreId, bool Included)>
+            ResolveSettlementComponentDimensionAsync(Guid companyId, string settlementKind, Guid invoiceId,
+                Guid invoiceFundCentreId, SettlementComponentAllocation allocation, DateTime settlementDate, CancellationToken ct)
+        {
+            if (allocation.ComponentKind == SettlementComponentKind.InvoiceLine)
+            {
+                if (!allocation.InvoiceLineId.HasValue || allocation.TaxComponentId.HasValue)
+                    throw new InvalidOperationException("Malformed invoice-line settlement component.");
+                if (settlementKind == "AR")
+                {
+                    var line = await _db.ArInvoiceLines.SingleOrDefaultAsync(x => x.Id == allocation.InvoiceLineId.Value && x.ArInvoiceId == invoiceId, ct)
+                        ?? throw new InvalidOperationException("AR settlement component references a line outside its invoice.");
+                    return (line.GlAccountId, invoiceFundCentreId, line.CostCentreId, true);
+                }
+                var apLine = await _db.ApInvoiceLines.SingleOrDefaultAsync(x => x.Id == allocation.InvoiceLineId.Value && x.ApInvoiceId == invoiceId, ct)
+                    ?? throw new InvalidOperationException("AP settlement component references a line outside its invoice.");
+                return (apLine.GlAccountId, invoiceFundCentreId, apLine.CostCentreId, true);
+            }
+            if (!allocation.TaxComponentId.HasValue || allocation.InvoiceLineId.HasValue)
+                throw new InvalidOperationException("Malformed tax-component settlement allocation.");
+            var component = await _db.InvoiceTaxComponents.SingleOrDefaultAsync(x =>
+                x.Id == allocation.TaxComponentId.Value && x.CompanyId == companyId &&
+                x.InvoiceId == invoiceId && x.InvoiceKind == settlementKind, ct)
+                ?? throw new InvalidOperationException("Settlement references a tax component outside its invoice.");
+            if (settlementKind == "AP" && component.TaxType == TaxType.WHT)
+                throw new InvalidOperationException("WHT is not supplier cash and must be settled using separate tax-authority payment evidence.");
+            var policy = await GetApprovedTaxBudgetPolicyAsync(companyId, component, settlementDate, ct);
+            if (policy.Treatment == TaxBudgetTreatment.ExcludeFromBudgetActual)
+                return (Guid.Empty, Guid.Empty, null, false);
+            if (policy.Treatment == TaxBudgetTreatment.SeparateClassification)
+                return (policy.BudgetGlAccountId!.Value, policy.FundCentreId!.Value, policy.CostCentreId, true);
+            if (!component.InvoiceLineId.HasValue)
+                throw new InvalidOperationException("An included VAT component must retain its originating invoice line.");
+            if (settlementKind == "AR")
+            {
+                var line = await _db.ArInvoiceLines.SingleOrDefaultAsync(x => x.Id == component.InvoiceLineId.Value && x.ArInvoiceId == invoiceId, ct)
+                    ?? throw new InvalidOperationException("AR VAT component has no valid originating invoice line.");
+                return (line.GlAccountId, invoiceFundCentreId, line.CostCentreId, true);
+            }
+            var apOrigin = await _db.ApInvoiceLines.SingleOrDefaultAsync(x => x.Id == component.InvoiceLineId.Value && x.ApInvoiceId == invoiceId, ct)
+                ?? throw new InvalidOperationException("AP VAT component has no valid originating invoice line.");
+            return (apOrigin.GlAccountId, invoiceFundCentreId, apOrigin.CostCentreId, true);
+        }
+
         public async Task<bool> IsCertifiedCashActualSourceValidAsync(
             Guid companyId, PublicSectorBudgetExecutionActual actual, CancellationToken ct)
         {
