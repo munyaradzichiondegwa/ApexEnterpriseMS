@@ -283,8 +283,62 @@ namespace ApexERP.Application.Services
             var companyProfile = await _db.Companies.IgnoreQueryFilters().Where(x => x.Id == companyId)
                 .Select(x => new { x.Name, x.FunctionalCurrency }).FirstOrDefaultAsync(ct);
             var comparabilityIssues = new List<string>();
-            if (original.AccountingBasis != AccountingBasis.Accrual)
-                comparabilityIssues.Add("The budget is not accrual basis; accrual GL actuals cannot be substituted. Load and approve actuals on the budget basis and complete the IPSAS 24 reconciliation before issuing the statement.");
+            var cashActualsByBudgetLine = new Dictionary<Guid, decimal>();
+            if (original.AccountingBasis != AccountingBasis.Accrual &&
+                original.AccountingBasis != AccountingBasis.Cash)
+                comparabilityIssues.Add("This non-accrual budget basis does not yet have an approved source adapter. Accrual GL actuals cannot be substituted.");
+
+            if (original.AccountingBasis == AccountingBasis.Cash)
+            {
+                // Cash actuals must come from certified source-linked events attached to the
+                // latest approved cash budget version. Never substitute accrual journal totals.
+                var actualVersion = final ?? original;
+                var cashActuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id &&
+                    x.EffectiveDate >= actualVersion.PeriodStart && x.EffectiveDate < actualVersion.PeriodEnd)
+                    .ToListAsync(ct);
+                var capturedSourceIds = cashActuals.Select(x => x.SourceRecordId).Distinct().ToArray();
+                var postedBankMovements = _db.BankTransactions.Where(x => x.CompanyId == companyId &&
+                    x.TransactionDate >= actualVersion.PeriodStart && x.TransactionDate < actualVersion.PeriodEnd &&
+                    x.JournalEntryId.HasValue && _db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
+                        j.CompanyId == companyId && j.Status == JournalStatus.Posted));
+                var uncapturedMovements = await postedBankMovements.CountAsync(x =>
+                    !x.IsReconciled || !capturedSourceIds.Contains(x.Id), ct);
+                var pendingCashActuals = cashActuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
+                var invalidCertifiedCashActuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
+                        x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id &&
+                        x.Status == PublicSectorBudgetActualStatus.Certified)
+                    .CountAsync(actual => !_db.BankTransactions.Any(bank => bank.Id == actual.SourceRecordId &&
+                        bank.CompanyId == companyId && bank.IsReconciled && bank.JournalEntryId.HasValue &&
+                        ((actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt &&
+                            bank.Credit == actual.Amount && bank.Debit == 0m) ||
+                         (actual.EventKind == PublicSectorBudgetActualEventKind.CashPayment &&
+                            bank.Debit == actual.Amount && bank.Credit == 0m)) &&
+                        _db.BankAccounts.Any(account => account.Id == bank.BankAccountId &&
+                            account.CompanyId == companyId && account.Currency == actual.Currency) &&
+                        _db.JournalEntries.Any(journal => journal.Id == bank.JournalEntryId.Value &&
+                            journal.CompanyId == companyId && journal.Status == JournalStatus.Posted) &&
+                        _db.GlAccounts.Any(account => account.Id == actual.GlAccountId &&
+                            account.CompanyId == companyId && account.CashFlowCategory == actual.CashFlowSection) &&
+                        _db.JournalLines.Where(line => line.JournalEntryId == bank.JournalEntryId.Value &&
+                            line.GlAccountId == actual.GlAccountId && line.FundCentreId == actual.FundCentreId &&
+                            line.CostCentreId == actual.CostCentreId)
+                            .Sum(line => actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt
+                                ? line.Credit - line.Debit : line.Debit - line.Credit) == actual.Amount), ct);
+
+                if (uncapturedMovements > 0)
+                    comparabilityIssues.Add($"Cash actual source coverage is incomplete: {uncapturedMovements} posted bank movements are unreconciled or have not been captured.");
+                if (pendingCashActuals > 0)
+                    comparabilityIssues.Add($"Cash actual certification is incomplete: {pendingCashActuals} actual records remain draft or pending certification.");
+                if (invalidCertifiedCashActuals > 0)
+                    comparabilityIssues.Add($"Cash actual evidence has changed or is no longer valid for {invalidCertifiedCashActuals} certified records.");
+
+                if (uncapturedMovements == 0 && pendingCashActuals == 0 && invalidCertifiedCashActuals == 0)
+                {
+                    foreach (var group in cashActuals.GroupBy(x => x.BudgetVersionLineId))
+                        cashActualsByBudgetLine[group.Key] = group.Sum(x => x.Amount);
+                }
+            }
             if (companyProfile == null)
                 comparabilityIssues.Add("The registered company profile could not be resolved.");
             else
@@ -309,7 +363,9 @@ namespace ApexERP.Application.Services
             }
             var comparable = comparabilityIssues.Count == 0;
             var comparabilityMessage = comparable
-                ? "Accrual-basis ledger actuals are comparable because the budget basis, registered entity, functional currency, classification basis and reporting period agree."
+                ? original.AccountingBasis == AccountingBasis.Cash
+                    ? "Cash-basis actuals are sourced from certified reconciled bank transactions mapped to the approved budget lines. Source coverage, entity, currency, classification and reporting period checks passed. Complete the separate Statement of Cash Flows reconciliation before statutory issue."
+                    : "Accrual-basis ledger actuals are comparable because the budget basis, registered entity, functional currency, classification basis and reporting period agree."
                 : string.Join(" ", comparabilityIssues);
             var rows = new List<BudgetComparisonLine>();
             var dimensions = original.Lines.Concat(final?.Lines ?? Array.Empty<PublicSectorBudgetVersionLine>())
@@ -329,13 +385,22 @@ namespace ApexERP.Application.Services
                 decimal? actual = null;
                 if (comparable)
                 {
-                    var raw = await _db.JournalLines.Where(l => l.GlAccountId == line.GlAccountId &&
-                        l.FundCentreId == line.FundCentreId && l.CostCentreId == line.CostCentreId &&
-                        l.JournalEntry!.CompanyId == companyId &&
-                        l.JournalEntry.EntryDate >= original.PeriodStart && l.JournalEntry.EntryDate < original.PeriodEnd &&
-                        (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
-                        .SumAsync(l => account.Type == GlAccountType.Income ? l.BaseCredit - l.BaseDebit : l.BaseDebit - l.BaseCredit, ct);
-                    actual = raw;
+                    if (original.AccountingBasis == AccountingBasis.Cash)
+                    {
+                        var actualLine = dimension.FinalLine ?? dimension.OriginalLine!;
+                        actual = cashActualsByBudgetLine.TryGetValue(actualLine.Id, out var cashAmount)
+                            ? cashAmount : 0m;
+                    }
+                    else
+                    {
+                        var raw = await _db.JournalLines.Where(l => l.GlAccountId == line.GlAccountId &&
+                            l.FundCentreId == line.FundCentreId && l.CostCentreId == line.CostCentreId &&
+                            l.JournalEntry!.CompanyId == companyId &&
+                            l.JournalEntry.EntryDate >= original.PeriodStart && l.JournalEntry.EntryDate < original.PeriodEnd &&
+                            (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
+                            .SumAsync(l => account.Type == GlAccountType.Income ? l.BaseCredit - l.BaseDebit : l.BaseDebit - l.BaseCredit, ct);
+                        actual = raw;
+                    }
                 }
                 var originalAmount = dimension.OriginalLine?.Amount ?? 0m;
                 var finalAmount = dimension.FinalLine?.Amount;
