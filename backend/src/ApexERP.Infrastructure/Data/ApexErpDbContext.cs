@@ -724,6 +724,10 @@ namespace ApexERP.Infrastructure.Data
                 .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetVersionLine>()
                 .HasOne<CostCentre>().WithMany().HasForeignKey(x => x.CostCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<ArInvoiceLine>()
+                .HasOne<CostCentre>().WithMany().HasForeignKey(x => x.CostCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<ApInvoiceLine>()
+                .HasOne<CostCentre>().WithMany().HasForeignKey(x => x.CostCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetReconciliation>()
                 .HasIndex(x => new { x.CompanyId, x.FinancialYear, x.Type, x.Description }).IsUnique()
                 .HasDatabaseName("UX_PublicSectorBudgetRecon_Description");
