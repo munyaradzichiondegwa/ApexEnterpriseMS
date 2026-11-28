@@ -30,7 +30,7 @@ export default function PublicSectorPage() {
 
   function load() {
     api.get(`/public-sector/fund-centres?year=${year}`).then((r) => setFundCentres(r.data)).catch((e) => setError(extractErrorMessage(e)));
-    api.get("/gl/accounts").then((r) => setBudgetAccounts(r.data.filter((a: any) => a.isActive && (a.type === "Income" || a.type === "Expense")))).catch(() => {});
+    api.get("/gl/accounts").then((r) => setBudgetAccounts(r.data.filter((a: any) => a.isActive))).catch(() => {});
     api.get(`/public-sector/fund-centres/utilization?year=${year}`).then((r) => setUtilization(r.data)).catch(() => {});
     api.get("/public-sector/tenders").then((r) => setTenders(r.data)).catch(() => {});
     api.get("/public-sector/asset-verification/batches").then((r) => setBatches(r.data)).catch(() => {});
@@ -167,6 +167,11 @@ export default function PublicSectorPage() {
     } catch (err) { setError(extractErrorMessage(err)); }
   }
 
+  const selectableBudgetAccounts = budgetAccounts.filter((a: any) =>
+    a.type === "Income" || a.type === "Expense" ||
+    (budgetDraft.accountingBasis === "Cash" &&
+      ["Operating", "Investing", "Financing"].includes(a.cashFlowCategory))
+  );
   const fmt = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
@@ -273,7 +278,7 @@ export default function PublicSectorPage() {
                     const account = budgetAccounts.find((a: any) => a.id === e.target.value);
                     updateBudgetLine(index, "glAccountId", e.target.value);
                     updateBudgetLine(index, "classificationCode", account?.subType ?? "");
-                  }}><option value="">Income / expense account</option>{budgetAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} — {a.name} ({a.type})</option>)}</select>
+                  }}><option value="">Select GL account</option>{selectableBudgetAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} — {a.name} ({a.type})</option>)}</select>
                   <input className="input" required placeholder="Description" value={line.description} onChange={(e) => updateBudgetLine(index, "description", e.target.value)} />
                   <input className="input" required placeholder="GL SubType code" value={line.classificationCode} onChange={(e) => updateBudgetLine(index, "classificationCode", e.target.value)} />
                   <input className="input" type="number" min="0" step="0.01" required placeholder="Amount" value={line.amount} onChange={(e) => updateBudgetLine(index, "amount", Number(e.target.value))} />
@@ -282,10 +287,10 @@ export default function PublicSectorPage() {
               ))}
             </div>
             <div className="flex gap-2 flex-wrap">
-              <button className="btn-primary" disabled={budgetAccounts.length === 0 || fundCentres.length === 0}>Save budget draft</button>
+              <button className="btn-primary" disabled={selectableBudgetAccounts.length === 0 || fundCentres.length === 0}>Save budget draft</button>
               {budgetDraftId && <button type="button" className="btn-secondary" onClick={submitBudgetVersion}>Submit draft for approval</button>}
             </div>
-            {budgetAccounts.length === 0 && <p className="text-xs text-amber-700">Configure active income and expense GL accounts before entering budget lines.</p>}
+            {selectableBudgetAccounts.length === 0 && <p className="text-xs text-amber-700">Configure active income/expense accounts, or for cash budgets balance-sheet accounts classified to operating, investing or financing cash flows.</p>}
           </form>
           <div className="border rounded-lg p-4 space-y-3">
             <div>
