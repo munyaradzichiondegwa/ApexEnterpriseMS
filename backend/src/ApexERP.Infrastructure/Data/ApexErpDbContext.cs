@@ -1234,13 +1234,28 @@ namespace ApexERP.Infrastructure.Data
 
                 var original = entry.Property(x => x.Status).OriginalValue;
                 var current = entry.Property(x => x.Status).CurrentValue;
+                var expectedChanges = new HashSet<string> { nameof(BaseEntity.UpdatedAt), nameof(BaseEntity.UpdatedBy) };
                 var validTransition =
                     (original == ZimbabweDswtFilingStatus.Prepared && current == ZimbabweDswtFilingStatus.Submitted) ||
                     (original == ZimbabweDswtFilingStatus.Submitted &&
                         current is ZimbabweDswtFilingStatus.Acknowledged or ZimbabweDswtFilingStatus.Rejected) ||
                     (original == ZimbabweDswtFilingStatus.Acknowledged && current == ZimbabweDswtFilingStatus.PaymentConfirmed);
-                if (current != original && !validTransition)
-                    throw new InvalidOperationException($"A DSWT filing cannot move from {original} to {current}.");
+                if (original == ZimbabweDswtFilingStatus.Prepared && current == ZimbabweDswtFilingStatus.Submitted)
+                    expectedChanges.UnionWith(new[] { nameof(ZimbabweDswtFiling.SubmittedAt), nameof(ZimbabweDswtFiling.SubmittedBy),
+                        nameof(ZimbabweDswtFiling.SubmissionReference), nameof(ZimbabweDswtFiling.SubmissionEvidenceReference), nameof(ZimbabweDswtFiling.Status) });
+                else if (original == ZimbabweDswtFilingStatus.Submitted &&
+                    current is ZimbabweDswtFilingStatus.Acknowledged or ZimbabweDswtFilingStatus.Rejected)
+                    expectedChanges.UnionWith(new[] { nameof(ZimbabweDswtFiling.AcknowledgedAt), nameof(ZimbabweDswtFiling.AcknowledgementReference),
+                        nameof(ZimbabweDswtFiling.AcknowledgementEvidenceReference), nameof(ZimbabweDswtFiling.Status) });
+                else if (original == ZimbabweDswtFilingStatus.Acknowledged && current == ZimbabweDswtFilingStatus.PaymentConfirmed)
+                    expectedChanges.UnionWith(new[] { nameof(ZimbabweDswtFiling.PaymentConfirmedAt), nameof(ZimbabweDswtFiling.PaymentReference),
+                        nameof(ZimbabweDswtFiling.PaymentAmount), nameof(ZimbabweDswtFiling.PaymentCurrency),
+                        nameof(ZimbabweDswtFiling.PaymentEvidenceReference), nameof(ZimbabweDswtFiling.Status) });
+
+                var changed = entry.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name);
+                if (!validTransition || changed.Any(name => !expectedChanges.Contains(name)))
+                    throw new InvalidOperationException(
+                        $"A DSWT filing cannot move from {original} to {current} or alter evidence outside its permitted transition.");
             }
 
             foreach (var entry in ChangeTracker.Entries<JournalEntry>())
