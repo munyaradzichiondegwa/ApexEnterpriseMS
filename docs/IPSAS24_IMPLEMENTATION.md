@@ -90,6 +90,17 @@ API routes:
 - `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/submit`
 - `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/review`
 
+### Final-budget-to-actual variance explanations — implemented
+
+The comparison API now identifies the final budget line behind each comparison row and stores an evidence-backed explanation for each non-zero comparable final-budget-to-actual variance. Explanations are prepared, submitted and independently reviewed. At submission and approval, ApexERP recalculates the current comparison and requires the recorded variance amount to remain exact. PostgreSQL prevents edits or deletion after approval/rejection; a changed actual variance can receive a new explanation while retaining the earlier explanation as audit history.
+
+Until an approved entity-specific materiality threshold is configured, the implementation deliberately requires an explanation for **every non-zero variance**, which is stricter than applying an unapproved threshold. The comparison report exposes whether all required explanations are approved, and the frontend withholds the comparison CSV export while comparable actuals or variance explanations are incomplete.
+
+API routes:
+- `POST /api/v1/public-sector/budget-variance-explanations`
+- `POST /api/v1/public-sector/budget-variance-explanations/{id}/submit`
+- `POST /api/v1/public-sector/budget-variance-explanations/{id}/review`
+
 ### Expected-source register completeness certification — implemented
 
 A separate tenant-scoped attestation now records the approved budget version, reporting-entity scope, declared expected-source count and evidence reference. The preparer submits it and an independent certifier approves or rejects it. Certification re-counts the register and requires every registered source—including sources reporting nil activity—to have both an independently reviewed period control submission and an independently reviewed record-level reconciliation.
