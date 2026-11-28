@@ -2782,7 +2782,8 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("Only a pending budget actual can be certified.");
                 if (actual.CreatedBy == certifierId)
                     throw new InvalidOperationException("The person who captured the budget actual cannot certify it.");
-                if (actual.SourceKind is PublicSectorBudgetActualSourceKind.ArReceipt or PublicSectorBudgetActualSourceKind.ApPayment)
+                if (!actual.ReversalOfId.HasValue &&
+                    actual.SourceKind is PublicSectorBudgetActualSourceKind.ArReceipt or PublicSectorBudgetActualSourceKind.ApPayment)
                 {
                     var sourceAllocations = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
                         x.CompanyId == companyId && x.SourceKind == actual.SourceKind &&
