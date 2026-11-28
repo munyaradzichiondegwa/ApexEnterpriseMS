@@ -1931,7 +1931,7 @@ namespace ApexERP.Application.Services
                     else if (ledger.EventKind == ModifiedCashLedgerEventKind.Reversal &&
                         ledger.OriginalEventId.HasValue)
                     {
-                        var original = await _db.ModifiedCashRecognitionLedgerEvents.FirstOrDefaultAsync(x =>
+                        var originalRecognition = await _db.ModifiedCashRecognitionLedgerEvents.FirstOrDefaultAsync(x =>
                             x.Id == ledger.OriginalEventId.Value && x.CompanyId == companyId &&
                             x.Status == ModifiedCashLedgerEventStatus.Certified &&
                             x.EventKind == ModifiedCashLedgerEventKind.Recognition &&
@@ -1941,30 +1941,30 @@ namespace ApexERP.Application.Services
                             (x.Status == InvoiceStatus.Posted || x.Status == InvoiceStatus.Paid ||
                              x.Status == InvoiceStatus.Partial), ct);
                         valid = sourceValid && policyPeriodValid && mappingValid &&
-                            original != null && commitment != null && !postedInvoiceExists &&
-                            original.PolicyId == ledger.PolicyId &&
-                            original.CommitmentId == ledger.CommitmentId &&
-                            original.SourceEventId == ledger.SourceEventId &&
-                            original.Amount == ledger.Amount && original.EventDate == ledger.EventDate;
+                            originalRecognition != null && commitment != null && !postedInvoiceExists &&
+                            originalRecognition.PolicyId == ledger.PolicyId &&
+                            originalRecognition.CommitmentId == ledger.CommitmentId &&
+                            originalRecognition.SourceEventId == ledger.SourceEventId &&
+                            originalRecognition.Amount == ledger.Amount && originalRecognition.EventDate == ledger.EventDate;
                     }
                     else if (ledger.EventKind == ModifiedCashLedgerEventKind.Liquidation &&
                         ledger.OriginalEventId.HasValue)
                     {
-                        var original = await _db.ModifiedCashRecognitionLedgerEvents.FirstOrDefaultAsync(x =>
+                        var originalRecognition = await _db.ModifiedCashRecognitionLedgerEvents.FirstOrDefaultAsync(x =>
                             x.Id == ledger.OriginalEventId.Value && x.CompanyId == companyId &&
                             x.Status == ModifiedCashLedgerEventStatus.Certified &&
                             x.EventKind == ModifiedCashLedgerEventKind.Recognition &&
                             !x.OriginalEventId.HasValue, ct);
                         var settlement = await ModifiedCashApSettlementEvidenceValidator.ValidateAsync(
                             _db, companyId, ledger.SourceEventId, ledger.CommitmentId, ct);
-                        valid = policyPeriodValid && mappingValid && original != null &&
-                            settlement != null && original.PolicyId == ledger.PolicyId &&
-                            original.CommitmentId == ledger.CommitmentId &&
+                        valid = policyPeriodValid && mappingValid && originalRecognition != null &&
+                            settlement != null && originalRecognition.PolicyId == ledger.PolicyId &&
+                            originalRecognition.CommitmentId == ledger.CommitmentId &&
                             original.SourceEventKind == ledger.SourceEventKind &&
                             settlement.AllocatedAmount == ledger.Amount &&
                             settlement.PaymentDate == ledger.EventDate &&
                             !await _db.ModifiedCashRecognitionLedgerEvents.AnyAsync(x =>
-                                x.CompanyId == companyId && x.OriginalEventId == original.Id &&
+                                x.CompanyId == companyId && x.OriginalEventId == originalRecognition.Id &&
                                 x.EventKind == ModifiedCashLedgerEventKind.Reversal &&
                                 x.Status != ModifiedCashLedgerEventStatus.Rejected, ct);
                     }
@@ -3652,7 +3652,7 @@ namespace ApexERP.Application.Services
                     EffectiveDate = original.EffectiveDate,
                     Currency = original.Currency,
                     SourceAmount = original.SourceAmount,
-                    Amount = original.Amount,
+                    Amount = originalRecognition.Amount,
                     ExchangeRateToBudgetCurrency = original.ExchangeRateToBudgetCurrency,
                     ExchangeRateDate = original.ExchangeRateDate,
                     ExchangeRateSource = original.ExchangeRateSource,
@@ -3670,7 +3670,7 @@ namespace ApexERP.Application.Services
                 _audit.Record(companyId, actorId, "PublicSectorBudgetExecutionActual.ReversalCreated", "PublicSector",
                     nameof(PublicSectorBudgetExecutionActual), reversal.Id, null,
                     new { OriginalActualId = original.Id, original.SourceKind, original.SourceRecordId,
-                        original.Currency, original.SourceAmount, original.Amount,
+                        original.Currency, original.SourceAmount, originalRecognition.Amount,
                         original.ExchangeRateToBudgetCurrency, original.ExchangeRateDate,
                         original.ExchangeRateSource, original.ExchangeRateSourceReference,
                         original.ExchangeRateIsInverse, original.ExchangeRateApprovedBy,
