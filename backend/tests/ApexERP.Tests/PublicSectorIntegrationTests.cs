@@ -2262,5 +2262,120 @@ namespace ApexERP.Tests
             });
             await Assert.ThrowsAsync<DbUpdateException>(() => frozenContext.SaveChangesAsync());
         }
+
+        [PostgresFact]
+        public async Task Ipsas24_cash_actual_translates_foreign_currency_with_immutable_rate_provenance()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var accountId = Guid.NewGuid();
+            var bankAccountId = Guid.NewGuid();
+            var journalId = Guid.NewGuid();
+            var transactionId = Guid.NewGuid();
+            var budgetVersionId = Guid.NewGuid();
+            var budgetLineId = Guid.NewGuid();
+            var preparerId = Guid.NewGuid();
+            var certifierId = Guid.NewGuid();
+            var effectiveDate = new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "IPSAS FX Cash MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-FX",
+                    Name = "FX Vote", Level = FundCentreLevel.Vote, FinancialYear = 2026
+                });
+                seed.GlAccounts.Add(new GlAccount
+                {
+                    Id = accountId, CompanyId = companyId, Code = "5102",
+                    Name = "Foreign Currency Operating Expenditure",
+                    Type = GlAccountType.Expense, SubType = "EC-FX",
+                    Currency = "USD", CashFlowCategory = CashFlowCategory.Operating
+                });
+                seed.BankAccounts.Add(new BankAccount
+                {
+                    Id = bankAccountId, CompanyId = companyId, Name = "ZWG Operating Bank",
+                    AccountNo = "FX-TEST-001", BankName = "Test Bank",
+                    Currency = "ZWG", GlAccountId = accountId
+                });
+                seed.JournalEntries.Add(new JournalEntry
+                {
+                    Id = journalId, CompanyId = companyId, EntryNo = "JE-IPSAS24-FX",
+                    Description = "Foreign currency cash execution", EntryDate = effectiveDate,
+                    Source = JournalSource.Bank, Status = JournalStatus.Posted
+                });
+                seed.BankTransactions.Add(new BankTransaction
+                {
+                    Id = transactionId, CompanyId = companyId, BankAccountId = bankAccountId,
+                    TransactionDate = effectiveDate, Description = "Foreign currency supplier payment",
+                    Debit = 500m, Credit = 0m, Reference = "ZWG-BANK-001",
+                    IsReconciled = true, JournalEntryId = journalId
+                });
+                seed.JournalLines.Add(new JournalLine
+                {
+                    JournalEntryId = journalId, GlAccountId = accountId, FundCentreId = fundCentreId,
+                    Debit = 500m, Credit = 0m, Currency = "ZWG", ExchangeRate = 0.02m,
+                    BaseDebit = 10m, BaseCredit = 0m
+                });
+                seed.ExchangeRates.Add(new ExchangeRate
+                {
+                    CompanyId = companyId, FromCurrency = "ZWG", ToCurrency = "USD",
+                    RateDate = effectiveDate, Rate = 0.02m, IsManualOverride = false,
+                    RateSource = "RBZ published rate", SourceReference = "RBZ-DAILY-2026-06-30"
+                });
+                var version = new PublicSectorBudgetVersion
+                {
+                    Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
+                    VersionNumber = 1, Kind = PublicSectorBudgetVersionKind.Original,
+                    Status = PublicSectorBudgetVersionStatus.Approved, Currency = "USD",
+                    AccountingBasis = AccountingBasis.Cash, ClassificationBasis = "MDA cash classification",
+                    EntityScope = "IPSAS FX Cash MDA",
+                    PeriodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    PeriodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    AuthorityReference = "Appropriation Act 2026", ApprovedBy = certifierId,
+                    ApprovedAt = DateTime.UtcNow, CreatedBy = preparerId
+                };
+                version.Lines.Add(new PublicSectorBudgetVersionLine
+                {
+                    Id = budgetLineId, CompanyId = companyId, BudgetVersionId = budgetVersionId,
+                    FundCentreId = fundCentreId, GlAccountId = accountId, LineNumber = 1,
+                    Description = "Foreign currency operating expenditure",
+                    ClassificationCode = "EC-FX", Amount = 100m, CreatedBy = preparerId
+                });
+                seed.PublicSectorBudgetVersions.Add(version);
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var actual = await service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
+                budgetLineId, PublicSectorBudgetActualEventKind.CashPayment,
+                PublicSectorBudgetActualSourceKind.BankTransaction, transactionId,
+                effectiveDate, CashFlowCategory.Operating, preparerId);
+
+            Assert.Equal(500m, actual.SourceAmount);
+            Assert.Equal(10m, actual.Amount);
+            Assert.Equal(0.02m, actual.ExchangeRateToBudgetCurrency);
+            Assert.Equal(effectiveDate.Date, actual.ExchangeRateDate!.Value.Date);
+            Assert.Equal("RBZ published rate", actual.ExchangeRateSource);
+            Assert.Equal("RBZ-DAILY-2026-06-30", actual.ExchangeRateSourceReference);
+            Assert.False(actual.ExchangeRateIsInverse);
+
+            await service.SubmitBudgetExecutionActualAsync(companyId, actual.Id, preparerId);
+            await service.CertifyBudgetExecutionActualAsync(companyId, actual.Id, certifierId);
+            Assert.True(await service.IsCertifiedCashActualSourceValidAsync(companyId, actual, default));
+
+            var rate = await ctx.ExchangeRates.SingleAsync(x =>
+                x.CompanyId == companyId && x.FromCurrency == "ZWG" && x.ToCurrency == "USD");
+            rate.Rate = 0.03m;
+            await ctx.SaveChangesAsync();
+            Assert.False(await service.IsCertifiedCashActualSourceValidAsync(companyId, actual, default));
+        }
     }
 }
