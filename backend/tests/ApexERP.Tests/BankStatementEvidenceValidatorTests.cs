@@ -72,7 +72,7 @@ public sealed class BankStatementEvidenceValidatorTests
             new HashSet<Guid>(), new HashSet<string>());
 
         Assert.False(result.IsValid);
-        Assert.Contains("bank-origin authentication", result.Reason);
+        Assert.Contains("independently evidenced bank confirmation", result.Reason);
     }
 
     [Fact]
