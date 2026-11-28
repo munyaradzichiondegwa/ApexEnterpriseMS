@@ -55,9 +55,15 @@ public sealed class AddIpsas24BankStatementImports : Migration
             {
                 table.PrimaryKey("PK_BankStatementImportBatches", x => x.Id);
                 table.CheckConstraint("CK_BankStatementBatch_Period", "\"PeriodEnd\" > \"PeriodStart\"");
-                table.CheckConstraint("CK_BankStatementBatch_ByteLength", "\"ByteLength\" > 0");
+                table.CheckConstraint("CK_BankStatementBatch_ByteLength", "\"ByteLength\" > 0 AND octet_length(\"OriginalBytes\") = \"ByteLength\"");
                 table.CheckConstraint("CK_BankStatementBatch_Totals",
                     "\"TotalDebits\" >= 0 AND \"TotalCredits\" >= 0 AND \"TransactionCount\" >= 0");
+                table.CheckConstraint("CK_BankStatementBatch_Balance",
+                    "\"OpeningBalance\" + \"TotalCredits\" - \"TotalDebits\" = \"ClosingBalance\"");
+                table.CheckConstraint("CK_BankStatementBatch_Authentication",
+                    "(\"Status\" = 0 AND \"AuthenticationMethod\" = 0 AND \"AuthenticatedBy\" IS NULL AND \"AuthenticatedAt\" IS NULL AND \"AuthenticationEvidenceReference\" IS NULL) OR (\"Status\" IN (1,2) AND \"AuthenticationMethod\" = 1 AND \"AuthenticatedBy\" IS NOT NULL AND \"AuthenticatedAt\" IS NOT NULL AND \"AuthenticationEvidenceReference\" IS NOT NULL) OR \"Status\" = 3");
+                table.CheckConstraint("CK_BankStatementBatch_Completeness",
+                    "(\"Status\" = 2 AND \"CompletenessCertifiedBy\" IS NOT NULL AND \"CompletenessCertifiedAt\" IS NOT NULL) OR (\"Status\" <> 2 AND \"CompletenessCertifiedBy\" IS NULL AND \"CompletenessCertifiedAt\" IS NULL)");
                 table.ForeignKey("FK_BankStatementBatch_BankAccount", x => x.BankAccountId,
                     "BankAccounts", "Id", onDelete: ReferentialAction.Restrict);
             });
@@ -95,8 +101,12 @@ public sealed class AddIpsas24BankStatementImports : Migration
             {
                 table.PrimaryKey("PK_BankStatementImportedTransactions", x => x.Id);
                 table.CheckConstraint("CK_BankStatementTransaction_Amounts",
-                    "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0)");
+                    "(\"Debit\" > 0 AND \"Credit\" = 0) OR (\"Credit\" > 0 AND \"Debit\" = 0)");
                 table.CheckConstraint("CK_BankStatementTransaction_SourceLine", "\"SourceLineNumber\" > 1");
+                table.CheckConstraint("CK_BankStatementTransaction_Identity",
+                    "length(trim(\"ExternalTransactionId\")) > 0 AND length(\"Currency\") = 3 AND length(\"TransactionFingerprint\") = 64");
+                table.CheckConstraint("CK_BankStatementTransaction_Review",
+                    "(\"Status\" = 0 AND \"MatchedBankTransactionId\" IS NULL AND \"MatchedBy\" IS NULL AND \"MatchedAt\" IS NULL AND \"ExclusionReason\" IS NULL AND \"ExcludedBy\" IS NULL AND \"ExcludedAt\" IS NULL) OR (\"Status\" = 1 AND \"MatchedBankTransactionId\" IS NOT NULL AND \"MatchedBy\" IS NOT NULL AND \"MatchedAt\" IS NOT NULL AND \"ExclusionReason\" IS NULL AND \"ExcludedBy\" IS NULL AND \"ExcludedAt\" IS NULL) OR (\"Status\" = 2 AND \"MatchedBankTransactionId\" IS NULL AND \"MatchedBy\" IS NULL AND \"MatchedAt\" IS NULL AND length(trim(\"ExclusionReason\")) > 0 AND \"ExcludedBy\" IS NOT NULL AND \"ExcludedAt\" IS NOT NULL)");
                 table.ForeignKey("FK_BankStatementTransaction_Batch", x => x.ImportBatchId,
                     "BankStatementImportBatches", "Id", onDelete: ReferentialAction.Restrict);
                 table.ForeignKey("FK_BankStatementTransaction_BankAccount", x => x.BankAccountId,
