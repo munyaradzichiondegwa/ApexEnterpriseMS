@@ -248,8 +248,10 @@ public sealed class BankStatementImportController : ApiControllerBase
                     throw new InvalidOperationException("The uploader and authenticator cannot perform transaction matching.");
                 var statementLine = await _db.BankStatementImportedTransactions.SingleOrDefaultAsync(x =>
                     x.Id == transactionId && x.CompanyId == CompanyId &&
-                    x.ImportBatchId == batch.Id && x.Status == BankStatementImportedTransactionStatus.Imported, token)
-                    ?? throw new InvalidOperationException("Unmatched imported statement transaction not found.");
+                    x.ImportBatchId == batch.Id &&
+                    (x.Status == BankStatementImportedTransactionStatus.Imported ||
+                     x.Status == BankStatementImportedTransactionStatus.Excluded), token)
+                    ?? throw new InvalidOperationException("Unmatched or quarantined imported statement transaction not found.");
                 var bankTransaction = await _db.BankTransactions.SingleOrDefaultAsync(x =>
                     x.Id == req.BankTransactionId && x.CompanyId == CompanyId &&
                     x.BankAccountId == batch.BankAccountId, token)
@@ -270,15 +272,29 @@ public sealed class BankStatementImportController : ApiControllerBase
                     !string.Equals((bankTransaction.Reference ?? string.Empty).Trim(),
                         (statementLine.Reference ?? string.Empty).Trim(), StringComparison.Ordinal))
                     throw new InvalidOperationException("Bank transaction does not exactly match the imported statement date, amount, currency and reference.");
+                var priorStatus = statementLine.Status;
+                var priorExclusion = new
+                {
+                    statementLine.ExclusionReason,
+                    statementLine.ExcludedBy,
+                    statementLine.ExcludedAt
+                };
                 bankTransaction.IsReconciled = true;
                 bankTransaction.MatchedStatementLineHash = statementLine.Id;
                 statementLine.Status = BankStatementImportedTransactionStatus.Matched;
                 statementLine.MatchedBankTransactionId = bankTransaction.Id;
                 statementLine.MatchedBy = UserId;
                 statementLine.MatchedAt = DateTime.UtcNow;
+                // A reviewed exclusion is a quarantine decision, not permission to omit a
+                // statement row from completeness. A later independent exact match may resolve it.
+                statementLine.ExclusionReason = null;
+                statementLine.ExcludedBy = null;
+                statementLine.ExcludedAt = null;
                 _audit.Record(CompanyId, UserId, "BankStatementTransaction.Matched", "Banking",
-                    nameof(BankStatementImportedTransaction), statementLine.Id, null,
-                    new { statementLine.MatchedBankTransactionId, statementLine.MatchedBy, statementLine.MatchedAt });
+                    nameof(BankStatementImportedTransaction), statementLine.Id,
+                    new { PriorStatus = priorStatus, PriorExclusion = priorExclusion },
+                    new { statementLine.Status, statementLine.MatchedBankTransactionId,
+                        statementLine.MatchedBy, statementLine.MatchedAt });
                 await _db.SaveChangesAsync(token);
                 return statementLine;
             }, ct);
@@ -340,14 +356,11 @@ public sealed class BankStatementImportController : ApiControllerBase
                 var lines = await _db.BankStatementImportedTransactions.Where(x =>
                     x.CompanyId == CompanyId && x.ImportBatchId == item.Id).ToListAsync(token);
                 if (lines.Count != item.TransactionCount ||
-                    lines.Any(x => x.Status == BankStatementImportedTransactionStatus.Imported) ||
-                    lines.Any(x => x.Status == BankStatementImportedTransactionStatus.Excluded &&
-                        (x.ExcludedBy == null || x.ExcludedAt == null || string.IsNullOrWhiteSpace(x.ExclusionReason))) ||
-                    lines.Any(x => x.Status == BankStatementImportedTransactionStatus.Matched &&
-                        (x.MatchedBy == null || x.MatchedAt == null || !x.MatchedBankTransactionId.HasValue)))
-                    throw new InvalidOperationException("Every imported statement row must be matched or independently excluded with complete review evidence.");
-                if (lines.Any(x => x.MatchedBy == UserId || x.ExcludedBy == UserId))
-                    throw new InvalidOperationException("The completeness certifier cannot certify their own transaction matching or exclusions.");
+                    lines.Any(x => x.Status != BankStatementImportedTransactionStatus.Matched ||
+                        x.MatchedBy == null || x.MatchedAt == null || !x.MatchedBankTransactionId.HasValue))
+                    throw new InvalidOperationException("Every imported statement row must be matched one-to-one to a posted bank-ledger transaction. Quarantined exclusions cannot certify source completeness.");
+                if (lines.Any(x => x.MatchedBy == UserId))
+                    throw new InvalidOperationException("The completeness certifier cannot certify their own transaction matching.");
                 var totalDebits = lines.Sum(x => x.Debit);
                 var totalCredits = lines.Sum(x => x.Credit);
                 if (totalDebits != item.TotalDebits || totalCredits != item.TotalCredits ||
