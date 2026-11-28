@@ -119,6 +119,15 @@ namespace ApexERP.API.Controllers
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
+        [HttpGet("receipts")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetReceipts([FromQuery] int? year, CancellationToken ct)
+        {
+            var query = _db.ArReceipts.Where(x => x.CompanyId == CompanyId);
+            if (year.HasValue) query = query.Where(x => x.ReceiptDate.Year == year.Value);
+            return Ok(await query.OrderByDescending(x => x.ReceiptDate).Take(500).ToListAsync(ct));
+        }
+
         [HttpGet("ageing")]
         public async Task<IActionResult> GetAgeing([FromQuery] DateTime? asOf)
         {
