@@ -598,21 +598,27 @@ namespace ApexERP.API.Controllers
                 expectedSourceRegisterApproved && requiredSourceSubmissionsReviewed &&
                 noUnreviewedSourceSubmissions;
 
+            // Record-level matching of every external statement row to one or more actual
+            // allocations (or an independently approved exclusion) is not implemented yet.
+            // Keep this explicit false gate so a control-total submission is never mistaken for
+            // transaction-level completeness.
+            const bool recordLevelSourceReconciliationComplete = false;
+            // The approved register itself also needs an independent completeness attestation;
+            // approval of the entries currently present cannot prove that no source was omitted.
+            const bool expectedSourceRegisterCompletenessCertified = false;
             var sourceCoverageComplete = (noSourceBackedCashActuals
                     ? certifiedZeroActivity
                     : true) &&
                 uncapturedPostedMovements == 0 && missingArSettlementCoverage == 0 &&
                 missingApSettlementCoverage == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0 &&
-                registeredSourceSubmissionCoverageComplete;
+                registeredSourceSubmissionCoverageComplete &&
+                recordLevelSourceReconciliationComplete &&
+                expectedSourceRegisterCompletenessCertified;
             var operatingBridgeDifference = operatingDifference - operatingAdjustment;
             var investingBridgeDifference = investingDifference - investingAdjustment;
             var financingBridgeDifference = financingDifference - financingAdjustment;
-            // Do not call the period reconciled until the expected-source register itself has
-            // an independently approved completeness certification. No such workflow exists yet.
-            const bool expectedSourceRegisterCompletenessCertified = false;
-            var reconciled = sourceCoverageComplete && expectedSourceRegisterCompletenessCertified &&
-                operatingBridgeDifference == 0m && investingBridgeDifference == 0m &&
-                financingBridgeDifference == 0m;
+            var reconciled = sourceCoverageComplete && operatingBridgeDifference == 0m &&
+                investingBridgeDifference == 0m && financingBridgeDifference == 0m;
 
             return Ok(new
             {
@@ -626,6 +632,7 @@ namespace ApexERP.API.Controllers
                 RequiredSourceSubmissionsReviewed = requiredExpectedSources.Count(x =>
                     sourceSubmissions.Any(s => s.ExpectedCashSourceId == x.Id && s.Status == "Reviewed")),
                 RegisteredSourceSubmissionCoverageComplete = registeredSourceSubmissionCoverageComplete,
+                RecordLevelSourceReconciliationComplete = recordLevelSourceReconciliationComplete,
                 ExpectedSourceRegisterCompletenessCertified = expectedSourceRegisterCompletenessCertified,
                 UncapturedOrUnreconciledPostedBankMovements = uncapturedPostedMovements,
                 MissingPostedArSettlementCoverage = missingArSettlementCoverage,
