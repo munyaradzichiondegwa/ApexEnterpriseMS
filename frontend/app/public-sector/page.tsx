@@ -632,7 +632,7 @@ export default function PublicSectorPage() {
               <div className="border-t pt-3 space-y-2">
                 <h5 className="font-medium">Independent expected-source register completeness certification</h5>
                 <p className="text-xs text-slate-500">The evidence reference must identify the signed management inventory or other authoritative population evidence used to establish that no bank account, receivables/payables control population or reporting source has been omitted.</p>
-                {!registerAttestation && <div className="flex gap-2 flex-wrap">
+                {(!registerAttestation || registerAttestation.status === "Rejected") && <div className="flex gap-2 flex-wrap">
                   <input className="input flex-1" required placeholder="Signed source inventory evidence reference" value={registerAttestationEvidence} onChange={(e) => setRegisterAttestationEvidence(e.target.value)} />
                   <button type="button" className="btn-secondary" disabled={!expectedCashSources.length || !registerAttestationEvidence.trim()} onClick={() => registerAttestationAction("create")}>Create attestation</button>
                 </div>}
@@ -706,7 +706,10 @@ export default function PublicSectorPage() {
                   </span>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Source coverage: {cashActualReconciliation.sourceCoverageComplete ? "complete for in-period bank movements" : "incomplete"} ·
+                  Source coverage: {cashActualReconciliation.sourceCoverageComplete ? "complete" : "incomplete"} ·
+                  Expected-source register: {cashActualReconciliation.expectedSourceRegisterPresent ? (cashActualReconciliation.expectedSourceRegisterApproved ? "approved" : "not approved") : "missing"} ·
+                  Record-level reconciliations reviewed: {cashActualReconciliation.requiredSourceRecordReconciliationsReviewed} / {cashActualReconciliation.requiredExpectedSources} required sources ·
+                  Register completeness certification: {cashActualReconciliation.expectedSourceRegisterCompletenessCertified ? "certified" : "not certified"} ·
                   {cashActualReconciliation.noSourceBackedCashActuals ? "No source-backed cash actuals or zero-activity certification captured · " : ""}
                   Uncaptured/unreconciled bank movements: {cashActualReconciliation.uncapturedOrUnreconciledPostedBankMovements} ·
                   Draft/pending actuals: {cashActualReconciliation.pendingOrDraftActuals} ·
