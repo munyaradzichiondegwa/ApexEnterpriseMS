@@ -90,7 +90,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             .OrderBy(x => x.Name)
             .Select(x => new { x.Id, x.Name, x.RegistrationNo, x.BaseCurrency, x.FunctionalCurrency,
                 x.FiscalYearStartMonth, x.Timezone, x.Sector, x.ParentCompanyId, x.OwnershipPercentage,
-                x.IsPublicSectorEntity, x.AccountingBasis, x.IsActive })
+                x.IsPublicSectorEntity, x.AccountingBasis, x.ZimbabweTaxpayerTin, x.IsActive })
             .ToListAsync(ct);
         return Ok(rows);
     }
@@ -158,6 +158,37 @@ public sealed class OrganisationManagementController : ApiControllerBase
         return CreatedAtAction(nameof(Companies), new { id = company.Id }, new { company.Id, company.Name });
     }
 
+
+    [HttpGet("companies/{companyId:guid}/tax-profile")]
+    public async Task<IActionResult> GetCompanyTaxProfile(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: view company tax profile");
+        var company = await _db.Companies.IgnoreQueryFilters().AsNoTracking()
+            .Where(x => x.Id == companyId && x.TenantId == TenantId)
+            .Select(x => new { x.Id, x.Name, x.VatNo, x.ZimbabweTaxpayerTin })
+            .SingleOrDefaultAsync(ct);
+        return company is null ? NotFound() : Ok(company);
+    }
+
+    [HttpPut("companies/{companyId:guid}/tax-profile/zimbabwe")]
+    public async Task<IActionResult> UpdateZimbabweTaxProfile(
+        Guid companyId, [FromBody] UpdateZimbabweTaxProfileRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        var tin = request.ZimbabweTaxpayerTin?.Trim();
+        if (string.IsNullOrWhiteSpace(tin) || tin.Length > 40 ||
+            tin.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '/')))
+            return BadRequest(new { error = "A valid ZIMRA TIN (maximum 40 letters, digits, hyphens or slashes) is required." });
+
+        using var scope = _db.SystemAccessScope("tenant administration: update Zimbabwe tax profile");
+        var company = await _db.Companies.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct);
+        if (company is null) return NotFound();
+
+        company.ZimbabweTaxpayerTin = tin;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { company.Id, company.Name, company.ZimbabweTaxpayerTin });
+    }
 
     [HttpPut("companies/{companyId:guid}/deactivate")]
     public async Task<IActionResult> DeactivateCompany(Guid companyId, CancellationToken ct)
@@ -792,3 +823,5 @@ public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
     string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null, string? BaseCurrency = null);
 public sealed record UpdateOnboardingRequest(string[] CompletedSteps, Guid? DeploymentProfileId = null, bool Completed = false);
+
+public sealed record UpdateZimbabweTaxProfileRequest(string ZimbabweTaxpayerTin);
