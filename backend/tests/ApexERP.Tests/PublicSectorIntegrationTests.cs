@@ -1365,6 +1365,37 @@ namespace ApexERP.Tests
             Assert.Equal(PublicSectorBudgetActualStatus.Reversed,
                 (await ctx.PublicSectorBudgetExecutionActuals.SingleAsync(x => x.Id == certified.Id)).Status);
 
+            // The PostgreSQL trigger independently rejects a chained reversal even if
+            // a caller bypasses the application service.
+            await using (var chainContext = db.NewContext(companyId))
+            {
+                chainContext.PublicSectorBudgetExecutionActuals.Add(new PublicSectorBudgetExecutionActual
+                {
+                    CompanyId = companyId,
+                    FinancialYear = certifiedReversal.FinancialYear,
+                    BudgetVersionId = certifiedReversal.BudgetVersionId,
+                    BudgetVersionLineId = certifiedReversal.BudgetVersionLineId,
+                    FundCentreId = certifiedReversal.FundCentreId,
+                    GlAccountId = certifiedReversal.GlAccountId,
+                    CostCentreId = certifiedReversal.CostCentreId,
+                    EventKind = PublicSectorBudgetActualEventKind.CashPayment,
+                    SourceKind = certifiedReversal.SourceKind,
+                    SourceRecordId = certifiedReversal.SourceRecordId,
+                    SourceReference = certifiedReversal.SourceReference,
+                    SourceDate = certifiedReversal.SourceDate,
+                    EffectiveDate = certifiedReversal.EffectiveDate,
+                    Currency = certifiedReversal.Currency,
+                    Amount = certifiedReversal.Amount,
+                    ExchangeRateToBudgetCurrency = certifiedReversal.ExchangeRateToBudgetCurrency,
+                    CashFlowSection = certifiedReversal.CashFlowSection,
+                    ReversalOfId = certifiedReversal.Id,
+                    ReversalReason = "Attempt to chain a second compensating reversal.",
+                    Status = PublicSectorBudgetActualStatus.Draft,
+                    CreatedBy = Guid.NewGuid()
+                });
+                await Assert.ThrowsAsync<DbUpdateException>(() => chainContext.SaveChangesAsync());
+            }
+
             // A source population can be corrected by a new numbered revision without
             // mutating the previously reviewed submission. Certified actuals are reused
             // only within the latest revision's record-level mapping.
@@ -1402,6 +1433,7 @@ namespace ApexERP.Tests
                 reconciliationReviewerId, true, "Replacement source population reconciled and independently reviewed.");
             var revisedComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(revisedComparison.ComparableActualsAvailable, revisedComparison.ComparabilityMessage);
+            Assert.Equal(75m, Assert.Single(revisedComparison.Lines).ActualOnComparableBasis);
             Assert.True(revisedComparison.FinancialStatementReconciliation.Required);
             Assert.False(revisedComparison.FinancialStatementReconciliation.Complete);
 
