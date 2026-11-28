@@ -3755,7 +3755,6 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<decimal>("ClosingBalance").HasColumnType("numeric(20,6)");
                     b.Property<string>("Currency").IsRequired().HasColumnType("text");
                     b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
-                    b.Property<string>("CommentReference").HasColumnType("text");
                     b.Property<string>("Status").IsRequired().HasColumnType("text");
                     b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
                     b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
@@ -3859,6 +3858,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<decimal>("VarianceAmount").HasColumnType("numeric(20,6)");
                     b.Property<string>("Explanation").IsRequired().HasColumnType("text");
                     b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("CommentReference").HasColumnType("text");
                     b.Property<string>("Status").IsRequired().HasColumnType("text");
                     b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
                     b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
