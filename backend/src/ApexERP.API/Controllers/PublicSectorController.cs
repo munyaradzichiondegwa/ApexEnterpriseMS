@@ -144,6 +144,9 @@ namespace ApexERP.API.Controllers
                         .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstOrDefaultAsync(token);
                     if (policy == null)
                         return BadRequest(new { error = "An approved, effective WHT budget-treatment policy is required before remittance allocation." });
+                    if (policy.Treatment == TaxBudgetTreatment.IncludeInBudgetActual &&
+                        await _db.ApInvoiceLines.CountAsync(x => x.ApInvoiceId == component.InvoiceId, token) != 1)
+                        return BadRequest(new { error = "WHT inclusion can follow an AP expense line only for a single-line invoice. Use SeparateClassification or ExcludeFromBudgetActual for multi-line invoices." });
                     if (policy.Treatment == TaxBudgetTreatment.SeparateClassification &&
                         (!policy.BudgetGlAccountId.HasValue || !policy.FundCentreId.HasValue ||
                          !await _db.GlAccounts.AnyAsync(x => x.Id == policy.BudgetGlAccountId.Value && x.CompanyId == CompanyId && x.IsActive && x.IsPostable, token) ||
