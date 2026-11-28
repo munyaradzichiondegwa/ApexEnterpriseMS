@@ -96,6 +96,21 @@ public sealed class BankStatementEvidenceValidatorTests
     }
 
     [Fact]
+    public void Validate_RejectsTrustedApiAndDigitalSignatureUntilServerVerifiersExist()
+    {
+        var api = BankStatementEvidenceValidator.Validate(
+            Envelope(method: BankStatementAuthenticationMethod.TrustedBankApi, verified: true),
+            new HashSet<Guid>(), new HashSet<string>());
+        var signature = BankStatementEvidenceValidator.Validate(
+            Envelope(method: BankStatementAuthenticationMethod.VerifiedDigitalSignature, verified: true),
+            new HashSet<Guid>(), new HashSet<string>());
+
+        Assert.False(api.IsValid);
+        Assert.False(signature.IsValid);
+        Assert.Contains("server-side verifiers", api.Reason);
+    }
+
+    [Fact]
     public void Validate_RejectsHashWithoutBankOriginAuthentication()
     {
         var result = BankStatementEvidenceValidator.Validate(
