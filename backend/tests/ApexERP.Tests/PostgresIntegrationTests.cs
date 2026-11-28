@@ -1172,7 +1172,8 @@ namespace ApexERP.Tests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.GenerateMonthlyReturnSummaryAsync(company.Id, 2026, 11, "TIN-123456"));
 
-            company.ZimbabweTaxpayerTin = "TIN-123456";
+            var persistedCompany = await ctx.Companies.SingleAsync(x => x.Id == company.Id);
+            persistedCompany.ZimbabweTaxpayerTin = "TIN-123456";
             await ctx.SaveChangesAsync();
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
