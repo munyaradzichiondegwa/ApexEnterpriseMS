@@ -31,6 +31,9 @@ public sealed class AllowIpsas24SourceSubmissionRevisions : Migration
             unique: true);
 
         migrationBuilder.DropIndex(
+            name: "IX_PublicSectorCashSourceReconciliationLines_BudgetExecutionActualId",
+            table: "PublicSectorCashSourceReconciliationLines");
+        migrationBuilder.DropIndex(
             name: "UX_CashSourceReconciliationLine_Actual",
             table: "PublicSectorCashSourceReconciliationLines");
         migrationBuilder.CreateIndex(
@@ -39,6 +42,10 @@ public sealed class AllowIpsas24SourceSubmissionRevisions : Migration
             columns: new[] { "CompanyId", "CashSourceSubmissionId", "BudgetExecutionActualId" },
             unique: true,
             filter: "\"BudgetExecutionActualId\" IS NOT NULL");
+        migrationBuilder.CreateIndex(
+            name: "IX_PublicSectorCashSourceReconciliationLines_BudgetExecutionActualId",
+            table: "PublicSectorCashSourceReconciliationLines",
+            column: "BudgetExecutionActualId");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
