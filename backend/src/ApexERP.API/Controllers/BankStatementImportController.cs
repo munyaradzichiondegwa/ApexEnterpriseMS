@@ -256,9 +256,8 @@ public sealed class BankStatementImportController : ApiControllerBase
                     x.Id == req.BankTransactionId && x.CompanyId == CompanyId &&
                     x.BankAccountId == batch.BankAccountId, token)
                     ?? throw new InvalidOperationException("Bank transaction not found for the statement bank account.");
-                if (bankTransaction.IsReconciled || bankTransaction.MatchedStatementLineHash.HasValue ||
-                    !bankTransaction.JournalEntryId.HasValue)
-                    throw new InvalidOperationException("The bank transaction is already reconciled, already matched or lacks a posted journal.");
+                if (bankTransaction.MatchedStatementLineHash.HasValue || !bankTransaction.JournalEntryId.HasValue)
+                    throw new InvalidOperationException("The bank transaction is already linked to another statement row or lacks a posted journal.");
                 var journalPosted = await _db.JournalEntries.AnyAsync(x =>
                     x.Id == bankTransaction.JournalEntryId.Value && x.CompanyId == CompanyId &&
                     x.Status == JournalStatus.Posted, token);
