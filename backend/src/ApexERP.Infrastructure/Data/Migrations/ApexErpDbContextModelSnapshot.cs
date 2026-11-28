@@ -57,6 +57,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
                     b.HasIndex("CompanyId", "PaymentReference").IsUnique();
                     b.HasIndex("CompanyId", "ApPaymentId").IsUnique().HasFilter("\"ApPaymentId\" IS NOT NULL");
+                    b.HasIndex("CompanyId", "BankStatementTransactionId").IsUnique().HasFilter("\"BankStatementTransactionId\" IS NOT NULL");
                     b.HasIndex("CompanyId", "TaxPeriodYear", "TaxPeriodMonth", "Status");
                     b.ToTable("ZimbabweDswtWithholdingRecords", t =>
                         {
