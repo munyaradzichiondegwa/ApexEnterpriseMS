@@ -1244,14 +1244,14 @@ namespace ApexERP.Application.Services
             if (account.CashFlowCategory != cashFlowSection)
                 throw new InvalidOperationException("The selected cash-flow section does not match the budget line GL account's configured cash-flow classification.");
 
-            if (await _db.PublicSectorBudgetExecutionActuals.AnyAsync(x =>
+            var existingSourceAllocations = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
                 x.CompanyId == companyId && x.SourceKind == sourceKind &&
-                x.SourceRecordId == sourceRecordId && x.BudgetVersionLineId == line.Id, ct))
+                x.SourceRecordId == sourceRecordId).ToListAsync(ct);
+            if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction && existingSourceAllocations.Count > 0)
+                throw new InvalidOperationException("A bank transaction is captured once against its exact posted journal classification; only AR/AP invoice settlements support split source allocation.");
+            if (existingSourceAllocations.Any(x => x.BudgetVersionLineId == line.Id))
                 throw new InvalidOperationException("This source transaction has already been allocated to the selected budget line.");
-            if (await _db.PublicSectorBudgetExecutionActuals.AnyAsync(x =>
-                x.CompanyId == companyId && x.SourceKind == sourceKind &&
-                x.SourceRecordId == sourceRecordId &&
-                x.Status == PublicSectorBudgetActualStatus.Certified, ct))
+            if (existingSourceAllocations.Any(x => x.Status == PublicSectorBudgetActualStatus.Certified))
                 throw new InvalidOperationException("A source transaction cannot receive additional allocations after any allocation has been certified.");
 
             decimal amount;
@@ -1386,7 +1386,8 @@ namespace ApexERP.Application.Services
                             x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
                         throw new InvalidOperationException("Split AP capture currently requires fully settled, tax-free invoices with an explicit Fund Centre and posted expense journals.");
                     var invoiceLines = await _db.ApInvoiceLines.Where(x => x.ApInvoiceId == invoice.Id).ToListAsync(ct);
-                    if (invoiceLines.Count == 0 || invoiceLines.Sum(x => x.LineTotal) != invoice.Total)
+                    if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
+                        invoiceLines.Sum(x => x.LineTotal) != invoice.Total)
                         throw new InvalidOperationException("AP invoice lines must reconcile exactly to the fully settled tax-free invoice total.");
                     var expectedByAccount = invoiceLines.Where(x => x.GlAccountId == line.GlAccountId)
                         .Sum(x => x.LineTotal);
