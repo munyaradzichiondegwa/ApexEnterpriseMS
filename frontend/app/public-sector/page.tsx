@@ -15,6 +15,8 @@ export default function PublicSectorPage() {
   const [batches, setBatches] = useState<any[]>([]);
   const [budgetComparison, setBudgetComparison] = useState<any | null>(null);
   const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);
+  const [statementPeriodStart, setStatementPeriodStart] = useState("");
+  const [statementPeriodEnd, setStatementPeriodEnd] = useState("");
   const [approvedBudgetVersions, setApprovedBudgetVersions] = useState<any[]>([]);
   const [budgetExecutionActuals, setBudgetExecutionActuals] = useState<any[]>([]);
   const [cashPeriodAttestations, setCashPeriodAttestations] = useState<any[]>([]);
@@ -38,7 +40,7 @@ export default function PublicSectorPage() {
   const [varianceDraft, setVarianceDraft] = useState({ budgetVersionLineId: "", explanation: "", evidenceReference: "", commentReference: "" });
   const [budgetReconciliations, setBudgetReconciliations] = useState<any[]>([]);
   const [budgetReconciliationDraft, setBudgetReconciliationDraft] = useState({
-    type: "Basis", description: "", statementSection: "Revenue",
+    type: "Basis", description: "", statementSection: "Operating",
     revenueAmount: 0, expenseAmount: 0, operatingAmount: 0,
     investingAmount: 0, financingAmount: 0, supportingReference: "",
     isNoDifferenceAttestation: false,
@@ -191,11 +193,16 @@ export default function PublicSectorPage() {
     setBudgetComparisonLoading(true);
     setError(null);
     try {
+      const comparisonParams = new URLSearchParams({ year: String(year) });
+      if (statementPeriodStart) comparisonParams.set("statementPeriodStart", `${statementPeriodStart}T00:00:00.000Z`);
+      if (statementPeriodEnd) comparisonParams.set("statementPeriodEnd", `${statementPeriodEnd}T00:00:00.000Z`);
       const [response, reconciliations] = await Promise.all([
-        api.get(`/public-sector/budget-versions/comparison?year=${year}`),
+        api.get(`/public-sector/budget-versions/comparison?${comparisonParams.toString()}`),
         api.get(`/public-sector/budget-reconciliations?year=${year}`),
       ]);
       setBudgetComparison(response.data);
+      setStatementPeriodStart(String(response.data.statementPeriodStart ?? "").slice(0, 10));
+      setStatementPeriodEnd(String(response.data.statementPeriodEnd ?? "").slice(0, 10));
       setBudgetReconciliations(reconciliations.data);
     } catch (err) {
       setBudgetComparison(null);
@@ -224,12 +231,32 @@ export default function PublicSectorPage() {
       };
       await api.post("/public-sector/budget-reconciliations", payload);
       setBudgetReconciliationDraft({
-        type: "Basis", description: "", statementSection: "Revenue",
+        type: "Basis", description: "", statementSection: "Operating",
         revenueAmount: 0, expenseAmount: 0, operatingAmount: 0,
         investingAmount: 0, financingAmount: 0, supportingReference: "",
         isNoDifferenceAttestation: false,
       });
       setMsg("Reconciliation adjustment created. Submit it for independent workflow approval.");
+      await loadBudgetComparison();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function createAutomaticBudgetReconciliation(candidate: any) {
+    if (!budgetComparison?.finalBudgetVersionId) return;
+    setError(null);
+    try {
+      await api.post("/public-sector/budget-reconciliations/automatic", {
+        financialYear: year,
+        budgetVersionId: budgetComparison.finalBudgetVersionId,
+        type: candidate.type,
+        statementSection: candidate.statementSection,
+        description: candidate.explanation,
+        supportingReference: `AUTO-IPSAS24-${candidate.type}-${candidate.statementSection}-${String(candidate.sourceFingerprint).slice(0, 16)}`,
+        statementPeriodStart: budgetComparison.statementPeriodStart,
+        statementPeriodEnd: budgetComparison.statementPeriodEnd,
+        statementEntityScope: budgetComparison.financialStatementEntityScope,
+      });
+      setMsg(`System-calculated ${candidate.type.toLowerCase()} reconciliation created for ${candidate.statementSection.toLowerCase()}.`);
       await loadBudgetComparison();
     } catch (err) { setError(extractErrorMessage(err)); }
   }
@@ -613,6 +640,12 @@ export default function PublicSectorPage() {
               title={!budgetComparison.comparableActualsAvailable ? "Comparable actuals are not available." : !budgetComparison.financialStatementReconciliation?.complete ? budgetComparison.financialStatementReconciliation?.message ?? "Complete the reconciliation to financial-statement actuals." : !budgetComparison.originalToFinalExplanationsComplete ? "Classify and explain changes from the original to final budget before export." : !budgetComparison.varianceExplanationsComplete ? "Approve all non-zero variance explanations before export." : budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled ? "Complete the independently reviewed Statement of Cash Flows bridge before export." : "Export the reconciled IPSAS 24 comparison."}>Export CSV</button>}
           </div>
           {budgetComparisonLoading && <p className="text-sm text-slate-500">Loading approved budget versions and ledger actuals…</p>}
+          <div className="rounded-lg border p-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div><label className="label">Financial-statement period start</label><input className="input" type="date" value={statementPeriodStart} onChange={(e) => setStatementPeriodStart(e.target.value)} /></div>
+            <div><label className="label">Financial-statement period end (exclusive)</label><input className="input" type="date" value={statementPeriodEnd} onChange={(e) => setStatementPeriodEnd(e.target.value)} /></div>
+            <div className="flex items-end"><button type="button" className="btn-secondary w-full" onClick={loadBudgetComparison} disabled={budgetComparisonLoading}>Recalculate comparable subset</button></div>
+            <p className="md:col-span-3 text-xs text-slate-500">The approved budget period is compared with this financial-statement period. The system calculates basis, timing, entity-scope and presentation differences from posted ledger and certified cash-actual evidence. The financial-statement entity remains the registered company; budget subsets are defined by approved Fund Centre and Cost Centre dimensions.</p>
+          </div>
           <form onSubmit={createBudgetVersion} className="rounded-lg border p-4 space-y-3">
             <h3 className="font-semibold">Create an original or revised budget version</h3>
             <p className="text-xs text-slate-500">The draft is not included in the financial statement until an independent approver finalises its approval workflow.</p>
@@ -1020,6 +1053,37 @@ export default function PublicSectorPage() {
               )}
               <div className="border rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className="font-semibold">System-calculated reconciliation candidates</h3>
+                  <span className="text-xs text-slate-500">{budgetComparison.automaticReconciliationCandidates?.length ?? 0} candidates · period {new Date(budgetComparison.statementPeriodStart).toLocaleDateString()} to {new Date(new Date(budgetComparison.statementPeriodEnd).getTime() - 86400000).toLocaleDateString()}</span>
+                </div>
+                <p className="text-xs text-slate-500">Create each calculated adjustment or explicit nil-difference attestation, then submit it for independent approval. The source fingerprint is revalidated when the approver finalises it.</p>
+                <div className="overflow-x-auto">
+                  <table className="table-base">
+                    <thead><tr><th>Difference type</th><th>Section</th><th className="text-right">Calculated adjustment</th><th>Calculation basis</th><th>Status / action</th></tr></thead>
+                    <tbody>{budgetComparison.automaticReconciliationCandidates?.map((candidate: any) => {
+                      const existing = budgetReconciliations.find((item: any) =>
+                        item.budgetVersionId === budgetComparison.finalBudgetVersionId &&
+                        item.type === candidate.type && item.statementSection === candidate.statementSection &&
+                        item.sourceFingerprint === candidate.sourceFingerprint && item.status !== "Rejected");
+                      return <tr key={`${candidate.type}-${candidate.statementSection}`}>
+                        <td>{candidate.type}</td><td>{candidate.statementSection}</td>
+                        <td className="text-right">{fmt(candidate.expectedAdjustment)}</td><td>{candidate.explanation}</td>
+                        <td>{!existing
+                          ? <button type="button" className="btn-secondary" disabled={!budgetComparison.comparableActualsAvailable}
+                              onClick={() => createAutomaticBudgetReconciliation(candidate)}>Create calculated row</button>
+                          : existing.status === "Draft"
+                            ? <button type="button" className="btn-secondary" onClick={() => budgetReconciliationAction(existing.id, "submit")}>Submit</button>
+                            : existing.status === "PendingApproval"
+                              ? <button type="button" className="btn-secondary" onClick={() => budgetReconciliationAction(existing.id, "finalise")}>Finalise approved workflow</button>
+                              : existing.status}</td>
+                      </tr>;
+                    })}
+                    {!budgetComparison.automaticReconciliationCandidates?.length && <tr><td colSpan={5} className="text-center text-slate-500">No automatic reconciliation candidates are available until comparable source actuals are complete.</td></tr>}</tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h3 className="font-semibold">Final budget-to-actual variance explanations</h3>
                   <span className={budgetComparison.originalToFinalExplanationsComplete ? "text-sm text-green-700" : "text-sm text-amber-700"}>
                     {budgetComparison.originalToFinalExplanationsComplete ? "Original-to-final budget changes classified and explained" : "Original-to-final amendment classification outstanding"}
@@ -1068,7 +1132,6 @@ export default function PublicSectorPage() {
                       statementSection: e.target.value, revenueAmount: 0, expenseAmount: 0,
                       operatingAmount: 0, investingAmount: 0, financingAmount: 0,
                       isNoDifferenceAttestation: false })}>
-                    <option value="Revenue">Total revenue</option><option value="Expense">Total expense</option>
                     <option value="Operating">Net cash flows — operating</option>
                     <option value="Investing">Net cash flows — investing</option>
                     <option value="Financing">Net cash flows — financing</option>
@@ -1076,14 +1139,7 @@ export default function PublicSectorPage() {
                   <input className="input" required placeholder="Description of difference"
                     value={budgetReconciliationDraft.description}
                     onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, description: e.target.value })} />
-                  {budgetReconciliationDraft.statementSection === "Revenue" && <input className="input" type="number" step="0.01" placeholder="Revenue adjustment to financial statements"
-                    disabled={budgetReconciliationDraft.isNoDifferenceAttestation}
-                    value={budgetReconciliationDraft.revenueAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, revenueAmount: Number(e.target.value) })} />}
-                  {budgetReconciliationDraft.statementSection === "Expense" && <input className="input" type="number" step="0.01" placeholder="Expense adjustment to financial statements"
-                    disabled={budgetReconciliationDraft.isNoDifferenceAttestation}
-                    value={budgetReconciliationDraft.expenseAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, expenseAmount: Number(e.target.value) })} />}
+                  <p className="md:col-span-3 text-xs text-slate-500">Revenue and expense basis/timing/entity/presentation rows are generated from the calculation candidates above. This form is reserved for the separate operating, investing and financing cash-flow bridge.</p>
                   {budgetReconciliationDraft.statementSection === "Operating" && <input className="input" type="number" step="0.01" placeholder="Operating cash-flow adjustment"
                     value={budgetReconciliationDraft.operatingAmount}
                     onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, operatingAmount: Number(e.target.value) })} />}
@@ -1093,13 +1149,7 @@ export default function PublicSectorPage() {
                   {budgetReconciliationDraft.statementSection === "Financing" && <input className="input" type="number" step="0.01" placeholder="Financing cash-flow adjustment"
                     value={budgetReconciliationDraft.financingAmount}
                     onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, financingAmount: Number(e.target.value) })} />}
-                  {["Revenue", "Expense"].includes(budgetReconciliationDraft.statementSection) && <label className="flex items-center gap-2 text-sm md:col-span-3">
-                    <input type="checkbox" checked={budgetReconciliationDraft.isNoDifferenceAttestation}
-                      onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft,
-                        isNoDifferenceAttestation: e.target.checked,
-                        revenueAmount: 0, expenseAmount: 0, operatingAmount: 0, investingAmount: 0, financingAmount: 0 })} />
-                    No difference exists for this financial-statement section (explicit attestation)
-                  </label>}
+
                   <input className="input md:col-span-2" required placeholder="Supporting workpaper / evidence reference"
                     value={budgetReconciliationDraft.supportingReference}
                     onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, supportingReference: e.target.value })} />
