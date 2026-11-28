@@ -21,7 +21,7 @@
 | Statement of Financial Performance | Existing income statement / OCI reporting | Validate IPSAS presentation, revenue/expense classifications and public-sector disclosures |
 | Statement of Changes in Net Assets | Existing changes-in-equity reporting | Confirm public-sector net-assets terminology and required reserve/disclosure mapping |
 | Statement of Cash Flows | Existing cash-flow reporting | Confirm IPSAS-specific classifications and disclosure requirements |
-| Statement of Comparison of Budget and Actual Amounts | Vote/Programme/Sub-Programme expenditure schedule, controlled approved allocations and posted-GL actuals | A full IPSAS 24 comparison needs the approved budget basis and presentation basis, original/final budget, actual-on-comparable-basis and required reconciliation. Current allocations are expense-only; revenue budgets, amendments and comparable-basis reconciliation are not yet a complete statutory statement |
+| Statement of Comparison of Budget and Actual Amounts | Versioned and independently approved original/final budget versions; accrual GL actuals or certified cash actuals; expected-source register and record-level reconciliation; independent variance explanations; approved basis/timing/entity/presentation adjustments; ZFRM Appendix 5 Notes and Comment Ref fields; separate statement UI and CSV export | Confirm whether Treasury has issued a later template/classification dictionary for the reporting year; map the entity's authorised budget classifications to Appendix 5; obtain current source exports and independent management certifications; implement compensating reversal for already-certified actuals whose underlying source changes; complete statutory issue approval. See `docs/IPSAS24_IMPLEMENTATION.md` |
 | Notes to financial statements | Financial-statement notes service and tenant-authored notes | Add/validate a Zimbabwe IPSAS disclosure checklist, policy/basis notes, judgements/estimates and material explanatory notes; support IPSAS 33 transition disclosures where applicable |
 | Disclosure checklist | No claim of a Treasury-approved complete checklist | Obtain current PAAB/Treasury checklist and version it by reporting year and reporting-entity class |
 | Asset register | Fixed-asset module | Validate PPE, intangible, biological-asset and investment-property schedules and opening balances |
@@ -42,7 +42,12 @@
 
 ## Immediate next work
 
-1. Obtain the current 2026/2027 Treasury reporting circular, current Zimbabwe Financial Reporting Manual amendments and PAAB-approved disclosure checklist.
-2. Implement the complete IPSAS 24 budget comparison only after the approved-budget data model includes original budget, final budget/amendments, actual comparable-basis amounts and the basis reconciliation.
-3. Implement the statement/note templates as versioned reporting profiles with effective dates and review controls.
-4. Add PostgreSQL acceptance for each statement, fund boundary, budget reconciliation and note completeness before making any compliance claim.
+1. Obtain the current 2026/2027 Treasury reporting circular, any amendments to the Zimbabwe Financial Reporting Manual, and the PAAB/Treasury-approved disclosure checklist. The 2023 ZFRM Appendix 5 is the current available format reference in this research baseline; Treasury must confirm whether it remains the operative template for the reporting year.
+2. Configure the authorised Treasury revenue/expenditure/programme classification dictionary as a versioned, effective-dated reporting profile. ApexERP deliberately does not fabricate government classification codes.
+3. Complete the compensating-reversal workflow for a certified cash actual whose underlying source amount or classification is later corrected; stale source actuals currently block comparison rather than being rewritten.
+4. Obtain source-population evidence, approved accounting/budget basis policy, functional/presentation currency policy, and entity/fund scope certification from each reporting entity.
+5. Complete the statutory issue approval and external audit/Treasury acceptance process in the deployment environment. Passing CI is software verification, not legal or statutory certification.
+
+## IPSAS 24 implementation status
+
+The software implementation now covers the core original/final/comparable-actual comparison and evidence/approval controls. It is not being represented as fully statutory-certified until the remaining items above are resolved. The detailed feature status, test evidence and explicit technical boundaries are maintained in `docs/IPSAS24_IMPLEMENTATION.md`.
