@@ -435,11 +435,13 @@ namespace ApexERP.API.Controllers
                         account.CompanyId == CompanyId && account.Currency == actual.Currency) &&
                     _db.JournalEntries.Any(journal => journal.Id == bank.JournalEntryId.Value &&
                         journal.CompanyId == CompanyId && journal.Status == JournalStatus.Posted) &&
-                    _db.JournalLines.Any(line => line.JournalEntryId == bank.JournalEntryId.Value &&
+                    _db.GlAccounts.Any(account => account.Id == actual.GlAccountId &&
+                        account.CompanyId == CompanyId && account.CashFlowCategory == actual.CashFlowSection) &&
+                    _db.JournalLines.Where(line => line.JournalEntryId == bank.JournalEntryId.Value &&
                         line.GlAccountId == actual.GlAccountId && line.FundCentreId == actual.FundCentreId &&
-                        line.CostCentreId == actual.CostCentreId &&
-                        (actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt
-                            ? line.Credit - line.Debit : line.Debit - line.Credit) == actual.Amount)), ct);
+                        line.CostCentreId == actual.CostCentreId)
+                        .Sum(line => actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt
+                            ? line.Credit - line.Debit : line.Debit - line.Credit) == actual.Amount), ct);
             var certified = actuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
             decimal Actual(CashFlowCategory section) => certified.Where(x => x.CashFlowSection == section)
                 .Sum(x => x.EventKind == PublicSectorBudgetActualEventKind.CashReceipt ? x.Amount : -x.Amount);
