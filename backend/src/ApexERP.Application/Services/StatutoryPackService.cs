@@ -144,7 +144,7 @@ public sealed class StatutoryPackService
             if (!_activationAdapters.TryGetValue(document.JurisdictionCode, out var activationAdapter))
                 throw new InvalidOperationException($"No statutory activation adapter is registered for jurisdiction {document.JurisdictionCode}. The pack remains Approved and unapplied until a country-specific adapter and its validation tests are registered.");
             activationAdapter.Validate(document);
-            await activationAdapter.ActivateAsync(document, token);
+            await activationAdapter.ActivateAsync(companyId, document, token);
             var published = document with { Status = "Published", PublishedAt = DateTime.UtcNow };
             setting.Value = JsonSerializer.Serialize(published);
             _audit.Record(companyId, publisherId, "StatutoryPack.Published", "Statutory", nameof(StatutoryPackDocument),
