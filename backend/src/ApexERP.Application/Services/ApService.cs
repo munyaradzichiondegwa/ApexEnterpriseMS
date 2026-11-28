@@ -163,6 +163,7 @@ namespace ApexERP.Application.Services
                 if (invoice.Status != InvoiceStatus.Draft)
                     throw new InvalidOperationException("Only draft invoices can be posted.");
                 var approvedVatMappings = new List<TaxAccountMapping>();
+                var approvedVatRates = new Dictionary<Guid, decimal>();
                 TaxAccountMapping? approvedWhtMapping = null;
 
                 if (invoice.VatAmount > 0m)
@@ -175,6 +176,7 @@ namespace ApexERP.Application.Services
                     if (taxCodes.Count != taxCodeIds.Length || taxCodes.Any(x => !x.IsActive || x.Type != TaxType.VAT ||
                         x.EffectiveFrom.Date > invoice.InvoiceDate.Date || (x.EffectiveTo.HasValue && x.EffectiveTo.Value.Date < invoice.InvoiceDate.Date)))
                         throw new InvalidOperationException("AP invoice VAT requires active, company-owned VAT tax codes effective on the invoice date.");
+                    approvedVatRates = taxCodes.ToDictionary(x => x.Id, x => x.Rate);
                     foreach (var line in taxableLines)
                     {
                         var taxCode = taxCodes.Single(x => x.Id == line.TaxCodeId!.Value);
@@ -280,7 +282,7 @@ namespace ApexERP.Application.Services
                                 CompanyId = companyId, InvoiceKind = "AP", InvoiceId = invoice.Id,
                                 InvoiceLineId = invoiceLine.Id, TaxCodeId = taxCodeId, TaxType = TaxType.VAT,
                                 TaxableBase = invoiceLine.LineSubtotal,
-                                Rate = await _db.TaxCodes.Where(x => x.Id == taxCodeId && x.CompanyId == companyId).Select(x => x.Rate).SingleAsync(token),
+                                Rate = approvedVatRates[taxCodeId],
                                 Amount = invoiceLine.LineVat, GlAccountId = mapping.GlAccountId,
                                 TaxAccountMappingId = mapping.Id, MappingVersionNumber = mapping.VersionNumber,
                                 JournalEntryId = journal.Id, JournalLineId = journalLine.Id
@@ -290,16 +292,16 @@ namespace ApexERP.Application.Services
                 }
                 if (invoice.WhtAmount > 0m)
                 {
-                    var mapping = approvedWhtMapping ?? throw new InvalidOperationException("The approved WHT mapping changed before posting.");
-                    var journalLine = journal.Lines.Single(x => x.GlAccountId == mapping.GlAccountId &&
+                    var whtMapping = approvedWhtMapping ?? throw new InvalidOperationException("The approved WHT mapping changed before posting.");
+                    var journalLine = journal.Lines.Single(x => x.GlAccountId == whtMapping.GlAccountId &&
                         x.Credit == invoice.WhtAmount && x.TaxCodeId == null);
                     var rate = await _db.Suppliers.Where(x => x.Id == invoice.SupplierId && x.CompanyId == companyId).Select(x => x.WhtRate).SingleAsync(token);
                     _db.InvoiceTaxComponents.Add(new InvoiceTaxComponent
                     {
                         CompanyId = companyId, InvoiceKind = "AP", InvoiceId = invoice.Id,
                         TaxType = TaxType.WHT, TaxableBase = invoice.Subtotal, Rate = rate,
-                        Amount = invoice.WhtAmount, GlAccountId = mapping.GlAccountId,
-                        TaxAccountMappingId = mapping.Id, MappingVersionNumber = mapping.VersionNumber,
+                        Amount = invoice.WhtAmount, GlAccountId = whtMapping.GlAccountId,
+                        TaxAccountMappingId = whtMapping.Id, MappingVersionNumber = whtMapping.VersionNumber,
                         JournalEntryId = journal.Id, JournalLineId = journalLine.Id
                     });
                 }
