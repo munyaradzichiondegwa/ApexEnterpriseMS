@@ -1024,8 +1024,7 @@ namespace ApexERP.Application.Services
                 throw new InvalidOperationException("The selected cash-flow section does not match the budget line GL account's configured cash-flow classification.");
 
             if (await _db.PublicSectorBudgetExecutionActuals.AnyAsync(x =>
-                x.CompanyId == companyId && x.SourceKind == sourceKind && x.SourceRecordId == sourceRecordId &&
-                x.Status != PublicSectorBudgetActualStatus.Rejected, ct))
+                x.CompanyId == companyId && x.SourceKind == sourceKind && x.SourceRecordId == sourceRecordId, ct))
                 throw new InvalidOperationException("This source transaction has already been captured for this company.");
 
             decimal amount;
