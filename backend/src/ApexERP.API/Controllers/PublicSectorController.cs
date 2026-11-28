@@ -791,8 +791,13 @@ namespace ApexERP.API.Controllers
             var operatingBridgeDifference = operatingDifference - operatingAdjustment;
             var investingBridgeDifference = investingDifference - investingAdjustment;
             var financingBridgeDifference = financingDifference - financingAdjustment;
-            var reconciled = sourceCoverageComplete && operatingBridgeDifference == 0m &&
-                investingBridgeDifference == 0m && financingBridgeDifference == 0m;
+            // The budget-to-cash-flow bridge is not complete if the underlying Statement of Cash
+            // Flows itself fails to reconcile opening cash plus net movement to closing cash.
+            // Keep this independent from the three section bridges: both controls must pass.
+            var cashFlowStatementReconciled = cashFlow.ReconciliationDifference == 0m;
+            var reconciled = sourceCoverageComplete && cashFlowStatementReconciled &&
+                operatingBridgeDifference == 0m && investingBridgeDifference == 0m &&
+                financingBridgeDifference == 0m;
 
             return Ok(new
             {
@@ -820,6 +825,8 @@ namespace ApexERP.API.Controllers
                 MissingPostedApSettlementCoverage = missingApSettlementCoverage,
                 PendingOrDraftActuals = pendingActuals,
                 InvalidCertifiedActuals = invalidCertifiedActuals,
+                CashFlowStatementReconciled = cashFlowStatementReconciled,
+                CashFlowStatementReconciliationDifference = cashFlow.ReconciliationDifference,
                 Reconciled = reconciled,
                 Sections = new[]
                 {
