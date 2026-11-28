@@ -2340,7 +2340,8 @@ namespace ApexERP.Tests
                 {
                     CompanyId = companyId, FromCurrency = "ZWG", ToCurrency = "USD",
                     RateDate = effectiveDate, Rate = 0.02m, IsManualOverride = false,
-                    RateSource = "RBZ published rate", SourceReference = "RBZ-DAILY-2026-06-30"
+                    RateSource = "RBZ published rate", SourceReference = "RBZ-DAILY-2026-06-30",
+                    CreatedBy = preparerId
                 });
                 var version = new PublicSectorBudgetVersion
                 {
@@ -2367,6 +2368,18 @@ namespace ApexERP.Tests
 
             await using var ctx = db.NewContext(companyId);
             var service = new PublicSectorService(ctx, new AuditService(ctx));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
+                    budgetLineId, PublicSectorBudgetActualEventKind.CashPayment,
+                    PublicSectorBudgetActualSourceKind.BankTransaction, transactionId,
+                    effectiveDate, CashFlowCategory.Operating, preparerId));
+
+            var rate = await ctx.ExchangeRates.SingleAsync(x =>
+                x.CompanyId == companyId && x.FromCurrency == "ZWG" && x.ToCurrency == "USD");
+            rate.ApprovedBy = certifierId;
+            rate.ApprovedAt = DateTime.UtcNow;
+            await ctx.SaveChangesAsync();
+
             var actual = await service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
                 budgetLineId, PublicSectorBudgetActualEventKind.CashPayment,
                 PublicSectorBudgetActualSourceKind.BankTransaction, transactionId,
@@ -2379,13 +2392,13 @@ namespace ApexERP.Tests
             Assert.Equal("RBZ published rate", actual.ExchangeRateSource);
             Assert.Equal("RBZ-DAILY-2026-06-30", actual.ExchangeRateSourceReference);
             Assert.False(actual.ExchangeRateIsInverse);
+            Assert.Equal(certifierId, actual.ExchangeRateApprovedBy);
+            Assert.NotNull(actual.ExchangeRateApprovedAt);
 
             await service.SubmitBudgetExecutionActualAsync(companyId, actual.Id, preparerId);
             await service.CertifyBudgetExecutionActualAsync(companyId, actual.Id, certifierId);
             Assert.True(await service.IsCertifiedCashActualSourceValidAsync(companyId, actual, default));
 
-            var rate = await ctx.ExchangeRates.SingleAsync(x =>
-                x.CompanyId == companyId && x.FromCurrency == "ZWG" && x.ToCurrency == "USD");
             rate.Rate = 0.03m;
             await ctx.SaveChangesAsync();
             Assert.False(await service.IsCertifiedCashActualSourceValidAsync(companyId, actual, default));
