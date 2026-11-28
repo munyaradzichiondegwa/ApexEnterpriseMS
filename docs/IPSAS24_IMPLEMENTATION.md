@@ -44,6 +44,41 @@ The implementation contract for this phase is:
 
 Acceptance tests must cover independent approval, approved-PO eligibility, commitment amendments, partial invoice realisation, cancellation, payment liquidation without double-counting, period cut-off, source changes after approval, duplicate mapping, exact allocation totals, tenant isolation/RLS and the cash-flow reconciliation bridge.
 
+## Period completeness — implementation boundary and remaining work
+
+**Status: zero-activity certification is implemented; general period-completeness certification is not yet complete.**
+
+The current `PublicSectorCashPeriodAttestation` workflow is deliberately narrow:
+- It permits a nil-return only when the current counts for bank transactions, AR receipts and AP payments are all zero.
+- It re-counts those three source populations at submission and independent certification.
+- It records the budget version, period, observed counts and supporting evidence reference, and makes certified/rejected attestations immutable.
+- The cash comparison refuses to infer zero actuals when neither source-backed actuals nor a valid certified nil-return exists.
+
+This is not yet a complete period-close control for periods that contain transactions. The current counts are not a source-population reconciliation: they do not establish that every eligible bank movement, AR receipt and AP payment has either been captured to an approved budget line or independently classified as an evidenced exclusion. Nor do they establish that all expected source systems, bank accounts, cashbooks, funds or reporting units have submitted their period records. A period with some captured actuals must therefore not be treated as complete merely because at least one actual exists.
+
+### Required completion design
+
+1. Maintain an expected-source register for each company, reporting entity and period. It must identify the bank accounts/cashbooks and AR/AP source populations in scope, with effective dates and accountable owners. The register must be independently approved before period close.
+2. Record a period-close submission for each expected source. Each submission must identify the source, period, statement/control totals, record count, opening/closing balance where applicable, evidence reference and preparer.
+3. Reconcile source populations to captured execution actuals. Every in-scope record must be either allocated exactly once to an approved budget line or linked to an independently approved, reason-coded exclusion. Duplicate, omitted, unclassified, out-of-period and cross-company records block completion.
+4. Reconcile bank/cashbook control totals to source statements and distinguish bank movements from AR/AP subledger evidence so the same settlement is not counted twice.
+5. Require independent reviewer sign-off for each source and an independent period-level certification. Preparers cannot certify their own submissions. Late-arriving or amended source records invalidate the affected certification and require controlled reopening/re-certification with an audit trail.
+6. Permit a zero-activity declaration only after all expected sources have submitted nil activity and their control evidence has been independently reviewed. Missing source submissions are **unknown**, not zero.
+7. Make budget comparison, statutory statement issuance and export fail closed while any expected source is missing, unreconciled, awaiting approval, or invalidated. Preserve a drill-through from each reported amount to the source records and evidence.
+8. Retain immutable source snapshots, certification events and compensating corrections; never silently rewrite a previously certified period.
+
+### Acceptance tests still required
+
+- Non-zero period with one omitted source record is blocked.
+- Every expected source must submit, including nil returns; a missing source cannot be interpreted as zero.
+- Exact source-to-actual coverage, duplicate detection and approved exclusion handling.
+- Bank movement linked to an AR receipt/AP payment is not double-counted.
+- Independent approval and segregation of duties at source and period level.
+- Late-arriving transaction or changed source evidence invalidates prior certification.
+- Reopening, recertification and audit-history preservation.
+- Tenant/RLS isolation, period cut-off, currency precision and clean migration/rollback.
+- Comparison, export and statutory issuance are blocked until the complete period is certified.
+
 ## Explicit remaining controls
 
 1. For cash/modified-cash budgets, comparable actuals must be sourced from the budgetary ledger/cash and commitment records, independently certified and reconciled to the statement of cash flows. Accrual GL postings are deliberately not substituted.
