@@ -1300,6 +1300,20 @@ namespace ApexERP.Application.Services
                 .Select(x => new { x.Name, x.FunctionalCurrency }).FirstOrDefaultAsync(ct);
             var comparabilityIssues = new List<string>();
             var cashActualsByBudgetLine = new Dictionary<Guid, decimal>();
+            var usesZfrmClassification =
+                original.ClassificationBasis.Contains("ZFRM", StringComparison.OrdinalIgnoreCase) ||
+                original.ClassificationBasis.Contains("Zimbabwe Financial Reporting Manual", StringComparison.OrdinalIgnoreCase);
+            if (usesZfrmClassification)
+            {
+                var allBudgetLines = original.Lines.Concat(final?.Lines ?? Array.Empty<PublicSectorBudgetVersionLine>()).ToList();
+                var accountTypes = await _db.GlAccounts.Where(x =>
+                    x.CompanyId == companyId && allBudgetLines.Select(line => line.GlAccountId).Contains(x.Id))
+                    .Select(x => new { x.Id, x.Type }).ToDictionaryAsync(x => x.Id, x => x.Type, ct);
+                if (allBudgetLines.Any(line => string.IsNullOrWhiteSpace(line.TreasuryClassificationCode) ||
+                    !accountTypes.TryGetValue(line.GlAccountId, out var accountType) ||
+                    (accountType != GlAccountType.Income && accountType != GlAccountType.Expense)))
+                    comparabilityIssues.Add("ZFRM Appendix 5 comparability requires a Treasury category on every budget line and income/expense GL accounts only.");
+            }
             if (original.AccountingBasis != AccountingBasis.Accrual &&
                 original.AccountingBasis != AccountingBasis.Cash)
                 comparabilityIssues.Add("This non-accrual budget basis does not yet have an approved source adapter. Accrual GL actuals cannot be substituted.");
