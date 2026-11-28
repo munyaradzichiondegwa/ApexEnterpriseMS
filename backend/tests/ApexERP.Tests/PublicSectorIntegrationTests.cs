@@ -1841,7 +1841,21 @@ namespace ApexERP.Tests
             await service.SubmitCashSourceRecordReconciliationAsync(companyId, submission.Id,
                 reconciliationPreparerId);
             await service.ReviewCashSourceRecordReconciliationAsync(companyId, submission.Id,
-                reconciliationReviewerId, true, "Zero source records confirmed against the bank statement.");
+                reconciliationReviewerId, false, "Initial zero-record pack did not include the signed bank confirmation.");
+
+            // A rejected record-level reconciliation remains immutable history, but a new
+            // source submission revision can be prepared and independently reviewed.
+            var revisedSubmission = await service.CreateCashSourceSubmissionAsync(companyId, source.Id,
+                0, 0m, 1000m, 1000m, "USD", "Corrected signed bank statement nil-activity evidence", preparerId);
+            Assert.Equal(2, revisedSubmission.SubmissionRevision);
+            await service.SubmitCashSourceSubmissionAsync(companyId, revisedSubmission.Id, preparerId);
+            await service.ReviewCashSourceSubmissionAsync(companyId, revisedSubmission.Id, sourceReviewerId,
+                true, "Corrected source control totals independently confirmed.");
+            await service.SubmitCashSourceRecordReconciliationAsync(companyId, revisedSubmission.Id,
+                reconciliationPreparerId);
+            await service.ReviewCashSourceRecordReconciliationAsync(companyId, revisedSubmission.Id,
+                reconciliationReviewerId, true, "Corrected zero-record population independently confirmed.");
+
             var registerAttestation = await service.CreateExpectedCashSourceRegisterAttestationAsync(
                 companyId, budgetVersionId, 1, "Zero Activity MDA",
                 "Signed bank account inventory for the reporting entity", preparerId);
