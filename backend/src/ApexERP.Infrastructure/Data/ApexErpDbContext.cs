@@ -610,7 +610,10 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<FundCentre>().HasIndex(f => new { f.CompanyId, f.Code, f.FinancialYear }).IsUnique();
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
                 .HasIndex(a => new { a.CompanyId, a.FundCentreId, a.GlAccountId, a.CostCentreId, a.FinancialYear })
-                .IsUnique();
+                .IsUnique().HasFilter("\"CostCentreId\" IS NOT NULL");
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasIndex(a => new { a.CompanyId, a.FundCentreId, a.GlAccountId, a.FinancialYear })
+                .IsUnique().HasFilter("\"CostCentreId\" IS NULL");
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
                 .HasCheckConstraint("CK_PublicSectorBudgetAllocations_Amount", "\"Amount\" > 0");
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
