@@ -2028,7 +2028,8 @@ namespace ApexERP.Tests
             }
 
             await using var ctx = db.NewContext(companyId);
-            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var cashFlowService = new CashFlowStatementService(ctx, new ReportingService(ctx));
+            var service = new PublicSectorService(ctx, new AuditService(ctx), cashFlowService);
             var blocked = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.False(blocked.ComparableActualsAvailable);
             Assert.Contains("zero-activity attestation", blocked.ComparabilityMessage, StringComparison.OrdinalIgnoreCase);
@@ -2089,6 +2090,38 @@ namespace ApexERP.Tests
             var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
 
+            async Task<PublicSectorBudgetReconciliation> PrepareCashFlowAdjustmentAsync(string section, string reference)
+            {
+                var item = await service.CreateAutomaticCashFlowBudgetReconciliationAsync(companyId,
+                    2026, budgetVersionId, section, reference, preparerId);
+                Assert.True(item.IsNoDifferenceAttestation);
+                var workflowId = Guid.NewGuid();
+                ctx.WorkflowRequests.Add(new WorkflowRequest
+                {
+                    Id = workflowId, CompanyId = companyId, RequestType = "PublicSectorBudgetReconciliation",
+                    ReferenceId = item.Id, ReferenceTable = "PublicSectorBudgetReconciliation",
+                    SubmittedBy = preparerId, Amount = 0m, Status = WorkflowStatus.Pending
+                });
+                await ctx.SaveChangesAsync();
+                await service.MarkBudgetReconciliationPendingAsync(companyId, item.Id, workflowId);
+                var workflow = await ctx.WorkflowRequests.SingleAsync(x => x.Id == workflowId);
+                workflow.Status = WorkflowStatus.Approved;
+                ctx.WorkflowApprovals.Add(new WorkflowApproval
+                {
+                    CompanyId = companyId, WorkflowRequestId = workflowId, Tier = 1,
+                    ApproverId = certifierId, Approved = true, DecidedAt = DateTime.UtcNow
+                });
+                await ctx.SaveChangesAsync();
+                return item;
+            }
+
+            var approvedOperating = await PrepareCashFlowAdjustmentAsync("Operating", "WP-CASHFLOW-OPERATING-NIL");
+            await service.FinaliseBudgetReconciliationApprovalAsync(companyId, approvedOperating.Id, certifierId);
+            Assert.Equal(PublicSectorBudgetReconciliationStatus.Approved, approvedOperating.Status);
+
+            var pendingInvesting = await PrepareCashFlowAdjustmentAsync("Investing", "WP-CASHFLOW-INVESTING-NIL");
+            Assert.Equal(PublicSectorBudgetReconciliationStatus.PendingApproval, pendingInvesting.Status);
+
             // Certification is not a permanent assertion that later source activity cannot occur.
             // The bridge and comparison must re-count source populations on every read.
             await using (var lateActivity = db.NewContext(companyId))
@@ -2104,6 +2137,8 @@ namespace ApexERP.Tests
             }
 
             Assert.False(await service.HasValidCertifiedZeroActivityAttestationAsync(companyId, budgetVersionId));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.FinaliseBudgetReconciliationApprovalAsync(companyId, pendingInvesting.Id, certifierId));
             var staleComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.False(staleComparison.ComparableActualsAvailable);
             Assert.Contains("no cash actuals were captured", staleComparison.ComparabilityMessage, StringComparison.OrdinalIgnoreCase);
