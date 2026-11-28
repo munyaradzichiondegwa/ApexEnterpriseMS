@@ -254,6 +254,29 @@ namespace ApexERP.Domain.Common
         Rejected
     }
 
+    public enum PublicSectorBudgetVersionKind
+    {
+        Original,
+        Revised
+    }
+
+    public enum PublicSectorBudgetVersionStatus
+    {
+        Draft,
+        PendingApproval,
+        Approved,
+        Rejected,
+        Superseded
+    }
+
+    public enum PublicSectorBudgetReconciliationType
+    {
+        Basis,
+        Timing,
+        Entity,
+        Presentation
+    }
+
     public enum GrantStatus
     {
         Active,
