@@ -86,9 +86,11 @@ namespace ApexERP.API.Controllers
         private readonly AssetVerificationService _assetVerification;
         private readonly ApprovalChainService _approvalChains;
         private readonly CashFlowStatementService _cashFlow;
+        private readonly AuditService _audit;
 
         public PublicSectorController(ApexErpDbContext db, PublicSectorService publicSector, TenderService tender,
-            AssetVerificationService assetVerification, ApprovalChainService approvalChains, CashFlowStatementService cashFlow)
+            AssetVerificationService assetVerification, ApprovalChainService approvalChains,
+            CashFlowStatementService cashFlow, AuditService audit)
         {
             _db = db;
             _publicSector = publicSector;
@@ -96,6 +98,7 @@ namespace ApexERP.API.Controllers
             _assetVerification = assetVerification;
             _approvalChains = approvalChains;
             _cashFlow = cashFlow;
+            _audit = audit;
         }
 
         // ---- IPSAS 24 tax mapping and budget-treatment controls ----
