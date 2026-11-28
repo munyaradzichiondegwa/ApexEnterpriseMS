@@ -9,7 +9,9 @@ export default function PublicSectorPage() {
   const [fundCentres, setFundCentres] = useState<any[]>([]);
   const [utilization, setUtilization] = useState<any[]>([]);
   const [tenders, setTenders] = useState<any[]>([]);
-  const [batches, setBatches] = useState<any[]>([]);\n  const [budgetComparison, setBudgetComparison] = useState<any | null>(null);\n  const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);
+  const [batches, setBatches] = useState<any[]>([]);
+  const [budgetComparison, setBudgetComparison] = useState<any | null>(null);
+  const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [year] = useState(new Date().getFullYear());
