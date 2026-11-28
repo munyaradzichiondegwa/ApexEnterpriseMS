@@ -2751,6 +2751,8 @@ namespace ApexERP.Application.Services
             string rateSource = "IDENTITY";
             string rateSourceReference = "Source and budget currencies are identical; no conversion applied.";
             var inverseRate = false;
+            Guid? exchangeRateApprovedBy = null;
+            DateTime? exchangeRateApprovedAt = null;
             if (!string.Equals(sourceCurrency, budgetCurrency, StringComparison.Ordinal))
             {
                 var directRates = await _db.ExchangeRates.Where(x =>
@@ -2777,6 +2779,8 @@ namespace ApexERP.Application.Services
                 rateDate = selected.Rate.RateDate.Date;
                 rateSource = selected.Rate.RateSource.Trim();
                 rateSourceReference = selected.Rate.SourceReference.Trim();
+                exchangeRateApprovedBy = selected.Rate.ApprovedBy;
+                exchangeRateApprovedAt = selected.Rate.ApprovedAt;
             }
             var budgetAmount = decimal.Round(amount * rateToBudget, 6, MidpointRounding.AwayFromZero);
             if (budgetAmount <= 0m)
@@ -2793,22 +2797,8 @@ namespace ApexERP.Application.Services
                 ExchangeRateToBudgetCurrency = rateToBudget, ExchangeRateDate = rateDate,
                 ExchangeRateSource = rateSource, ExchangeRateSourceReference = rateSourceReference,
                 ExchangeRateIsInverse = inverseRate,
-                ExchangeRateApprovedBy = inverseRate || !string.Equals(sourceCurrency, budgetCurrency, StringComparison.Ordinal)
-                    ? await _db.ExchangeRates.Where(x => x.CompanyId == companyId &&
-                        x.FromCurrency.ToUpper() == (inverseRate ? budgetCurrency : sourceCurrency) &&
-                        x.ToCurrency.ToUpper() == (inverseRate ? sourceCurrency : budgetCurrency) &&
-                        x.RateDate.Date == rateDate && x.RateSource == rateSource &&
-                        x.SourceReference == rateSourceReference)
-                        .Select(x => x.ApprovedBy).FirstOrDefaultAsync(ct)
-                    : null,
-                ExchangeRateApprovedAt = inverseRate || !string.Equals(sourceCurrency, budgetCurrency, StringComparison.Ordinal)
-                    ? await _db.ExchangeRates.Where(x => x.CompanyId == companyId &&
-                        x.FromCurrency.ToUpper() == (inverseRate ? budgetCurrency : sourceCurrency) &&
-                        x.ToCurrency.ToUpper() == (inverseRate ? sourceCurrency : budgetCurrency) &&
-                        x.RateDate.Date == rateDate && x.RateSource == rateSource &&
-                        x.SourceReference == rateSourceReference)
-                        .Select(x => x.ApprovedAt).FirstOrDefaultAsync(ct)
-                    : null,
+                ExchangeRateApprovedBy = exchangeRateApprovedBy,
+                ExchangeRateApprovedAt = exchangeRateApprovedAt,
                 CashFlowSection = cashFlowSection, Status = PublicSectorBudgetActualStatus.Draft,
                 CreatedBy = actorId
             };
