@@ -415,12 +415,16 @@ namespace ApexERP.API.Controllers
                 x.CompanyId == CompanyId && x.BudgetVersionId == version.Id &&
                 x.EffectiveDate >= version.PeriodStart && x.EffectiveDate < version.PeriodEnd).ToListAsync(ct);
             var capturedSourceIds = actuals.Select(x => x.SourceRecordId).ToArray();
-            var postedBankMovements = _db.BankTransactions.Where(x => x.CompanyId == CompanyId &&
-                x.TransactionDate >= version.PeriodStart && x.TransactionDate < version.PeriodEnd &&
-                x.JournalEntryId.HasValue && _db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
-                    j.CompanyId == CompanyId && j.Status == JournalStatus.Posted));
-            var uncapturedPostedMovements = await postedBankMovements.CountAsync(x =>
-                !x.IsReconciled || !capturedSourceIds.Contains(x.Id), ct);
+            // Coverage includes every bank-statement movement, not only those already linked
+            // to a posted journal. Otherwise unlinked/unposted cash movements disappear from
+            // the completeness denominator and the bridge can falsely report full coverage.
+            var periodBankMovements = _db.BankTransactions.Where(x => x.CompanyId == CompanyId &&
+                x.TransactionDate >= version.PeriodStart && x.TransactionDate < version.PeriodEnd);
+            var uncapturedPostedMovements = await periodBankMovements.CountAsync(x =>
+                !x.IsReconciled || !x.JournalEntryId.HasValue ||
+                !_db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
+                    j.CompanyId == CompanyId && j.Status == JournalStatus.Posted) ||
+                !capturedSourceIds.Contains(x.Id), ct);
             var pendingActuals = actuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
             var invalidCertifiedActuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
                     x.CompanyId == CompanyId && x.BudgetVersionId == version.Id &&
