@@ -349,6 +349,10 @@ public sealed class ZimbabweDswtWithholdingRegisterService
 
         var company = await _db.Companies.FirstOrDefaultAsync(x => x.Id == companyId, ct)
             ?? throw new InvalidOperationException("Company not found.");
+        if (string.IsNullOrWhiteSpace(company.ZimbabweTaxpayerTin))
+            throw new InvalidOperationException("The company's Zimbabwe ZIMRA TIN has not been configured in its tax profile.");
+        if (!string.Equals(company.ZimbabweTaxpayerTin.Trim(), taxpayerTin.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The supplied TIN does not match the company's registered Zimbabwe tax profile.");
         var records = await _db.ZimbabweDswtWithholdingRecords
             .Where(x => x.CompanyId == companyId && x.TaxPeriodYear == year &&
                         x.TaxPeriodMonth == month && x.Status != ZimbabweDswtRecordStatus.Reversed)
@@ -362,7 +366,7 @@ public sealed class ZimbabweDswtWithholdingRegisterService
         var remitted = records.Where(x => x.Status == ZimbabweDswtRecordStatus.RemittedToZimra)
             .Sum(x => x.WithheldAmount);
         return new ZimbabweDswtMonthlyReturnSummary(
-            taxpayerTin.Trim(), company.Name, year, month, "USD",
+            company.ZimbabweTaxpayerTin.Trim(), company.Name, year, month, "USD",
             gross, gross, tax, net, remitted, tax - remitted, records.Count);
     }
 
