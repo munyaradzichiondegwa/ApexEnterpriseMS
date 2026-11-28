@@ -241,6 +241,12 @@ namespace ApexERP.Application.Services
                     x.Status == PublicSectorBudgetVersionStatus.Approved &&
                     (!budgetVersionId.HasValue || x.Id == budgetVersionId.Value), ct)
                 ?? throw new InvalidOperationException("The selected approved IPSAS 24 budget version is required before recording a reconciliation.");
+            var currentFinalBudget = await _db.PublicSectorBudgetVersions.Where(x =>
+                    x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                    x.Status == PublicSectorBudgetVersionStatus.Approved)
+                .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber).FirstAsync(ct);
+            if (currentFinalBudget.Id != approvedBudget.Id)
+                throw new InvalidOperationException("Reconciliation rows must be tied to the current approved final budget version.");
             var companyName = await _db.Companies.IgnoreQueryFilters().Where(x => x.Id == companyId)
                 .Select(x => x.Name).SingleAsync(ct);
             var reconciliationPeriodStart = statementPeriodStart ?? approvedBudget.PeriodStart;
