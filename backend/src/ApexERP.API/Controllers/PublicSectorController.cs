@@ -42,15 +42,17 @@ namespace ApexERP.API.Controllers
         private readonly TenderService _tender;
         private readonly AssetVerificationService _assetVerification;
         private readonly ApprovalChainService _approvalChains;
+        private readonly CashFlowStatementService _cashFlow;
 
         public PublicSectorController(ApexErpDbContext db, PublicSectorService publicSector, TenderService tender,
-            AssetVerificationService assetVerification, ApprovalChainService approvalChains)
+            AssetVerificationService assetVerification, ApprovalChainService approvalChains, CashFlowStatementService cashFlow)
         {
             _db = db;
             _publicSector = publicSector;
             _tender = tender;
             _assetVerification = assetVerification;
             _approvalChains = approvalChains;
+            _cashFlow = cashFlow;
         }
 
         // ---- Fund Centres & Commitments ----
@@ -394,6 +396,83 @@ namespace ApexERP.API.Controllers
         {
             if (year < 2000 || year > 2200) return BadRequest(new { error = "A valid financial year is required." });
             return Ok(await _publicSector.GetBudgetExecutionActualsAsync(CompanyId, year, ct));
+        }
+
+        [HttpGet("budget-execution-actuals/reconciliation")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetBudgetExecutionReconciliation([FromQuery] int year, CancellationToken ct)
+        {
+            if (year < 2000 || year > 2200) return BadRequest(new { error = "A valid financial year is required." });
+            var version = await _db.PublicSectorBudgetVersions.Where(x => x.CompanyId == CompanyId &&
+                    x.FinancialYear == year && x.AccountingBasis == AccountingBasis.Cash &&
+                    x.Status == PublicSectorBudgetVersionStatus.Approved)
+                .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber).FirstOrDefaultAsync(ct);
+            if (version == null) return BadRequest(new { error = "An approved cash-basis budget version is required." });
+
+            var actuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
+                x.CompanyId == CompanyId && x.BudgetVersionId == version.Id &&
+                x.EffectiveDate >= version.PeriodStart && x.EffectiveDate < version.PeriodEnd).ToListAsync(ct);
+            var capturedSourceIds = actuals.Select(x => x.SourceRecordId).ToArray();
+            var postedBankMovements = _db.BankTransactions.Where(x => x.CompanyId == CompanyId &&
+                x.TransactionDate >= version.PeriodStart && x.TransactionDate < version.PeriodEnd &&
+                x.JournalEntryId.HasValue && _db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
+                    j.CompanyId == CompanyId && j.Status == JournalStatus.Posted));
+            var uncapturedPostedMovements = await postedBankMovements.CountAsync(x =>
+                !x.IsReconciled || !capturedSourceIds.Contains(x.Id), ct);
+            var pendingActuals = actuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
+            var certified = actuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
+            decimal Actual(CashFlowCategory section) => certified.Where(x => x.CashFlowSection == section)
+                .Sum(x => x.EventKind == PublicSectorBudgetActualEventKind.CashReceipt ? x.Amount : -x.Amount);
+
+            // CashFlowStatementService currently uses an inclusive period end; pass the final
+            // representable instant before the budget's exclusive end to preserve the budget cut-off.
+            var cashFlow = await _cashFlow.GetStatementAsync(CompanyId, version.PeriodStart,
+                version.PeriodEnd.AddTicks(-1), ct);
+            var adjustments = await _db.PublicSectorBudgetReconciliations.Where(x =>
+                x.CompanyId == CompanyId && x.FinancialYear == year &&
+                x.Status == PublicSectorBudgetReconciliationStatus.Approved).ToListAsync(ct);
+            decimal Adjustment(Func<PublicSectorBudgetReconciliation, decimal> selector) =>
+                adjustments.Sum(selector);
+            var budgetOperating = Actual(CashFlowCategory.Operating);
+            var budgetInvesting = Actual(CashFlowCategory.Investing);
+            var budgetFinancing = Actual(CashFlowCategory.Financing);
+            var operatingDifference = cashFlow.NetCashFromOperating - budgetOperating;
+            var investingDifference = cashFlow.NetCashFromInvesting - budgetInvesting;
+            var financingDifference = cashFlow.NetCashFromFinancing - budgetFinancing;
+            var operatingAdjustment = Adjustment(x => x.OperatingAmount);
+            var investingAdjustment = Adjustment(x => x.InvestingAmount);
+            var financingAdjustment = Adjustment(x => x.FinancingAmount);
+            var sourceCoverageComplete = uncapturedPostedMovements == 0 && pendingActuals == 0;
+            var operatingBridgeDifference = operatingDifference - operatingAdjustment;
+            var investingBridgeDifference = investingDifference - investingAdjustment;
+            var financingBridgeDifference = financingDifference - financingAdjustment;
+            var reconciled = sourceCoverageComplete && operatingBridgeDifference == 0m &&
+                investingBridgeDifference == 0m && financingBridgeDifference == 0m;
+
+            return Ok(new
+            {
+                budgetVersion.Id, budgetVersion.FinancialYear, budgetVersion.Currency,
+                SourceCoverageComplete = sourceCoverageComplete,
+                UncapturedOrUnreconciledPostedBankMovements = uncapturedPostedMovements,
+                PendingOrDraftActuals = pendingActuals,
+                Reconciled = reconciled,
+                Sections = new[]
+                {
+                    new { Section = "Operating", BudgetBasisActual = budgetOperating,
+                        StatementOfCashFlowsActual = cashFlow.NetCashFromOperating,
+                        RequiredAdjustment = operatingDifference, ApprovedAdjustment = operatingAdjustment,
+                        UnreconciledDifference = operatingBridgeDifference },
+                    new { Section = "Investing", BudgetBasisActual = budgetInvesting,
+                        StatementOfCashFlowsActual = cashFlow.NetCashFromInvesting,
+                        RequiredAdjustment = investingDifference, ApprovedAdjustment = investingAdjustment,
+                        UnreconciledDifference = investingBridgeDifference },
+                    new { Section = "Financing", BudgetBasisActual = budgetFinancing,
+                        StatementOfCashFlowsActual = cashFlow.NetCashFromFinancing,
+                        RequiredAdjustment = financingDifference, ApprovedAdjustment = financingAdjustment,
+                        UnreconciledDifference = financingBridgeDifference }
+                },
+                ApprovedAdjustments = adjustments
+            });
         }
 
         [HttpPost("budget-execution-actuals")]
