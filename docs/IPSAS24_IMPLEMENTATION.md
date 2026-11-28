@@ -74,7 +74,7 @@ This is intentionally a gate over the sources already registered; it is not proo
 
 ### Record-level source reconciliation — implemented foundation
 
-The branch now has a separate record-level reconciliation lifecycle attached to each reviewed period source submission:
+The branch now has a separate record-level reconciliation lifecycle attached to each reviewed period source submission, and a separate independent certification of the complete expected-source register:
 
 - A source record is identified by its company-scoped internal source-record ID and source reference. Bank-account sources map to bank transactions; receivables-control sources map to AR receipts; payables-control sources map to AP payments. Cashbook is deliberately rejected until a dedicated adapter exists.
 - Each source record is either allocated across one or more already-certified budget execution actuals or recorded once as an exclusion with a mandatory reason. A source cannot be partly allocated and partly excluded.
@@ -89,6 +89,20 @@ API routes:
 - `POST /api/v1/public-sector/cash-source-submissions/{id}/reconciliation-lines`
 - `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/submit`
 - `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/review`
+
+### Expected-source register completeness certification — implemented
+
+A separate tenant-scoped attestation now records the approved budget version, reporting-entity scope, declared expected-source count and evidence reference. The preparer submits it and an independent certifier approves or rejects it. Certification re-counts the register and requires every registered source—including sources reporting nil activity—to have both an independently reviewed period control submission and an independently reviewed record-level reconciliation.
+
+The certified attestation freezes additions to the expected-source register at database level. Rejected attestations remain immutable audit history and a new attestation may be prepared; a certified register cannot be silently expanded under the same budget version. The cash-flow bridge reads the latest attestation and requires its certified status, matching source count and matching entity scope before the register-completeness gate passes.
+
+API routes:
+- `GET /api/v1/public-sector/expected-cash-sources/completeness-attestation?budgetVersionId={id}`
+- `POST /api/v1/public-sector/expected-cash-sources/completeness-attestation`
+- `POST /api/v1/public-sector/expected-cash-sources/completeness-attestation/{id}/submit`
+- `POST /api/v1/public-sector/expected-cash-sources/completeness-attestation/{id}/review`
+
+This is a management completeness attestation supported by an evidence reference and independent approval; it does not independently discover undisclosed bank accounts or external systems. The entity remains responsible for supplying a complete authoritative inventory and retaining the evidence for audit.
 
 This is a transaction-level mapping against records already present in ApexERP. It is not yet a cryptographically verified import of an external bank or subledger statement. The reviewer must compare the submitted source evidence to the original source-system export. External cashbook ingestion and independent certification that the expected-source register is complete remain outstanding.
 
