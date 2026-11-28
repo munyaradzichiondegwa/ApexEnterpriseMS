@@ -1647,5 +1647,63 @@ namespace ApexERP.Tests
             Assert.Equal("Rejected", rejected.Status);
             Assert.Contains("Source activity detected", rejected.RejectionReason);
         }
+
+        [PostgresFact]
+        public async Task Expected_cash_source_register_requires_independent_approval_and_is_immutable()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var preparerId = Guid.NewGuid();
+            var approverId = Guid.NewGuid();
+            var budgetVersionId = Guid.NewGuid();
+            var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Expected Source MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
+                {
+                    Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
+                    VersionNumber = 1, Kind = PublicSectorBudgetVersionKind.Original,
+                    Status = PublicSectorBudgetVersionStatus.Approved, Currency = "USD",
+                    AccountingBasis = AccountingBasis.Cash, ClassificationBasis = "Cash economic classification",
+                    EntityScope = "Expected Source MDA", PeriodStart = periodStart, PeriodEnd = periodEnd,
+                    AuthorityReference = "Appropriation Act 2026", ApprovedBy = approverId,
+                    ApprovedAt = DateTime.UtcNow, CreatedBy = preparerId
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var source = await service.CreateExpectedCashSourceAsync(companyId, budgetVersionId,
+                "BankAccount", "BANK-OPERATING-01", "Operating account", "BankAccount:001",
+                true, periodStart, periodEnd, preparerId);
+            Assert.Equal("Draft", source.Status);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ApproveExpectedCashSourceAsync(companyId, source.Id, preparerId));
+            await service.SubmitExpectedCashSourceAsync(companyId, source.Id, preparerId);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ApproveExpectedCashSourceAsync(companyId, source.Id, preparerId));
+
+            var approved = await service.ApproveExpectedCashSourceAsync(companyId, source.Id, approverId);
+            Assert.Equal("Approved", approved.Status);
+            Assert.Equal(approverId, approved.ApprovedBy);
+            Assert.NotNull(approved.ApprovedAt);
+
+            var register = await service.GetExpectedCashSourcesAsync(companyId, budgetVersionId);
+            Assert.Single(register);
+            Assert.Equal("BANK-OPERATING-01", register[0].SourceCode);
+
+            // The database trigger, not merely the application service, protects approved register history.
+            approved.SourceName = "Silently altered account";
+            await Assert.ThrowsAsync<DbUpdateException>(() => ctx.SaveChangesAsync());
+        }
     }
 }
