@@ -492,7 +492,7 @@ namespace ApexERP.Application.Services
                     customer.CompanyId == companyId && customer.ArAccountId == controlAccountId) &&
                 _db.JournalEntries.Any(journal => journal.Id == x.JournalEntryId.Value &&
                     journal.CompanyId == companyId &&
-                    (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed)))
+                    journal.Status == JournalStatus.Posted))
                 .Select(x => new { x.Id, x.Total }).ToListAsync(ct);
             var invoiceIds = invoices.Select(x => x.Id).ToArray();
             if (invoiceIds.Length == 0) return 0m;
@@ -502,7 +502,7 @@ namespace ApexERP.Application.Services
                     receipt.ReceiptDate < asOf && receipt.JournalEntryId.HasValue &&
                     _db.JournalEntries.Any(journal => journal.Id == receipt.JournalEntryId.Value &&
                         journal.CompanyId == companyId &&
-                        (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed))))
+                        journal.Status == JournalStatus.Posted)))
                 .SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
             return invoices.Sum(x => x.Total) - applied;
         }
@@ -517,7 +517,7 @@ namespace ApexERP.Application.Services
                     supplier.CompanyId == companyId && supplier.ApAccountId == controlAccountId) &&
                 _db.JournalEntries.Any(journal => journal.Id == x.JournalEntryId.Value &&
                     journal.CompanyId == companyId &&
-                    (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed)))
+                    journal.Status == JournalStatus.Posted))
                 .Select(x => new { x.Id, x.Total }).ToListAsync(ct);
             var invoiceIds = invoices.Select(x => x.Id).ToArray();
             if (invoiceIds.Length == 0) return 0m;
@@ -527,7 +527,7 @@ namespace ApexERP.Application.Services
                     payment.PaymentDate < asOf && payment.JournalEntryId.HasValue &&
                     _db.JournalEntries.Any(journal => journal.Id == payment.JournalEntryId.Value &&
                         journal.CompanyId == companyId &&
-                        (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed))))
+                        journal.Status == JournalStatus.Posted)))
                 .SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
             return invoices.Sum(x => x.Total) - applied;
         }
