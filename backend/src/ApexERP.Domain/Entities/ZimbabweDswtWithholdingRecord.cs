@@ -2,7 +2,7 @@ using ApexERP.Domain.Common;
 
 namespace ApexERP.Domain.Entities;
 
-public enum ZimbabweDigitalServiceKind { ElectronicService, PhysicalGoods, NonElectronicImportedService, LocalService }
+public enum ZimbabweDigitalServiceKind { ElectronicService, PhysicalGoods, NonElectronicImportedService, LocalService, OtherNonResidentPayment }
 public enum ZimbabweSupplierVatStatus { NotRegistered, Registered }
 public enum ZimbabweDigitalPaymentRoute { ZimbabweIntermediary, PaidOutsideZimbabwe, LocalPayment }
 
