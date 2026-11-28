@@ -507,8 +507,10 @@ namespace ApexERP.Application.Services
             if (sources.Count == 0 || sources.Any(x => x.Status != "Approved" ||
                 !x.ApprovedBy.HasValue || !x.ApprovedAt.HasValue)) return false;
 
-            var submissions = await _db.PublicSectorCashSourceSubmissions.Where(x =>
-                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId).ToListAsync(ct);
+            var submissions = (await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId).ToListAsync(ct))
+                .GroupBy(x => x.ExpectedCashSourceId)
+                .Select(group => group.OrderByDescending(x => x.SubmissionRevision).First()).ToList();
             if (submissions.Count != sources.Count || submissions.Any(x =>
                 x.Status != "Reviewed" || !x.ReviewedBy.HasValue || !x.ReviewedAt.HasValue ||
                 x.RecordLevelStatus != "Reviewed" || !x.RecordLevelReviewedBy.HasValue ||
@@ -1073,8 +1075,10 @@ namespace ApexERP.Application.Services
                 if (sources.Count != item.ExpectedSourceCount || sources.Count == 0 ||
                     sources.Any(x => x.Status != "Approved"))
                     throw new InvalidOperationException("The expected-source register no longer matches the submitted completeness declaration.");
-                var submissions = await _db.PublicSectorCashSourceSubmissions.Where(x =>
-                    x.CompanyId == companyId && x.BudgetVersionId == item.BudgetVersionId).ToListAsync(token);
+                var submissions = (await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == item.BudgetVersionId).ToListAsync(token))
+                    .GroupBy(x => x.ExpectedCashSourceId)
+                    .Select(group => group.OrderByDescending(x => x.SubmissionRevision).First()).ToList();
                 var everySourceReconciled = sources.All(source => submissions.Any(submission =>
                     submission.ExpectedCashSourceId == source.Id && submission.Status == "Reviewed" &&
                     submission.RecordLevelStatus == "Reviewed"));
@@ -1268,8 +1272,10 @@ namespace ApexERP.Application.Services
                 // allocations/exclusions for every registered source (including zero-record sources).
                 var expectedSources = await _db.PublicSectorExpectedCashSources.Where(x =>
                     x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id).ToListAsync(ct);
-                var sourceSubmissions = await _db.PublicSectorCashSourceSubmissions.Where(x =>
-                    x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id).ToListAsync(ct);
+                var sourceSubmissions = (await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id).ToListAsync(ct))
+                    .GroupBy(x => x.ExpectedCashSourceId)
+                    .Select(group => group.OrderByDescending(x => x.SubmissionRevision).First()).ToList();
                 var sourceRegisterApproved = expectedSources.Count > 0 &&
                     expectedSources.All(x => x.Status == "Approved");
                 var everyExpectedSourceReviewed = expectedSources.All(source =>
