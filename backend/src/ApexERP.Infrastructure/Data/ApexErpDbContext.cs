@@ -171,6 +171,7 @@ namespace ApexERP.Infrastructure.Data
 
         // Public Sector & Government
         public DbSet<FundCentre> FundCentres => Set<FundCentre>();
+        public DbSet<PublicSectorBudgetAllocation> PublicSectorBudgetAllocations => Set<PublicSectorBudgetAllocation>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
@@ -492,6 +493,7 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<IntercompanyTransaction>(modelBuilder);
             ApplyTenantFilter<NettingBatch>(modelBuilder);
             ApplyTenantFilter<FundCentre>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetAllocation>(modelBuilder);
             ApplyTenantFilter<Commitment>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
@@ -606,6 +608,17 @@ namespace ApexERP.Infrastructure.Data
 
             // Unique business keys for the new modules
             modelBuilder.Entity<FundCentre>().HasIndex(f => new { f.CompanyId, f.Code, f.FinancialYear }).IsUnique();
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasIndex(a => new { a.CompanyId, a.FundCentreId, a.GlAccountId, a.CostCentreId, a.FinancialYear })
+                .IsUnique();
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasCheckConstraint("CK_PublicSectorBudgetAllocations_Amount", "\"Amount\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasOne<FundCentre>().WithMany().HasForeignKey(a => a.FundCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasOne<GlAccount>().WithMany().HasForeignKey(a => a.GlAccountId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasOne<CostCentre>().WithMany().HasForeignKey(a => a.CostCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<Grant>().HasIndex(g => new { g.CompanyId, g.GrantNo }).IsUnique();
             modelBuilder.Entity<TenderNotice>().HasIndex(t => new { t.CompanyId, t.TenderNo }).IsUnique();
             modelBuilder.Entity<Segment>().HasIndex(s => new { s.CompanyId, s.Code }).IsUnique();
