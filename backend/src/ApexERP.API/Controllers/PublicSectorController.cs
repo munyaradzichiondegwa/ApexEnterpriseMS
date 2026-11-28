@@ -1004,6 +1004,10 @@ namespace ApexERP.API.Controllers
             // representable instant before the budget's exclusive end to preserve the budget cut-off.
             var cashFlow = await _cashFlow.GetStatementAsync(CompanyId, version.PeriodStart,
                 version.PeriodEnd.AddTicks(-1), ct);
+            // Reconciliation rows are tied to the registered financial-statement entity,
+            // not an arbitrary entity label supplied by a client.
+            var statementEntityName = await _db.Companies.IgnoreQueryFilters()
+                .Where(x => x.Id == CompanyId).Select(x => x.Name).SingleAsync(ct);
             // Only adjustments approved for this exact budget version, reporting period
             // and reporting entity may enter this bridge. A year-wide aggregate can otherwise
             // import approvals from another budget revision or reporting window.
@@ -1012,8 +1016,7 @@ namespace ApexERP.API.Controllers
                 x.BudgetVersionId == version.Id &&
                 x.StatementPeriodStart == version.PeriodStart &&
                 x.StatementPeriodEnd == version.PeriodEnd &&
-                x.StatementEntityScope == version.EntityScope &&
-                x.StatementSection != null &&
+                x.StatementEntityScope == statementEntityName &&
                 (x.StatementSection == "Operating" || x.StatementSection == "Investing" ||
                  x.StatementSection == "Financing") &&
                 x.Status == PublicSectorBudgetReconciliationStatus.Approved).ToListAsync(ct);
