@@ -269,9 +269,17 @@ namespace ApexERP.API.Controllers
             if ((req.TaxType == TaxType.VAT && !req.TaxCodeId.HasValue) ||
                 (req.TaxType == TaxType.WHT && req.TaxCodeId.HasValue))
                 return BadRequest(new { error = "VAT policy must identify its tax code; WHT policy must use the code-less WHT component until a supplier WHT tax-code link is implemented." });
-            if (req.TaxCodeId.HasValue && !await _db.TaxCodes.AnyAsync(x => x.Id == req.TaxCodeId &&
-                x.CompanyId == CompanyId && x.Type == req.TaxType && x.IsActive, ct))
-                return BadRequest(new { error = "The policy tax code must be active, company-owned and match the tax type." });
+            if (req.TaxCodeId.HasValue)
+            {
+                var taxCode = await _db.TaxCodes.FirstOrDefaultAsync(x => x.Id == req.TaxCodeId &&
+                    x.CompanyId == CompanyId && x.Type == req.TaxType && x.IsActive, ct);
+                if (taxCode == null || req.EffectiveFrom < taxCode.EffectiveFrom ||
+                    (taxCode.EffectiveTo.HasValue && (!req.EffectiveTo.HasValue || req.EffectiveTo.Value > taxCode.EffectiveTo.Value)))
+                    return BadRequest(new { error = "The policy effective period must fall within its active tax code's effective period." });
+            }
+            if (req.Treatment != TaxBudgetTreatment.SeparateClassification &&
+                (req.BudgetGlAccountId.HasValue || req.FundCentreId.HasValue || req.CostCentreId.HasValue))
+                return BadRequest(new { error = "Budget GL/Fund Centre/cost-centre dimensions are only permitted for SeparateClassification treatment." });
             if (req.Treatment == TaxBudgetTreatment.SeparateClassification)
             {
                 if (!req.BudgetGlAccountId.HasValue || !req.FundCentreId.HasValue)
