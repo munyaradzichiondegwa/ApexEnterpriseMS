@@ -569,7 +569,9 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Budget reconciliation row not found.");
             if (item.Status != PublicSectorBudgetReconciliationStatus.Draft)
                 throw new InvalidOperationException("Only a draft reconciliation row can be submitted for approval.");
-            if ((item.StatementSection is "Revenue" or "Expense" or "Operating" or "Investing" or "Financing") &&
+            var fingerprintRequiredSection = new[] { "Revenue", "Expense", "Operating", "Investing", "Financing" }
+                .Any(section => string.Equals(section, item.StatementSection, StringComparison.OrdinalIgnoreCase));
+            if (fingerprintRequiredSection &&
                 (!item.BudgetVersionId.HasValue || !item.StatementPeriodStart.HasValue ||
                  !item.StatementPeriodEnd.HasValue || string.IsNullOrWhiteSpace(item.StatementEntityScope) ||
                  string.IsNullOrWhiteSpace(item.SourceFingerprint) || !item.CalculatedAt.HasValue))
@@ -620,14 +622,15 @@ namespace ApexERP.Application.Services
                                 : item.ExpenseAmount != candidate.ExpectedAdjustment || item.RevenueAmount != 0m))
                         throw new InvalidOperationException("The source data or calculated reconciliation has changed since preparation. Reject and recreate the reconciliation using the current candidate.");
                 }
-                else if (item.StatementSection is "Operating" or "Investing" or "Financing")
+                else if (new[] { "Operating", "Investing", "Financing" }.Any(section =>
+                    string.Equals(section, item.StatementSection, StringComparison.OrdinalIgnoreCase)))
                 {
                     if (!item.BudgetVersionId.HasValue || !item.StatementPeriodStart.HasValue ||
                         !item.StatementPeriodEnd.HasValue || string.IsNullOrWhiteSpace(item.StatementEntityScope))
                         throw new InvalidOperationException("The cash-flow reconciliation lacks its approved budget and reporting scope.");
                     var candidate = await GetAutomaticCashFlowBudgetReconciliationCandidateAsync(
                         companyId, item.FinancialYear, item.BudgetVersionId.Value, item.StatementSection, token);
-                    var amountMatches = item.StatementSection switch
+                    var amountMatches = candidate.StatementSection switch
                     {
                         "Operating" => item.OperatingAmount == candidate.ExpectedAdjustment &&
                             item.InvestingAmount == 0m && item.FinancingAmount == 0m,
