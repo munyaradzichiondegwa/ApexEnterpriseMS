@@ -30,7 +30,7 @@ ZIMRA Public Notice 24 of 2026 (9 April 2026) separately reminds local taxpayers
 
 ## Who bears it?
 
-The law's collection mechanics are explicit: the intermediary withholds from the amount being remitted to the foreign supplier and remits it to ZIMRA. The supplier receives a certificate and, if VAT-registered, claims the withholding as a credit against its VAT return. The Ministry describes this as a VAT collection mechanism rather than a new tax on all cardholders.
+The law's collection mechanics are explicit: the intermediary withholds from the amount being remitted to the foreign supplier and remits it to ZIMRA. The intermediary must issue a withholding certificate containing the payer, supplier, payment amount and tax withheld; retain that certificate as transaction evidence. A VAT-registered non-resident supplier may claim the withheld amount as a credit through its VAT return under ZIMRA's procedure. The Ministry describes this as a VAT collection mechanism rather than a new tax on all cardholders.
 
 There is a public interpretive inconsistency: a ZIMRA Head of Technical Services interview reported by The Herald on 16 January 2026 described the recipient as the person who pays the tax. That statement does not alter the statutory withholding workflow or ZIMRA Public Notice 05/2026. The system must therefore record both the statutory withholding mechanics and the commercial contract's agreed gross-up/pass-through treatment. Do not automatically add the tax as a customer surcharge.
 
@@ -59,9 +59,9 @@ This is not a blanket accounting conclusion for every contractual arrangement. I
 
 ## Accounting design decisions
 
-1. Record the gross foreign supplier payment as the underlying payable/cash remittance instruction.
-2. Record DSWT withheld as a separate tax-withholding liability/remittance item, with a certificate reference.
-3. Do not treat the withholding as an ordinary supplier WHT or an additional IMTT.
+1. Record the gross foreign supplier payment as the AP settlement and gross bank debit when the intermediary deducts DSWT from that gross payment.
+2. Preserve the supplier-net and DSWT-withheld split in the DSWT evidence register, with the intermediary certificate and bank statement link. Do not create a second expense or payable for the same withheld amount when it is already included in the gross bank debit.
+3. Do not treat DSWT as ordinary supplier WHT or additional IMTT. A separate journal is only appropriate where bank evidence shows a separate debit or an approved contract/accounting policy requires a different gross-up treatment.
 4. Do not add a second customer charge by default. Any gross-up or recovery from the customer must be explicitly configured, contractually supported and approved.
 5. Supplier VAT registration status, service classification, place of consumption, payment route and prior VAT accounting are evidence-backed inputs.
 6. Do not apply both DSWT withholding and recipient self-accounted VAT to the same supply without a documented statutory basis.
@@ -71,6 +71,6 @@ This is not a blanket accounting conclusion for every contractual arrangement. I
 
 - ZIMRA confirmation of the treatment where a supplier is registered but the customer/recipient also claims input VAT.
 - Confirm the tax agent's TaRMS tax-type registration, effective date and generated return periods; implement a validated TaRMS-ready return export against the current form schema.
-- Approved GL accounts, tax-code mapping, certificate numbering, monthly return and reconciliation workflow.
-- Bank/intermediary statement integration and source evidence.
+- Approved tax certificate numbering policy and validated monthly TaRMS return reconciliation/export.
+- Any exceptional gross-up or separate-debit accounting policy and related control-account mapping.
 - Tax counsel review of legal incidence versus commercial pass-through/gross-up.
