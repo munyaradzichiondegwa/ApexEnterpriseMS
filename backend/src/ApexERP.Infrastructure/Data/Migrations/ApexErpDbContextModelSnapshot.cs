@@ -200,7 +200,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
-                    b.HasIndex("CompanyId", "SettlementKind", "SettlementAllocationId", "InvoiceLineId", "TaxComponentId").IsUnique();
+                    b.HasIndex("CompanyId", "SettlementKind", "SettlementAllocationId", "InvoiceLineId", "TaxComponentId").IsUnique().HasDatabaseName("IX_SettlementComponentAllocations_Allocation");
                     b.HasIndex("TaxComponentId").HasDatabaseName("IX_SettlementComponentAllocations_TaxComponentId");
                     b.ToTable("SettlementComponentAllocations", t =>
                         {
