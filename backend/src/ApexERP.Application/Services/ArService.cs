@@ -191,9 +191,19 @@ namespace ApexERP.Application.Services
 
         /// <summary>Records a customer receipt and allocates it against one or more open invoices,
         /// updating each invoice's outstanding balance and status. Posts Dr Bank/Cash, Cr Trade Debtors.</summary>
-        public async Task<ArReceipt> ReceiveAndAllocateAsync(Guid companyId, Guid customerId, DateTime receiptDate,
+        public Task<ArReceipt> ReceiveAndAllocateAsync(Guid companyId, Guid customerId, DateTime receiptDate,
             string currency, decimal amount, PaymentMethod method, string? reference, Guid bankGlAccountId,
             Guid arControlAccountId, Dictionary<Guid, decimal> allocations, CancellationToken ct = default,
+            IReadOnlyCollection<SettlementComponentInput>? componentAllocations = null)
+        {
+            return _db.InTransactionAsync(token => ReceiveAndAllocateCoreAsync(
+                    companyId, customerId, receiptDate, currency, amount, method, reference, bankGlAccountId,
+                    arControlAccountId, allocations, token, componentAllocations), ct);
+        }
+
+        private async Task<ArReceipt> ReceiveAndAllocateCoreAsync(Guid companyId, Guid customerId, DateTime receiptDate,
+            string currency, decimal amount, PaymentMethod method, string? reference, Guid bankGlAccountId,
+            Guid arControlAccountId, Dictionary<Guid, decimal> allocations, CancellationToken ct,
             IReadOnlyCollection<SettlementComponentInput>? componentAllocations = null)
         {
             if (allocations.Values.Sum() > amount)
