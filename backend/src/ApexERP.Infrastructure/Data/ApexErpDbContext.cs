@@ -81,6 +81,7 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<ApInvoiceLine> ApInvoiceLines => Set<ApInvoiceLine>();
         public DbSet<ApPayment> ApPayments => Set<ApPayment>();
         public DbSet<ZimbabweDswtWithholdingRecord> ZimbabweDswtWithholdingRecords => Set<ZimbabweDswtWithholdingRecord>();
+        public DbSet<ZimbabweDswtFiling> ZimbabweDswtFilings => Set<ZimbabweDswtFiling>();
         public DbSet<ApPaymentAllocation> ApPaymentAllocations => Set<ApPaymentAllocation>();
         public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
         public DbSet<BankTransaction> BankTransactions => Set<BankTransaction>();
@@ -386,6 +387,19 @@ namespace ApexERP.Infrastructure.Data
                     "\"TaxPeriodYear\" BETWEEN 2026 AND 9999 AND \"TaxPeriodMonth\" BETWEEN 1 AND 12");
             });
             modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.TaxPeriodYear, x.TaxPeriodMonth, x.Status });
+            modelBuilder.Entity<ZimbabweDswtFiling>().HasIndex(x => new { x.CompanyId, x.TaxYear, x.TaxPeriod, x.ReturnVersion }).IsUnique();
+            modelBuilder.Entity<ZimbabweDswtFiling>().HasIndex(x => new { x.CompanyId, x.IdempotencyKey }).IsUnique();
+            modelBuilder.Entity<ZimbabweDswtFiling>().HasIndex(x => new { x.CompanyId, x.SubmissionReference })
+                .IsUnique().HasFilter("\"SubmissionReference\" IS NOT NULL");
+            modelBuilder.Entity<ZimbabweDswtFiling>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_ZimbabweDswtFilings_Period",
+                    "\"TaxYear\" >= 2026 AND \"TaxPeriod\" BETWEEN 1 AND 12 AND \"ReturnVersion\" >= 1");
+                t.HasCheckConstraint("CK_ZimbabweDswtFilings_Amounts",
+                    "\"TaxableIncome\" >= 0 AND \"TaxAmount\" >= 0 AND \"PaymentCount\" >= 0");
+                t.HasCheckConstraint("CK_ZimbabweDswtFilings_Hash",
+                    "char_length(\"PayloadSha256\") = 64 AND char_length(\"IdempotencyKey\") = 64");
+            });
             modelBuilder.Entity<User>().HasIndex(u => new { u.CompanyId, u.Email }).IsUnique();
             modelBuilder.Entity<GlAccount>().HasIndex(a => new { a.CompanyId, a.Code }).IsUnique();
             modelBuilder.Entity<Customer>().HasIndex(c => new { c.CompanyId, c.Code }).IsUnique();
