@@ -70,3 +70,45 @@ public sealed class ZimbabweDswtApPaymentReconciliationValidatorTests
                 100m, "USD", "Foreign Cloud Ltd", Valid(posted: false)));
     }
 }
+
+
+public sealed class ZimbabweTaxpayerTinValidatorTests
+{
+    [Theory]
+    [InlineData("1234567890")]
+    [InlineData("TIN-123456")]
+    [InlineData(" ZW/123 456 ")]
+    [InlineData("AB12-CD/34")]
+    [InlineData("TIN.123")]
+    public void Accepts_non_blank_tin_values_without_assuming_an_undocumented_format(string tin)
+    {
+        Assert.True(ZimbabweTaxpayerTinValidator.IsValid(tin));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Rejects_missing_tin_values(string? tin)
+    {
+        Assert.False(ZimbabweTaxpayerTinValidator.IsValid(tin));
+    }
+
+    [Fact]
+    public void Rejects_tin_longer_than_forty_characters()
+    {
+        Assert.False(ZimbabweTaxpayerTinValidator.IsValid(new string('A', 41)));
+    }
+
+    [Fact]
+    public void Accepts_tin_at_maximum_length()
+    {
+        Assert.True(ZimbabweTaxpayerTinValidator.IsValid(new string('A', 40)));
+    }
+
+    [Fact]
+    public void Rejects_control_characters()
+    {
+        Assert.False(ZimbabweTaxpayerTinValidator.IsValid("TIN\n123"));
+    }
+}
