@@ -105,7 +105,7 @@ Implemented on the feature branch:
 ### Still not implemented / not verified
 
 - Budget actuals are not yet included in the IPSAS 24 comparison statement; statement comparability remains blocked for cash budgets until a period-coverage certification and reconciliation bridge are implemented.
-- No frontend cash-actual capture/review screen yet. AR/AP settlement allocation mapping is also outstanding; only directly mapped reconciled bank journal movements are accepted.
+- Added a Public Sector screen for selecting an approved cash budget line and reconciled bank transaction, capturing the event, listing actuals, submitting for certification and certifying as a separate user. AR/AP settlement allocation mapping remains outstanding; only directly mapped reconciled bank journal movements are accepted.
 - Modified-cash commitments, source snapshot hashing, compensating reversal workflow, foreign-currency source conversion and source completeness attestations remain disabled/outstanding.
 - Automated reconciliation to the three Statement of Cash Flows sections is not yet implemented.
 - The new migration, EF snapshot and PostgreSQL tests have not yet been executed in CI or against a live PostgreSQL instance in this work session.
