@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { api, extractErrorMessage } from "@/lib/api";
+import { downloadCsv } from "@/lib/exports";
 
 export default function PublicSectorPage() {
   const [tab, setTab] = useState<"funds" | "tenders" | "assets" | "ipsas24">("funds");
@@ -52,6 +53,23 @@ export default function PublicSectorPage() {
       setBudgetDraftId(response.data.id);
       setMsg(`${budgetDraft.kind} budget draft created. Submit it for independent approval before it appears in the statement.`);
     } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  function exportBudgetComparison() {
+    if (!budgetComparison) return;
+    downloadCsv(`apexerp-ipsas24-budget-comparison-${year}`, budgetComparison.lines, [
+      { key: "classificationCode", label: "Classification" },
+      { key: "fundCentreCode", label: "Fund Centre Code" },
+      { key: "fundCentreName", label: "Fund Centre" },
+      { key: "accountCode", label: "GL Account Code" },
+      { key: "accountName", label: "GL Account" },
+      { key: "originalBudget", label: "Original Budget" },
+      { key: "finalBudget", label: "Final Budget" },
+      { key: "actualOnComparableBasis", label: "Actual on Comparable Basis" },
+      { key: "variance", label: "Variance" },
+      { key: "variancePercent", label: "Variance Percent" },
+      { key: "originalToFinalExplanation", label: "Explanation" },
+    ]);
   }
 
   async function submitBudgetVersion() {
@@ -171,6 +189,7 @@ export default function PublicSectorPage() {
             <button className="btn-secondary" onClick={loadBudgetComparison} disabled={budgetComparisonLoading}>
               {budgetComparisonLoading ? "Loading…" : "Refresh statement"}
             </button>
+            {budgetComparison && <button className="btn-secondary" onClick={exportBudgetComparison}>Export CSV</button>}
           </div>
           {budgetComparisonLoading && <p className="text-sm text-slate-500">Loading approved budget versions and ledger actuals…</p>}
           <form onSubmit={createBudgetVersion} className="rounded-lg border p-4 space-y-3">
