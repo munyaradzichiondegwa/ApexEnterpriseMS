@@ -1089,7 +1089,7 @@ namespace ApexERP.Tests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.CertifyBudgetExecutionActualAsync(companyId, actual.Id, preparerId));
 
-            await service.SubmitBudgetExecutionActualAsync(companyId, actual.Id);
+            await service.SubmitBudgetExecutionActualAsync(companyId, actual.Id, preparerId);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.CertifyBudgetExecutionActualAsync(companyId, actual.Id, preparerId));
             var certified = await service.CertifyBudgetExecutionActualAsync(companyId, actual.Id, certifierId);
