@@ -1236,6 +1236,36 @@ namespace ApexERP.Application.Services
                 .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
         }
 
+        private async Task<bool> AreExpectedCashSourceMappingsCompleteAsync(
+            Guid companyId, Guid budgetVersionId, CancellationToken ct)
+        {
+            var sources = await _db.PublicSectorExpectedCashSources.Where(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId).ToListAsync(ct);
+            var registered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var source in sources)
+            {
+                if (!Guid.TryParse(source.SourceIdentifier, out var sourceId)) return false;
+                registered.Add($"{source.SourceKind}:{sourceId:N}");
+            }
+
+            var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var bankIds = await _db.BankAccounts.Where(x => x.CompanyId == companyId)
+                .Select(x => x.Id).ToListAsync(ct);
+            foreach (var id in bankIds) discovered.Add($"BankAccount:{id:N}");
+
+            var receivableIds = await _db.Customers.Where(x =>
+                x.CompanyId == companyId && x.ArAccountId.HasValue)
+                .Select(x => x.ArAccountId!.Value).Distinct().ToListAsync(ct);
+            foreach (var id in receivableIds) discovered.Add($"ReceivablesControl:{id:N}");
+
+            var payableIds = await _db.Suppliers.Where(x =>
+                x.CompanyId == companyId && x.ApAccountId.HasValue)
+                .Select(x => x.ApAccountId!.Value).Distinct().ToListAsync(ct);
+            foreach (var id in payableIds) discovered.Add($"PayablesControl:{id:N}");
+
+            return registered.SetEquals(discovered);
+        }
+
         public async Task<PublicSectorExpectedCashSourceRegisterAttestation> CreateExpectedCashSourceRegisterAttestationAsync(
             Guid companyId, Guid budgetVersionId, int expectedSourceCount, string entityScope,
             string evidenceReference, Guid actorId, CancellationToken ct = default)
@@ -1314,6 +1344,10 @@ namespace ApexERP.Application.Services
                 if (sources.Count != item.ExpectedSourceCount || sources.Count == 0 ||
                     sources.Any(x => x.Status != "Approved"))
                     throw new InvalidOperationException("The expected-source register no longer matches the submitted completeness declaration.");
+                if (accepted && !await AreExpectedCashSourceMappingsCompleteAsync(
+                    companyId, item.BudgetVersionId, token))
+                    throw new InvalidOperationException("The registered bank accounts and AR/AP control accounts do not cover all company-owned source mappings.");
+
                 var submissions = (await _db.PublicSectorCashSourceSubmissions.Where(x =>
                     x.CompanyId == companyId && x.BudgetVersionId == item.BudgetVersionId).ToListAsync(token))
                     .GroupBy(x => x.ExpectedCashSourceId)
