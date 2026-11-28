@@ -428,8 +428,13 @@ namespace ApexERP.Application.Services
             "BankAccount", "ReceivablesControl", "PayablesControl"
         };
 
+        private sealed record ExpectedCashSourceRecord(
+            decimal Amount, string Reference, DateTime EffectiveDate, string Currency,
+            Guid? JournalEntryId, bool IsReconciled);
+
         private sealed record ExpectedCashSourcePopulation(
-            HashSet<Guid> RecordIds, decimal ControlTotal, bool CurrencyMatches, decimal? NetMovement);
+            HashSet<Guid> RecordIds, Dictionary<Guid, ExpectedCashSourceRecord> Records,
+            decimal ControlTotal, bool CurrencyMatches, decimal? NetMovement);
 
         // Re-read the live source population rather than trusting a previously submitted count.
         // SourceIdentifier is the internal BankAccount ID or the AR/AP control GL account ID.
@@ -448,11 +453,16 @@ namespace ApexERP.Application.Services
                 var rows = await _db.BankTransactions.Where(x =>
                     x.CompanyId == companyId && x.BankAccountId == sourceId &&
                     x.TransactionDate >= periodStart && x.TransactionDate < periodEnd)
-                    .Select(x => new { x.Id, x.Debit, x.Credit }).ToListAsync(ct);
+                    .Select(x => new { x.Id, x.Debit, x.Credit, x.Reference, x.TransactionDate, x.JournalEntryId, x.IsReconciled })
+                    .ToListAsync(ct);
                 if (rows.Any(x => x.Debit < 0m || x.Credit < 0m ||
                     (x.Debit > 0m && x.Credit > 0m) || Math.Max(x.Debit, x.Credit) <= 0m))
                     throw new InvalidOperationException($"Bank source {expected.SourceCode} contains a transaction with invalid debit/credit amounts.");
-                return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
+                var records = rows.ToDictionary(x => x.Id, x => new ExpectedCashSourceRecord(
+                    Math.Max(x.Debit, x.Credit),
+                    string.IsNullOrWhiteSpace(x.Reference) ? x.Id.ToString("N") : x.Reference!,
+                    x.TransactionDate, account.Currency, x.JournalEntryId, x.IsReconciled));
+                return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
                     rows.Sum(x => Math.Max(x.Debit, x.Credit)),
                     string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase),
                     rows.Sum(x => x.Credit - x.Debit));
@@ -469,8 +479,12 @@ namespace ApexERP.Application.Services
                     x.ReceiptDate >= periodStart && x.ReceiptDate < periodEnd &&
                     _db.Customers.Any(c => c.Id == x.CustomerId && c.CompanyId == companyId &&
                         c.ArAccountId == sourceId))
-                    .Select(x => new { x.Id, x.Amount, x.Currency }).ToListAsync(ct);
-                return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
+                    .Select(x => new { x.Id, x.Amount, x.Currency, x.ReceiptNo, x.ReceiptDate, x.JournalEntryId })
+                    .ToListAsync(ct);
+                var records = rows.ToDictionary(x => x.Id, x => new ExpectedCashSourceRecord(
+                    x.Amount, string.IsNullOrWhiteSpace(x.ReceiptNo) ? x.Id.ToString("N") : x.ReceiptNo,
+                    x.ReceiptDate, x.Currency, x.JournalEntryId, true));
+                return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
                     rows.Sum(x => x.Amount),
                     string.Equals(controlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
                     rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)), null);
@@ -487,14 +501,88 @@ namespace ApexERP.Application.Services
                     x.PaymentDate >= periodStart && x.PaymentDate < periodEnd &&
                     _db.Suppliers.Any(s => s.Id == x.SupplierId && s.CompanyId == companyId &&
                         s.ApAccountId == sourceId))
-                    .Select(x => new { x.Id, x.Amount, x.Currency }).ToListAsync(ct);
-                return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
+                    .Select(x => new { x.Id, x.Amount, x.Currency, x.PaymentNo, x.PaymentDate, x.JournalEntryId })
+                    .ToListAsync(ct);
+                var records = rows.ToDictionary(x => x.Id, x => new ExpectedCashSourceRecord(
+                    x.Amount, string.IsNullOrWhiteSpace(x.PaymentNo) ? x.Id.ToString("N") : x.PaymentNo,
+                    x.PaymentDate, x.Currency, x.JournalEntryId, true));
+                return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
                     rows.Sum(x => x.Amount),
                     string.Equals(controlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
                     rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)), null);
             }
 
             throw new InvalidOperationException($"Source kind {expected.SourceKind} has no configured source adapter.");
+        }
+
+        private async Task<bool> IsCurrentCashSourceReconciliationAsync(
+            Guid companyId, PublicSectorExpectedCashSource expected,
+            PublicSectorCashSourceSubmission submission, ExpectedCashSourcePopulation population,
+            CancellationToken ct)
+        {
+            var lines = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
+                x.CompanyId == companyId && x.CashSourceSubmissionId == submission.Id).ToListAsync(ct);
+            var groups = lines.GroupBy(x => x.SourceRecordId).ToList();
+            if (groups.Count != submission.RecordCount ||
+                !population.RecordIds.SetEquals(groups.Select(x => x.Key)) ||
+                groups.Any(group => !population.Records.ContainsKey(group.Key)))
+                return false;
+
+            var expectedActualSourceKind = expected.SourceKind switch
+            {
+                "BankAccount" => PublicSectorBudgetActualSourceKind.BankTransaction,
+                "ReceivablesControl" => PublicSectorBudgetActualSourceKind.ArReceipt,
+                "PayablesControl" => PublicSectorBudgetActualSourceKind.ApPayment,
+                _ => (PublicSectorBudgetActualSourceKind?)null
+            };
+            if (!expectedActualSourceKind.HasValue) return false;
+
+            foreach (var group in groups)
+            {
+                var source = population.Records[group.Key];
+                if (source.Amount <= 0m || source.EffectiveDate < submission.PeriodStart ||
+                    source.EffectiveDate >= submission.PeriodEnd ||
+                    !string.Equals(source.Currency, submission.Currency, StringComparison.OrdinalIgnoreCase) ||
+                    !source.JournalEntryId.HasValue ||
+                    (expected.SourceKind == "BankAccount" && !source.IsReconciled) ||
+                    !await _db.JournalEntries.AnyAsync(j => j.Id == source.JournalEntryId.Value &&
+                        j.CompanyId == companyId && j.Status == JournalStatus.Posted, ct))
+                    return false;
+
+                if (group.Any(line => line.SourceAmount != source.Amount ||
+                    !string.Equals(line.SourceReference, source.Reference, StringComparison.Ordinal)))
+                    return false;
+
+                if (group.Any(line => line.IsExcluded))
+                {
+                    if (group.Count() != 1 || group.Any(line => !line.IsExcluded ||
+                        line.BudgetExecutionActualId.HasValue || line.AllocatedAmount != 0m ||
+                        string.IsNullOrWhiteSpace(line.ExclusionReason)))
+                        return false;
+                    continue;
+                }
+
+                if (group.Any(line => line.IsExcluded || !line.BudgetExecutionActualId.HasValue) ||
+                    group.Sum(line => line.AllocatedAmount) != source.Amount)
+                    return false;
+
+                foreach (var line in group)
+                {
+                    var actual = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
+                        x.Id == line.BudgetExecutionActualId!.Value && x.CompanyId == companyId, ct);
+                    if (actual == null || actual.Status != PublicSectorBudgetActualStatus.Certified ||
+                        actual.BudgetVersionId != submission.BudgetVersionId ||
+                        actual.SourceKind != expectedActualSourceKind.Value ||
+                        actual.SourceRecordId != group.Key || actual.Amount != line.AllocatedAmount ||
+                        actual.Amount <= 0m || actual.SourceDate.Date != source.EffectiveDate.Date ||
+                        actual.EffectiveDate.Date != source.EffectiveDate.Date ||
+                        !string.Equals(actual.SourceReference, source.Reference, StringComparison.Ordinal) ||
+                        !string.Equals(actual.Currency, source.Currency, StringComparison.OrdinalIgnoreCase) ||
+                        !await IsCertifiedCashActualSourceValidAsync(companyId, actual, ct))
+                        return false;
+                }
+            }
+            return true;
         }
 
         public async Task<IReadOnlyList<(string SourceKind, Guid SourceRecordId)>> GetReviewedCashSourceExclusionsAsync(
@@ -564,14 +652,12 @@ namespace ApexERP.Application.Services
                 {
                     var population = await GetExpectedCashSourcePopulationAsync(companyId, source,
                         submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
-                    var mappedIds = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
-                        x.CompanyId == companyId && x.CashSourceSubmissionId == submission.Id)
-                        .Select(x => x.SourceRecordId).Distinct().ToListAsync(ct);
                     if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
                         population.ControlTotal != submission.ControlTotal ||
                         (population.NetMovement.HasValue &&
                             submission.OpeningBalance + population.NetMovement.Value != submission.ClosingBalance) ||
-                        !population.RecordIds.SetEquals(mappedIds)) return false;
+                        !await IsCurrentCashSourceReconciliationAsync(companyId, source, submission, population, ct))
+                        return false;
                 }
                 catch (InvalidOperationException)
                 {
@@ -1330,12 +1416,11 @@ namespace ApexERP.Application.Services
                         var submission = sourceSubmissions.Single(x => x.ExpectedCashSourceId == expected.Id);
                         var population = await GetExpectedCashSourcePopulationAsync(companyId, expected,
                             submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
-                        var mappedIds = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
-                            x.CompanyId == companyId && x.CashSourceSubmissionId == submission.Id)
-                            .Select(x => x.SourceRecordId).Distinct().ToListAsync(ct);
                         if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
                             population.ControlTotal != submission.ControlTotal ||
-                            !population.RecordIds.SetEquals(mappedIds))
+                            (population.NetMovement.HasValue &&
+                                submission.OpeningBalance + population.NetMovement.Value != submission.ClosingBalance) ||
+                            !await IsCurrentCashSourceReconciliationAsync(companyId, expected, submission, population, ct))
                         {
                             liveSourcePopulationsComplete = false;
                             break;
