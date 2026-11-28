@@ -73,6 +73,12 @@ public sealed class AddIpsas24BudgetExecutionActuals : Migration
         migrationBuilder.Sql("""
 CREATE OR REPLACE FUNCTION apex_guard_budget_execution_actual() RETURNS trigger AS $ipsas_actual$
 BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW."Status" <> 0 OR NEW."CertifiedBy" IS NOT NULL OR NEW."CertifiedAt" IS NOT NULL THEN
+            RAISE EXCEPTION 'Budget execution actuals must be inserted as uncertified drafts.' USING ERRCODE = 'restrict_violation';
+        END IF;
+        RETURN NEW;
+    END IF;
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'Budget execution actual evidence is immutable; a controlled reversal workflow is required.' USING ERRCODE = 'restrict_violation';
     END IF;
@@ -95,7 +101,7 @@ BEGIN
 END;
 $ipsas_actual$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_budget_execution_actual_immutable
-    BEFORE UPDATE OR DELETE ON "PublicSectorBudgetExecutionActuals"
+    BEFORE INSERT OR UPDATE OR DELETE ON "PublicSectorBudgetExecutionActuals"
     FOR EACH ROW EXECUTE FUNCTION apex_guard_budget_execution_actual();
 """);
     }
