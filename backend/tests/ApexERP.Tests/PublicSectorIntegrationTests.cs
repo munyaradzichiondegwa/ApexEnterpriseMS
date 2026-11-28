@@ -563,6 +563,48 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
+        public async Task Ipsas24_budget_versions_are_isolated_by_company()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyA = Guid.NewGuid();
+            var companyB = Guid.NewGuid();
+            await using (var seed = db.NewContext(companyA))
+            {
+                seed.Companies.AddRange(
+                    new Company { Id = companyA, Name = "MDA A", BaseCurrency = "USD", FunctionalCurrency = "USD" },
+                    new Company { Id = companyB, Name = "MDA B", BaseCurrency = "USD", FunctionalCurrency = "USD" });
+                seed.PublicSectorBudgetVersions.AddRange(
+                    new PublicSectorBudgetVersion
+                    {
+                        CompanyId = companyA, FinancialYear = 2026, VersionNumber = 1,
+                        Kind = PublicSectorBudgetVersionKind.Original, Status = PublicSectorBudgetVersionStatus.Approved,
+                        Currency = "USD", AccountingBasis = AccountingBasis.Accrual,
+                        ClassificationBasis = "A", EntityScope = "MDA A",
+                        PeriodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                        PeriodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                        AuthorityReference = "A-APPROPRIATION"
+                    },
+                    new PublicSectorBudgetVersion
+                    {
+                        CompanyId = companyB, FinancialYear = 2026, VersionNumber = 1,
+                        Kind = PublicSectorBudgetVersionKind.Original, Status = PublicSectorBudgetVersionStatus.Approved,
+                        Currency = "USD", AccountingBasis = AccountingBasis.Accrual,
+                        ClassificationBasis = "B", EntityScope = "MDA B",
+                        PeriodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                        PeriodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                        AuthorityReference = "B-APPROPRIATION"
+                    });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var companyAContext = db.NewContext(companyA);
+            var visible = await companyAContext.PublicSectorBudgetVersions.ToListAsync();
+            var onlyVersion = Assert.Single(visible);
+            Assert.Equal(companyA, onlyVersion.CompanyId);
+            Assert.Equal("A-APPROPRIATION", onlyVersion.AuthorityReference);
+        }
+
+        [PostgresFact]
         public async Task Ipsas24_comparison_preserves_original_final_and_comparable_actuals_including_added_lines()
         {
             await using var db = await TestDb.CreateAsync();
