@@ -1,3 +1,5 @@
+using ApexERP.Domain.Entities;
+
 namespace ApexERP.Application.Services;
 
 /// <summary>
@@ -6,27 +8,6 @@ namespace ApexERP.Application.Services;
 /// This calculates withholding at a Zimbabwe intermediary; it does not create a
 /// separate customer surcharge or replace the supplier's VAT return.
 /// </summary>
-public enum ZimbabweDigitalServiceKind
-{
-    ElectronicService,
-    PhysicalGoods,
-    NonElectronicImportedService,
-    LocalService
-}
-
-public enum ZimbabweSupplierVatStatus
-{
-    NotRegistered,
-    Registered
-}
-
-public enum ZimbabweDigitalPaymentRoute
-{
-    ZimbabweIntermediary,
-    PaidOutsideZimbabwe,
-    LocalPayment
-}
-
 public sealed record ZimbabweDigitalServicesTaxRequest(
     decimal GrossPaymentAmount,
     ZimbabweDigitalServiceKind ServiceKind,
