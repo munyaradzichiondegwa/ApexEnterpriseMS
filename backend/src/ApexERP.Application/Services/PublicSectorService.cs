@@ -374,6 +374,7 @@ namespace ApexERP.Application.Services
                     x.StatementPeriodEnd == report.StatementPeriodEnd &&
                     x.StatementEntityScope == report.FinancialStatementEntityScope &&
                     x.Type == type && x.StatementSection == section &&
+                    x.SourceFingerprint == candidate.SourceFingerprint &&
                     x.Status != PublicSectorBudgetReconciliationStatus.Rejected, token))
                     throw new InvalidOperationException("An active reconciliation already exists for this calculated type, section, budget version and statement scope.");
 
@@ -1991,8 +1992,11 @@ namespace ApexERP.Application.Services
                         x.SourceDate, x.SourceAmount, x.Amount, x.ExchangeRateToBudgetCurrency,
                         x.Status, x.ReversalOfId, x.CertifiedBy, x.CertifiedAt
                     }).ToListAsync(ct);
-                var budgetScopeKeys = final!.Lines.Select(x => (x.FundCentreId, x.CostCentreId)).ToHashSet();
-                var budgetLineKeys = final.Lines.Select(x => (x.FundCentreId, x.GlAccountId, x.CostCentreId)).ToHashSet();
+                // Original and final approved dimensions both belong to the budget comparison.
+                // A dimension removed from the final budget remains in the comparable subset.
+                var comparisonBudgetLines = original.Lines.Concat(final!.Lines).ToList();
+                var budgetScopeKeys = comparisonBudgetLines.Select(x => (x.FundCentreId, x.CostCentreId)).ToHashSet();
+                var budgetLineKeys = comparisonBudgetLines.Select(x => (x.FundCentreId, x.GlAccountId, x.CostCentreId)).ToHashSet();
                 var budgetPeriodRows = glRows.Where(x => x.EntryDate >= original.PeriodStart && x.EntryDate < original.PeriodEnd).ToList();
                 var statementPeriodRows = glRows.Where(x => x.EntryDate >= statementPeriodStart && x.EntryDate < statementPeriodEnd).ToList();
                 var budgetedRows = budgetPeriodRows.Where(x => x.FundCentreId.HasValue &&
@@ -2033,7 +2037,7 @@ namespace ApexERP.Application.Services
                     .AppendJoin(';', final.Lines.OrderBy(x => x.Id).Select(x =>
                         $"{x.Id:N}:{x.FundCentreId:N}:{x.GlAccountId:N}:{x.CostCentreId?.ToString("N") ?? "none"}:{x.Amount}")).Append('|')
                     .AppendJoin(';', glRows.OrderBy(x => x.Id).Select(x =>
-                        $"{x.Id:N}:{x.GlAccountId:N}:{x.FundCentreId?.ToString("N") ?? "none"}:{x.CostCentreId?.ToString("N") ?? "none"}:{x.EntryDate:O}:{x.BaseDebit}:{x.BaseCredit}")).Append('|')
+                        $"{x.Id:N}:{x.GlAccountId:N}:{x.AccountType}:{x.FundCentreId?.ToString("N") ?? "none"}:{x.CostCentreId?.ToString("N") ?? "none"}:{x.EntryDate:O}:{x.BaseDebit}:{x.BaseCredit}")).Append('|')
                     .AppendJoin(';', cashActualsByBudgetLine.OrderBy(x => x.Key).Select(x => $"{x.Key:N}:{x.Value}")).Append('|')
                     .AppendJoin(';', cashActualFingerprintRows.OrderBy(x => x.Id).Select(x =>
                         $"{x.Id:N}:{x.BudgetVersionLineId:N}:{x.SourceKind}:{x.SourceRecordId:N}:{x.SourceReference}:{x.SourceDate:O}:{x.SourceAmount}:{x.Amount}:{x.ExchangeRateToBudgetCurrency}:{x.Status}:{x.ReversalOfId?.ToString("N") ?? "none"}:{x.CertifiedBy?.ToString("N") ?? "none"}:{x.CertifiedAt:O}"))
