@@ -4253,6 +4253,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
                                 "(\"IsNoDifferenceAttestation\" = TRUE AND \"RevenueAmount\" = 0 AND \"ExpenseAmount\" = 0 AND \"OperatingAmount\" = 0 AND \"InvestingAmount\" = 0 AND \"FinancingAmount\" = 0) OR (\"IsNoDifferenceAttestation\" = FALSE AND (\"RevenueAmount\" <> 0 OR \"ExpenseAmount\" <> 0 OR \"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0))");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetRecon_StatementPeriod", "\"StatementPeriodStart\" IS NULL OR \"StatementPeriodEnd\" IS NULL OR \"StatementPeriodEnd\" > \"StatementPeriodStart\"");
                         });
                 });
 
