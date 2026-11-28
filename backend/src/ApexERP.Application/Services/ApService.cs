@@ -319,7 +319,8 @@ namespace ApexERP.Application.Services
 
         public async Task<ApPayment> PayAndAllocateAsync(Guid companyId, Guid supplierId, DateTime paymentDate,
             string currency, decimal amount, PaymentMethod method, Guid bankGlAccountId, Guid apControlAccountId,
-            Dictionary<Guid, decimal> allocations, CancellationToken ct = default)
+            Dictionary<Guid, decimal> allocations, CancellationToken ct = default,
+            IReadOnlyCollection<SettlementComponentInput>? componentAllocations = null)
         {
             if (allocations.Values.Sum() > amount)
                 throw new InvalidOperationException("Total allocated amount exceeds the payment amount.");
@@ -345,7 +346,9 @@ namespace ApexERP.Application.Services
 
                 invoice.Outstanding -= appliedAmount;
                 invoice.Status = invoice.Outstanding == 0 ? InvoiceStatus.Paid : InvoiceStatus.Partial;
-                payment.Allocations.Add(new ApPaymentAllocation { ApInvoiceId = invoiceId, AmountApplied = appliedAmount });
+                var parentAllocation = new ApPaymentAllocation { ApInvoiceId = invoiceId, AmountApplied = appliedAmount };
+                payment.Allocations.Add(parentAllocation);
+                await AddSettlementComponentsAsync(companyId, invoice, parentAllocation.Id, appliedAmount, componentAllocations, ct);
             }
 
             var je = await _gl.PostAsync(companyId, paymentDate, JournalSource.AP, $"Payment {paymentNo}", paymentNo,
@@ -359,6 +362,63 @@ namespace ApexERP.Application.Services
             _db.ApPayments.Add(payment);
             await _db.SaveChangesAsync(ct);
             return payment;
+        }
+
+
+        private async Task AddSettlementComponentsAsync(Guid companyId, ApInvoice invoice, Guid allocationId,
+            decimal appliedAmount, IReadOnlyCollection<SettlementComponentInput>? requested, CancellationToken ct)
+        {
+            var invoiceLines = await _db.ApInvoiceLines.Where(x => x.ApInvoiceId == invoice.Id).ToListAsync(ct);
+            var taxComponents = await _db.InvoiceTaxComponents.Where(x => x.CompanyId == companyId &&
+                x.InvoiceKind == "AP" && x.InvoiceId == invoice.Id).ToListAsync(ct);
+            var details = requested?.Where(x => x.InvoiceId == invoice.Id).ToList();
+            if (details == null || details.Count == 0)
+            {
+                if (invoice.VatAmount != 0m || invoice.WhtAmount != 0m)
+                    throw new InvalidOperationException("VAT/WHT-bearing AP payments require explicit settlement allocations. WHT is a separate liability and must not be treated as supplier cash.");
+                if (appliedAmount < invoice.Total && invoiceLines.Select(x => (x.GlAccountId, x.CostCentreId)).Distinct().Count() > 1)
+                    throw new InvalidOperationException("A partial AP settlement across multiple dimensions requires explicit settlement component allocations.");
+                if (invoiceLines.Count == 0 || invoiceLines.Sum(x => x.LineSubtotal) != invoice.Total)
+                    throw new InvalidOperationException("Tax-free AP invoice lines must reconcile to the invoice total before automatic settlement allocation.");
+                details = invoiceLines.Select(x => new SettlementComponentInput(invoice.Id, x.Id, null,
+                    appliedAmount == invoice.Total ? x.LineSubtotal : appliedAmount)).ToList();
+            }
+            if (details.Any(x => x.AmountApplied <= 0m || x.InvoiceLineId.HasValue == x.TaxComponentId.HasValue) ||
+                details.Sum(x => x.AmountApplied) != appliedAmount ||
+                details.Select(x => (x.InvoiceLineId, x.TaxComponentId)).Distinct().Count() != details.Count)
+                throw new InvalidOperationException("AP settlement component allocations must be positive, unique and sum exactly to the supplier cash payment allocation.");
+
+            foreach (var detail in details)
+            {
+                if (detail.InvoiceLineId.HasValue)
+                {
+                    var sourceLine = invoiceLines.SingleOrDefault(x => x.Id == detail.InvoiceLineId.Value)
+                        ?? throw new InvalidOperationException("An AP settlement line must belong to the allocated invoice.");
+                    var prior = await _db.SettlementComponentAllocations.Where(x => x.CompanyId == companyId &&
+                        x.SettlementKind == "AP" && x.InvoiceLineId == sourceLine.Id).SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
+                    if (prior + details.Where(x => x.InvoiceLineId == sourceLine.Id).Sum(x => x.AmountApplied) > sourceLine.LineSubtotal)
+                        throw new InvalidOperationException("AP settlements cannot allocate more than the posted expense/asset invoice-line amount.");
+                }
+                else
+                {
+                    var tax = taxComponents.SingleOrDefault(x => x.Id == detail.TaxComponentId.Value)
+                        ?? throw new InvalidOperationException("An AP settlement tax component must belong to the allocated invoice.");
+                    if (tax.TaxType != TaxType.VAT)
+                        throw new InvalidOperationException("WHT is not supplier cash. WHT settlement to the tax authority must be captured from its own bank/payment evidence.");
+                    var prior = await _db.SettlementComponentAllocations.Where(x => x.CompanyId == companyId &&
+                        x.SettlementKind == "AP" && x.TaxComponentId == tax.Id).SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
+                    if (prior + details.Where(x => x.TaxComponentId == tax.Id).Sum(x => x.AmountApplied) > tax.Amount)
+                        throw new InvalidOperationException("AP settlements cannot allocate more than the posted VAT input component amount.");
+                }
+                _db.SettlementComponentAllocations.Add(new SettlementComponentAllocation
+                {
+                    CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = allocationId,
+                    InvoiceId = invoice.Id,
+                    ComponentKind = detail.InvoiceLineId.HasValue ? SettlementComponentKind.InvoiceLine : SettlementComponentKind.TaxComponent,
+                    InvoiceLineId = detail.InvoiceLineId, TaxComponentId = detail.TaxComponentId,
+                    AmountApplied = detail.AmountApplied
+                });
+            }
         }
 
         /// <summary>AP ageing analysis: buckets outstanding invoice balances into current/30/60/90+ days.</summary>
