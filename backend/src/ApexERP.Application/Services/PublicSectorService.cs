@@ -2409,8 +2409,12 @@ namespace ApexERP.Application.Services
                 _db.PublicSectorCashSourceSubmissions.Any(submission =>
                     submission.Id == line.CashSourceSubmissionId && submission.CompanyId == companyId &&
                     submission.BudgetVersionId == version.Id && submission.Status != "Rejected" &&
-                    submission.RecordLevelStatus != "Rejected"), ct))
-                throw new InvalidOperationException("This source record has already been reconciled or excluded. A reviewed source mapping cannot be bypassed by creating a later budget actual.");
+                    submission.RecordLevelStatus != "Rejected" &&
+                    submission.SubmissionRevision == _db.PublicSectorCashSourceSubmissions
+                        .Where(latest => latest.CompanyId == companyId &&
+                            latest.ExpectedCashSourceId == submission.ExpectedCashSourceId)
+                        .Max(latest => latest.SubmissionRevision)), ct))
+                throw new InvalidOperationException("This source record has already been reconciled or excluded in the latest active source revision. Complete a replacement source revision before creating a new actual.");
             if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction && existingSourceAllocations.Count > 0)
                 throw new InvalidOperationException("A bank transaction is captured once against its exact posted journal classification; only AR/AP invoice settlements support split source allocation.");
             if (existingSourceAllocations.Any(x => x.BudgetVersionLineId == line.Id))
