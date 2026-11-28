@@ -4222,6 +4222,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
                     b.Property<Guid>("CompanyId").HasColumnType("uuid");
                     b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<Guid?>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<DateTime?>("StatementPeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("StatementPeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<string>("StatementEntityScope").HasColumnType("text");
+                    b.Property<string>("SourceFingerprint").HasMaxLength(128).HasColumnType("character varying(128)");
+                    b.Property<DateTime?>("CalculatedAt").HasColumnType("timestamp with time zone");
                     b.Property<int>("Type").HasColumnType("integer");
                     b.Property<string>("Description").IsRequired().HasColumnType("text");
                     b.Property<string>("StatementSection").IsRequired().HasColumnType("text");
@@ -4241,8 +4247,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
-                    b.HasIndex("CompanyId", "FinancialYear", "Type", "Description")
-                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetRecon_Description");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "StatementPeriodStart", "StatementPeriodEnd", "Type", "Description")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetRecon_ScopeDescription");
                     b.ToTable("PublicSectorBudgetReconciliations", t =>
                         {
                             t.HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
