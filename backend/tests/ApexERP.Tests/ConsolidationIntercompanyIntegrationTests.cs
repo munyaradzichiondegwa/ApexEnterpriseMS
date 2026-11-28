@@ -284,4 +284,51 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         Assert.Contains("Intercompany Buyer", error.Message);
     }
 
+    [PostgresFact]
+    public async Task Unmatched_and_unlinked_intercompany_transactions_are_reported_without_pnl_elimination()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var group = await SeedGroupAsync(db, 100m);
+
+        await using (var source = db.NewContext(group.CompanyAId, tenantId: group.TenantId))
+        {
+            source.IntercompanyTransactions.AddRange(
+                new IntercompanyTransaction
+                {
+                    CompanyId = group.CompanyAId,
+                    FromCompanyId = group.CompanyAId,
+                    ToCompanyId = group.CompanyBId,
+                    TransactionDate = new DateTime(2026, 1, 15),
+                    Description = "Unmatched intercompany transaction",
+                    Amount = 100m,
+                    Currency = "USD",
+                    Status = IntercompanyStatus.Unmatched
+                },
+                new IntercompanyTransaction
+                {
+                    CompanyId = group.CompanyAId,
+                    FromCompanyId = group.CompanyAId,
+                    ToCompanyId = group.CompanyBId,
+                    TransactionDate = new DateTime(2026, 1, 16),
+                    Description = "Matched status without journal links",
+                    Amount = 75m,
+                    Currency = "USD",
+                    Status = IntercompanyStatus.Matched,
+                    SourceJournalEntryId = Guid.NewGuid()
+                });
+            await source.SaveChangesAsync();
+        }
+
+        await using var ctx = db.NewContext(group.ParentId, tenantId: group.TenantId);
+        var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
+        var result = await service.ConsolidateAsync(group.ParentId, new DateTime(2026, 1, 31));
+
+        var transactionExceptions = result.IntercompanyExceptions
+            .Where(x => x.AccountCode.StartsWith("IC-TXN-")).ToList();
+        Assert.Equal(2, transactionExceptions.Count);
+        Assert.Contains(transactionExceptions, x => x.Reason.Contains("unmatched"));
+        Assert.Contains(transactionExceptions, x => x.Reason.Contains("missing its source/mirror"));
+        Assert.Equal(100m, result.TotalEliminations);
+    }
+
 }
