@@ -679,7 +679,7 @@ namespace ApexERP.Tests
                     new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 120m),
                     new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 70m),
                     new PublicSectorService.BudgetVersionLineInput(fundCentreId, addedExpenseId, null, "New Programme Expense", "EC-02", 30m)
-                }, Guid.NewGuid());
+                }, Guid.NewGuid(), default, PublicSectorBudgetAmendmentNature.Mixed);
             revised.Status = PublicSectorBudgetVersionStatus.Approved;
             revised.ApprovedBy = Guid.NewGuid();
             revised.ApprovedAt = DateTime.UtcNow;
