@@ -2965,9 +2965,54 @@ namespace ApexERP.Application.Services
                 .OrderBy(x => x.EffectiveDate).ThenBy(x => x.SourceReference).ToListAsync(ct);
         }
 
+        private async Task<bool> HasValidBudgetActualFxProvenanceAsync(
+            Guid companyId, PublicSectorBudgetExecutionActual actual, CancellationToken ct)
+        {
+            if (actual.SourceAmount <= 0m || actual.ExchangeRateToBudgetCurrency <= 0m ||
+                decimal.Round(actual.SourceAmount * actual.ExchangeRateToBudgetCurrency, 6,
+                    MidpointRounding.AwayFromZero) != actual.Amount)
+                return false;
+
+            var budgetCurrency = await _db.PublicSectorBudgetVersions.Where(x =>
+                x.Id == actual.BudgetVersionId && x.CompanyId == companyId)
+                .Select(x => x.Currency).FirstOrDefaultAsync(ct);
+            if (string.IsNullOrWhiteSpace(budgetCurrency)) return false;
+            budgetCurrency = budgetCurrency.Trim().ToUpperInvariant();
+
+            if (string.Equals(actual.Currency, budgetCurrency, StringComparison.OrdinalIgnoreCase))
+                return actual.ExchangeRateToBudgetCurrency == 1m &&
+                    !actual.ExchangeRateIsInverse &&
+                    actual.ExchangeRateDate?.Date == actual.SourceDate.Date &&
+                    string.Equals(actual.ExchangeRateSource, "IDENTITY", StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(actual.ExchangeRateSourceReference);
+
+            if (!actual.ExchangeRateDate.HasValue ||
+                string.IsNullOrWhiteSpace(actual.ExchangeRateSource) ||
+                string.IsNullOrWhiteSpace(actual.ExchangeRateSourceReference) ||
+                string.Equals(actual.ExchangeRateSource, "IDENTITY", StringComparison.OrdinalIgnoreCase) ||
+                actual.ExchangeRateDate.Value.Date > actual.SourceDate.Date)
+                return false;
+
+            var fromCurrency = actual.ExchangeRateIsInverse ? budgetCurrency : actual.Currency;
+            var toCurrency = actual.ExchangeRateIsInverse ? actual.Currency : budgetCurrency;
+            var rate = await _db.ExchangeRates.FirstOrDefaultAsync(x =>
+                x.CompanyId == companyId &&
+                x.FromCurrency.ToUpper() == fromCurrency.ToUpper() &&
+                x.ToCurrency.ToUpper() == toCurrency.ToUpper() &&
+                x.RateDate.Date == actual.ExchangeRateDate.Value.Date &&
+                x.RateSource == actual.ExchangeRateSource &&
+                x.SourceReference == actual.ExchangeRateSourceReference &&
+                x.Rate > 0m, ct);
+            if (rate == null) return false;
+            var effectiveRate = actual.ExchangeRateIsInverse ? 1m / rate.Rate : rate.Rate;
+            return effectiveRate == actual.ExchangeRateToBudgetCurrency;
+        }
+
         public async Task<bool> IsCertifiedCashActualSourceValidAsync(
             Guid companyId, PublicSectorBudgetExecutionActual actual, CancellationToken ct)
         {
+            if (!await HasValidBudgetActualFxProvenanceAsync(companyId, actual, ct))
+                return false;
             var isReceipt = actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt;
             if (actual.EventKind != PublicSectorBudgetActualEventKind.CashReceipt &&
                 actual.EventKind != PublicSectorBudgetActualEventKind.CashPayment)
@@ -3119,7 +3164,7 @@ namespace ApexERP.Application.Services
                     if (expense != postedLineAmount) return false;
                     expectedAllocation += lineAmount;
                 }
-                if (expectedAllocation != actual.Amount || actual.CostCentreId.HasValue) return false;
+                if (expectedAllocation != actual.SourceAmount || actual.CostCentreId.HasValue) return false;
                 var paymentBankCandidates = await _db.BankAccounts.Where(x =>
                     x.CompanyId == companyId && x.Currency == actual.Currency &&
                     _db.JournalLines.Any(j => j.JournalEntryId == payment.JournalEntryId.Value &&
