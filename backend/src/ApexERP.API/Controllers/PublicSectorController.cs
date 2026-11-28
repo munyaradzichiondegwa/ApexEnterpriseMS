@@ -151,13 +151,9 @@ namespace ApexERP.API.Controllers
                 return BadRequest(new { error = "An independent approver must finalise a submitted mapping." });
             var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x => x.Id == mapping.ApprovalWorkflowId &&
                 x.CompanyId == CompanyId, ct);
-            if (workflow?.Status != WorkflowStatus.Approved)
-                return BadRequest(new { error = "The linked approval workflow is not approved." });
-            var overlap = await _db.TaxAccountMappings.AnyAsync(x => x.CompanyId == CompanyId && x.Id != id &&
-                x.Purpose == mapping.Purpose && x.TaxCodeId == mapping.TaxCodeId &&
-                x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom < (mapping.EffectiveTo ?? DateTime.MaxValue) &&
-                (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > mapping.EffectiveFrom), ct);
-            if (overlap) return BadRequest(new { error = "An approved mapping already covers part of this effective period. Close the prior mapping before approval." });
+            if (workflow?.Status != WorkflowStatus.Approved || workflow.RequestType != "Ipsas24TaxAccountMapping" ||
+                workflow.ReferenceId != mapping.Id || workflow.SubmittedBy != mapping.SubmittedBy)
+                return BadRequest(new { error = "The linked independent approval workflow is not approved for this mapping." });
             mapping.Status = TaxConfigurationStatus.Approved;
             mapping.ApprovedBy = UserId;
             mapping.ApprovedAt = DateTime.UtcNow;
@@ -235,13 +231,9 @@ namespace ApexERP.API.Controllers
                 return BadRequest(new { error = "An independent approver must finalise a submitted policy." });
             var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x => x.Id == policy.ApprovalWorkflowId &&
                 x.CompanyId == CompanyId, ct);
-            if (workflow?.Status != WorkflowStatus.Approved)
-                return BadRequest(new { error = "The linked approval workflow is not approved." });
-            var overlap = await _db.PublicSectorTaxBudgetPolicies.AnyAsync(x => x.CompanyId == CompanyId && x.Id != id &&
-                x.TaxType == policy.TaxType && x.TaxCodeId == policy.TaxCodeId &&
-                x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom < (policy.EffectiveTo ?? DateTime.MaxValue) &&
-                (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > policy.EffectiveFrom), ct);
-            if (overlap) return BadRequest(new { error = "An approved tax budget policy already covers part of this effective period." });
+            if (workflow?.Status != WorkflowStatus.Approved || workflow.RequestType != "Ipsas24TaxBudgetPolicy" ||
+                workflow.ReferenceId != policy.Id || workflow.SubmittedBy != policy.SubmittedBy)
+                return BadRequest(new { error = "The linked independent approval workflow is not approved for this policy." });
             policy.Status = TaxConfigurationStatus.Approved;
             policy.ApprovedBy = UserId;
             policy.ApprovedAt = DateTime.UtcNow;
