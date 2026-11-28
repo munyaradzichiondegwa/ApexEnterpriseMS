@@ -1009,6 +1009,13 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("An approved budget version is required.");
             if (version.AccountingBasis != AccountingBasis.Cash)
                 throw new InvalidOperationException("This capture endpoint is restricted to approved cash-basis budgets. Modified-cash treatment must be explicitly configured before it can be enabled.");
+            var latestApprovedVersionId = await _db.PublicSectorBudgetVersions.Where(x =>
+                    x.CompanyId == companyId && x.FinancialYear == version.FinancialYear &&
+                    x.Status == PublicSectorBudgetVersionStatus.Approved && x.AccountingBasis == AccountingBasis.Cash)
+                .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber)
+                .Select(x => x.Id).FirstAsync(ct);
+            if (latestApprovedVersionId != version.Id)
+                throw new InvalidOperationException("Cash actuals must be mapped to the latest approved budget version. Complete and approve the final revision before capturing execution actuals.");
             var line = await _db.PublicSectorBudgetVersionLines.FirstOrDefaultAsync(x =>
                 x.Id == budgetVersionLineId && x.BudgetVersionId == version.Id &&
                 x.CompanyId == companyId, ct)
