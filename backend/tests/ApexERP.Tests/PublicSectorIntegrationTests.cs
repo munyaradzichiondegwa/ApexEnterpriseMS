@@ -1249,6 +1249,13 @@ namespace ApexERP.Tests
                     JournalEntryId = journalId, GlAccountId = accountId, FundCentreId = fundCentreId,
                     Debit = 75m, Credit = 0m, BaseDebit = 75m, BaseCredit = 0m
                 });
+                seed.SettlementComponentAllocations.AddRange(
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AR", SettlementAllocationId = arReceiptAllocation1Id, InvoiceId = arInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = arLine1Id, AmountApplied = 60m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AR", SettlementAllocationId = arReceiptAllocation1Id, InvoiceId = arInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = arLine2Id, AmountApplied = 40m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AR", SettlementAllocationId = arReceiptAllocation2Id, InvoiceId = arInvoice2Id, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = arInvoice2LineId, AmountApplied = 30m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = apPaymentAllocation1Id, InvoiceId = apInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = apLine1Id, AmountApplied = 120m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = apPaymentAllocation1Id, InvoiceId = apInvoiceId, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = apLine2Id, AmountApplied = 80m },
+                    new SettlementComponentAllocation { CompanyId = companyId, SettlementKind = "AP", SettlementAllocationId = apPaymentAllocation2Id, InvoiceId = apInvoice2Id, ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = apInvoice2LineId, AmountApplied = 60m });
                 var version = new PublicSectorBudgetVersion
                 {
                     Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
@@ -1597,7 +1604,17 @@ namespace ApexERP.Tests
             var arInvoiceId = Guid.NewGuid();
             var arInvoice2Id = Guid.NewGuid();
             var arReceiptId = Guid.NewGuid();
+            var arReceiptAllocation1Id = Guid.NewGuid();
+            var arReceiptAllocation2Id = Guid.NewGuid();
+            var arLine1Id = Guid.NewGuid();
+            var arLine2Id = Guid.NewGuid();
+            var arInvoice2LineId = Guid.NewGuid();
             var apInvoiceId = Guid.NewGuid();
+            var apPaymentAllocation1Id = Guid.NewGuid();
+            var apPaymentAllocation2Id = Guid.NewGuid();
+            var apLine1Id = Guid.NewGuid();
+            var apLine2Id = Guid.NewGuid();
+            var apInvoice2LineId = Guid.NewGuid();
             var apInvoice2Id = Guid.NewGuid();
             var apPaymentId = Guid.NewGuid();
             var budgetVersionId = Guid.NewGuid();
@@ -1711,8 +1728,8 @@ namespace ApexERP.Tests
                     Status = InvoiceStatus.Paid, JournalEntryId = arInvoiceJournalId, FundCentreId = fundCentreId,
                     Lines = new List<ArInvoiceLine>
                     {
-                        new() { ArInvoiceId = arInvoiceId, Description = "Service", Quantity = 1m, UnitPrice = 60m, LineSubtotal = 60m, LineVat = 0m, LineTotal = 60m, GlAccountId = revenueGlId, CostCentreId = costCentreId },
-                        new() { ArInvoiceId = arInvoiceId, Description = "Other service", Quantity = 1m, UnitPrice = 40m, LineSubtotal = 40m, LineVat = 0m, LineTotal = 40m, GlAccountId = revenueGl2Id }
+                        new() { Id = arLine1Id, ArInvoiceId = arInvoiceId, Description = "Service", Quantity = 1m, UnitPrice = 60m, LineSubtotal = 60m, LineVat = 0m, LineTotal = 60m, GlAccountId = revenueGlId, CostCentreId = costCentreId },
+                        new() { Id = arLine2Id, ArInvoiceId = arInvoiceId, Description = "Other service", Quantity = 1m, UnitPrice = 40m, LineSubtotal = 40m, LineVat = 0m, LineTotal = 40m, GlAccountId = revenueGl2Id }
                     }
                 });
                 seed.ArInvoices.Add(new ArInvoice
@@ -1723,7 +1740,7 @@ namespace ApexERP.Tests
                     Status = InvoiceStatus.Partial, JournalEntryId = arInvoice2JournalId, FundCentreId = fundCentreId,
                     Lines = new List<ArInvoiceLine>
                     {
-                        new() { ArInvoiceId = arInvoice2Id, Description = "Additional service", Quantity = 1m, UnitPrice = 60m, LineSubtotal = 60m, LineVat = 0m, LineTotal = 60m, GlAccountId = revenueGl2Id }
+                        new() { Id = arInvoice2LineId, ArInvoiceId = arInvoice2Id, Description = "Additional service", Quantity = 1m, UnitPrice = 60m, LineSubtotal = 60m, LineVat = 0m, LineTotal = 60m, GlAccountId = revenueGl2Id }
                     }
                 });
                 seed.ArReceipts.Add(new ArReceipt
@@ -1733,8 +1750,8 @@ namespace ApexERP.Tests
                     Amount = 130m, JournalEntryId = arReceiptJournalId,
                     Allocations = new List<ArReceiptAllocation>
                     {
-                        new() { ArReceiptId = arReceiptId, ArInvoiceId = arInvoiceId, AmountApplied = 100m },
-                        new() { ArReceiptId = arReceiptId, ArInvoiceId = arInvoice2Id, AmountApplied = 30m }
+                        new() { Id = arReceiptAllocation1Id, ArReceiptId = arReceiptId, ArInvoiceId = arInvoiceId, AmountApplied = 100m },
+                        new() { Id = arReceiptAllocation2Id, ArReceiptId = arReceiptId, ArInvoiceId = arInvoice2Id, AmountApplied = 30m }
                     }
                 });
                 seed.ApInvoices.Add(new ApInvoice
@@ -1745,8 +1762,8 @@ namespace ApexERP.Tests
                     Status = InvoiceStatus.Paid, JournalEntryId = apInvoiceJournalId, FundCentreId = fundCentreId,
                     Lines = new List<ApInvoiceLine>
                     {
-                        new() { ApInvoiceId = apInvoiceId, Description = "Supplies", Quantity = 1m, UnitCost = 120m, LineSubtotal = 120m, LineVat = 0m, LineTotal = 120m, GlAccountId = expenseGlId, CostCentreId = costCentreId },
-                        new() { ApInvoiceId = apInvoiceId, Description = "Other supplies", Quantity = 1m, UnitCost = 80m, LineSubtotal = 80m, LineVat = 0m, LineTotal = 80m, GlAccountId = expenseGl2Id }
+                        new() { Id = apLine1Id, ApInvoiceId = apInvoiceId, Description = "Supplies", Quantity = 1m, UnitCost = 120m, LineSubtotal = 120m, LineVat = 0m, LineTotal = 120m, GlAccountId = expenseGlId, CostCentreId = costCentreId },
+                        new() { Id = apLine2Id, ApInvoiceId = apInvoiceId, Description = "Other supplies", Quantity = 1m, UnitCost = 80m, LineSubtotal = 80m, LineVat = 0m, LineTotal = 80m, GlAccountId = expenseGl2Id }
                     }
                 });
                 seed.ApInvoices.Add(new ApInvoice
@@ -1757,7 +1774,7 @@ namespace ApexERP.Tests
                     Status = InvoiceStatus.Partial, JournalEntryId = apInvoice2JournalId, FundCentreId = fundCentreId,
                     Lines = new List<ApInvoiceLine>
                     {
-                        new() { ApInvoiceId = apInvoice2Id, Description = "Other supplies", Quantity = 1m, UnitCost = 120m, LineSubtotal = 120m, LineVat = 0m, LineTotal = 120m, GlAccountId = expenseGl2Id }
+                        new() { Id = apInvoice2LineId, ApInvoiceId = apInvoice2Id, Description = "Other supplies", Quantity = 1m, UnitCost = 120m, LineSubtotal = 120m, LineVat = 0m, LineTotal = 120m, GlAccountId = expenseGl2Id }
                     }
                 });
                 seed.ApPayments.Add(new ApPayment
@@ -1768,8 +1785,8 @@ namespace ApexERP.Tests
                     PreparedBy = preparerId, AuthorisedBy = certifierId, AuthorisedAt = DateTime.UtcNow,
                     Allocations = new List<ApPaymentAllocation>
                     {
-                        new() { ApPaymentId = apPaymentId, ApInvoiceId = apInvoiceId, AmountApplied = 200m },
-                        new() { ApPaymentId = apPaymentId, ApInvoiceId = apInvoice2Id, AmountApplied = 60m }
+                        new() { Id = apPaymentAllocation1Id, ApPaymentId = apPaymentId, ApInvoiceId = apInvoiceId, AmountApplied = 200m },
+                        new() { Id = apPaymentAllocation2Id, ApPaymentId = apPaymentId, ApInvoiceId = apInvoice2Id, AmountApplied = 60m }
                     }
                 });
                 var version = new PublicSectorBudgetVersion
