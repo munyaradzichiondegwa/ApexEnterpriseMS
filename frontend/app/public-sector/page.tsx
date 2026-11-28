@@ -848,9 +848,9 @@ export default function PublicSectorPage() {
                 <div>
                   <h3 className="font-semibold mb-2">Reconciliation to financial statements</h3>
                   <table className="table-base">
-                    <thead><tr><th>Difference type</th><th>Description</th><th>Statement section</th><th className="text-right">Operating</th><th className="text-right">Investing</th><th className="text-right">Financing</th></tr></thead>
+                    <thead><tr><th>Difference type</th><th>Description</th><th>Statement section</th><th className="text-right">Revenue</th><th className="text-right">Expense</th><th className="text-right">Operating</th><th className="text-right">Investing</th><th className="text-right">Financing</th></tr></thead>
                     <tbody>{budgetComparison.reconciliations.map((item: any) => (
-                      <tr key={item.id}><td>{item.type}</td><td>{item.description}</td><td>{item.statementSection}</td><td className="text-right">{fmt(item.operatingAmount)}</td><td className="text-right">{fmt(item.investingAmount)}</td><td className="text-right">{fmt(item.financingAmount)}</td></tr>
+                      <tr key={item.id}><td>{item.type}</td><td>{item.description}</td><td>{item.statementSection}</td><td className="text-right">{fmt(item.revenueAmount)}</td><td className="text-right">{fmt(item.expenseAmount)}</td><td className="text-right">{fmt(item.operatingAmount)}</td><td className="text-right">{fmt(item.investingAmount)}</td><td className="text-right">{fmt(item.financingAmount)}</td></tr>
                     ))}</tbody>
                   </table>
                 </div>
