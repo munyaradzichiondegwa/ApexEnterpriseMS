@@ -1967,6 +1967,9 @@ namespace ApexERP.Tests
             var budgetVersionId = Guid.NewGuid();
             var bankAccountId = Guid.NewGuid();
             var bankGlId = Guid.NewGuid();
+            var expenseGlId = Guid.NewGuid();
+            var payableGlId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
             var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
@@ -1988,6 +1991,19 @@ namespace ApexERP.Tests
                     Id = bankAccountId, CompanyId = companyId, Name = "Operating account",
                     AccountNo = "ZERO-OPERATING-01", BankName = "Test Bank",
                     Currency = "USD", GlAccountId = bankGlId
+                });
+                seed.GlAccounts.AddRange(
+                    new GlAccount { Id = expenseGlId, CompanyId = companyId, Code = "6000",
+                        Name = "Accrued operating expense", Type = GlAccountType.Expense,
+                        CashFlowCategory = CashFlowCategory.NotApplicable },
+                    new GlAccount { Id = payableGlId, CompanyId = companyId, Code = "2000",
+                        Name = "Accrued operating payable", Type = GlAccountType.Liability,
+                        CashFlowCategory = CashFlowCategory.Operating });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, PeriodNo = 6,
+                    StartDate = new DateTime(2026, 6, 1), EndDate = new DateTime(2026, 7, 1),
+                    Status = PeriodStatus.Open
                 });
                 seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
                 {
@@ -2103,9 +2119,24 @@ namespace ApexERP.Tests
             var pendingInvesting = await PrepareCashFlowAdjustmentAsync("Investing", "WP-CASHFLOW-INVESTING-NIL");
             Assert.Equal(PublicSectorBudgetReconciliationStatus.PendingApproval, pendingInvesting.Status);
 
-            // Even when population completeness remains true, changing the supporting
-            // register attestation after calculation invalidates the prepared fingerprint.
-            registerAttestation.EvidenceReference = "Changed after cash-flow reconciliation preparation";
+            // A non-cash accrual changes the statement-of-cash-flows calculation without
+            // changing the registered cash source population. Its changed statement detail
+            // must still invalidate the prepared fingerprint.
+            var nonCashJournal = new JournalEntry
+            {
+                CompanyId = companyId, EntryNo = "JE-IPSAS24-NONCASH-ACCRUAL",
+                Description = "Accrued operating cost with no cash settlement",
+                EntryDate = new DateTime(2026, 6, 30), PeriodId = periodId,
+                Source = JournalSource.Manual, Status = JournalStatus.Posted
+            };
+            ctx.JournalEntries.Add(nonCashJournal);
+            ctx.JournalLines.AddRange(
+                new JournalLine { JournalEntryId = nonCashJournal.Id, GlAccountId = expenseGlId,
+                    Debit = 10m, Credit = 0m, Currency = "USD", ExchangeRate = 1m,
+                    BaseDebit = 10m, BaseCredit = 0m },
+                new JournalLine { JournalEntryId = nonCashJournal.Id, GlAccountId = payableGlId,
+                    Debit = 0m, Credit = 10m, Currency = "USD", ExchangeRate = 1m,
+                    BaseDebit = 0m, BaseCredit = 10m });
             await ctx.SaveChangesAsync();
             var changedEvidence = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.FinaliseBudgetReconciliationApprovalAsync(companyId, pendingInvesting.Id, certifierId));
