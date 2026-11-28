@@ -679,9 +679,9 @@ namespace ApexERP.Tests
                 "Supplementary funding and reprioritisation approved.",
                 new[]
                 {
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 120m),
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 70m),
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, addedExpenseId, null, "New Programme Expense", "EC-02", 30m)
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 120m, "Note 12"),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 70m, "Note 13"),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, addedExpenseId, null, "New Programme Expense", "EC-02", 30m, "Note 14")
                 }, Guid.NewGuid(), default, PublicSectorBudgetAmendmentNature.Mixed);
             revised.Status = PublicSectorBudgetVersionStatus.Approved;
             revised.ApprovedBy = Guid.NewGuid();
@@ -727,6 +727,7 @@ namespace ApexERP.Tests
             Assert.Equal(120m, expense.FinalBudget);
             Assert.Equal(60m, expense.ActualOnComparableBasis);
             Assert.Equal(60m, expense.Variance);
+            Assert.Equal("Note 12", expense.NoteReference);
             var income = Assert.Single(report.Lines, x => x.AccountCode == "4100");
             Assert.Equal(20m, income.ActualOnComparableBasis);
             var added = Assert.Single(report.Lines, x => x.AccountCode == "5200");
@@ -749,7 +750,7 @@ namespace ApexERP.Tests
             var varianceExplanation = await service.CreateBudgetVarianceExplanationAsync(
                 companyId, revised.Id, expense.BudgetVersionLineId,
                 "Actual expenditure was below the final appropriation because two planned service contracts commenced in the next quarter.",
-                "WP-IPSAS24-VARIANCE-5100", preparerId);
+                "WP-IPSAS24-VARIANCE-5100", preparerId, default, "Comment 12");
             await service.SubmitBudgetVarianceExplanationAsync(companyId, varianceExplanation.Id, preparerId);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.ReviewBudgetVarianceExplanationAsync(companyId, varianceExplanation.Id,
@@ -758,6 +759,7 @@ namespace ApexERP.Tests
                 companyId, varianceExplanation.Id, approverId, true,
                 "Explanation and supporting workpaper reviewed.");
             Assert.Equal("Approved", approvedVariance.Status);
+            Assert.Equal("Comment 12", approvedVariance.CommentReference);
             foreach (var remainingVariance in report.Lines.Where(x =>
                 x.Variance.HasValue && x.Variance.Value != 0m &&
                 x.BudgetVersionLineId != expense.BudgetVersionLineId))
