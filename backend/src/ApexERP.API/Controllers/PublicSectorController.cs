@@ -809,7 +809,10 @@ namespace ApexERP.API.Controllers
                     "PublicSector", nameof(BudgetStatementIssueDocument), id,
                     new { Status = document.Status, document.SnapshotSha256 },
                     new { changed.Status, changed.ReviewedBy, changed.ApprovedBy, changed.IssuedBy,
-                        changed.ReviewedAt, changed.ApprovedAt, changed.IssuedAt });
+                        changed.ReviewedAt, changed.ApprovedAt, changed.IssuedAt,
+                        changed.TemplateVerificationReference, changed.ReviewerNote,
+                        changed.ApprovalReference, changed.ApproverNote,
+                        changed.PublicationReference, changed.PublisherNote });
                 await _db.SaveChangesAsync(token);
                 return changed;
             }, ct);
