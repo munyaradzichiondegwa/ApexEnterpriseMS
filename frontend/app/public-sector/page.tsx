@@ -58,17 +58,17 @@ export default function PublicSectorPage() {
   function exportBudgetComparison() {
     if (!budgetComparison) return;
     downloadCsv(`apexerp-ipsas24-budget-comparison-${year}`, budgetComparison.lines, [
-      { key: "classificationCode", label: "Classification" },
-      { key: "fundCentreCode", label: "Fund Centre Code" },
-      { key: "fundCentreName", label: "Fund Centre" },
-      { key: "accountCode", label: "GL Account Code" },
-      { key: "accountName", label: "GL Account" },
-      { key: "originalBudget", label: "Original Budget" },
-      { key: "finalBudget", label: "Final Budget" },
-      { key: "actualOnComparableBasis", label: "Actual on Comparable Basis" },
-      { key: "variance", label: "Variance" },
-      { key: "variancePercent", label: "Variance Percent" },
-      { key: "originalToFinalExplanation", label: "Explanation" },
+      { header: "Classification", value: (row: any) => row.classificationCode },
+      { header: "Fund Centre Code", value: (row: any) => row.fundCentreCode },
+      { header: "Fund Centre", value: (row: any) => row.fundCentreName },
+      { header: "GL Account Code", value: (row: any) => row.accountCode },
+      { header: "GL Account", value: (row: any) => row.accountName },
+      { header: "Original Budget", value: (row: any) => row.originalBudget },
+      { header: "Final Budget", value: (row: any) => row.finalBudget },
+      { header: "Actual on Comparable Basis", value: (row: any) => row.actualOnComparableBasis },
+      { header: "Variance", value: (row: any) => row.variance },
+      { header: "Variance Percent", value: (row: any) => row.variancePercent },
+      { header: "Explanation", value: (row: any) => row.originalToFinalExplanation },
     ]);
   }
 
