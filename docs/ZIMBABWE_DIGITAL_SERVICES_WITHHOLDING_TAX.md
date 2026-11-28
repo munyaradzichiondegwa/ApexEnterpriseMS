@@ -103,3 +103,27 @@ This is not a blanket accounting conclusion for every contractual arrangement. I
 - Confirm the approved TaRMS filing evidence and acknowledgement procedure, reconcile the generated return against the live TaRMS form, and approve the tax certificate numbering policy.
 - Any exceptional gross-up or separate-debit accounting policy and related control-account mapping.
 - Tax counsel review of legal incidence versus commercial pass-through/gross-up.
+
+
+## Electronic Commerce Operators' Tax — calculation implementation status
+
+The software now has a separate, pure calculation component for the 5% operator-level tax:
+- `ZimbabweElectronicCommerceTaxEvaluator` calculates 5% of the qualifying gross revenue supplied to it, only for a foreign-domiciled electronic commerce operator or satellite broadcasting service, Zimbabwe-resident customer, and revenue dated on or after 1 January 2026.
+- It applies no minimum revenue threshold from 1 January 2026, rejects negative revenue and invalid currency identifiers, and returns the foreign operator as statutory taxpayer.
+- It does not add a customer invoice surcharge, withhold from supplier remittance, create a GL posting, or claim to file a ZIMRA return.
+- `ZimbabweElectronicCommerceTaxCalendar` separates the statutory section 12A quarterly revenue windows and tax-payment dates from the prescribed electronic-commerce return due dates.
+
+Quarter windows implemented (start inclusive, end exclusive):
+
+| Tax quarter | Revenue window | Tax payment due | Return due |
+|---|---|---|---|
+| Q1 | 1 December previous year – 1 March | 25 March | 5 April |
+| Q2 | 1 March – 1 June | 25 June | 5 July |
+| Q3 | 1 June – 1 September | 25 September | 5 October |
+| Q4 | 1 September – 1 December | 20 December | 5 January following year |
+
+The payment dates follow Income Tax Act section 12A(6); return dates follow Finance (Due Dates for Submission of Returns and References to the Zimbabwe Dollar) Regulations, 2025 (SI 81 of 2025). The quarter windows intentionally reflect the statutory December–February first quarter, not calendar quarters.
+
+**Still not implemented:** taxpayer registration and representative-taxpayer appointment evidence; a persisted revenue-source register with customer-residency and section 12 exclusion evidence; multi-currency source translation/approved exchange-rate provenance; approved operator-level gross-revenue completeness and reconciliation; return preparation and immutable versioning; tax payable ledger, payment allocation and reconciliation; penalties/interest; and direct or human-evidenced TaRMS filing. The calculator is an engineering component, not a production tax-compliance workflow. A tax specialist must approve the detailed treatment of source revenue and statutory exclusions before operational use.
+
+Legal basis: [Finance Act No. 7 of 2025, section 14](https://www.veritaszim.net/sites/veritas_d/files/Finance%20Act%2C%20Act%20No.%207%20of%202025.pdf) removes the former US$500,000 threshold from Income Tax Act section 12A with effect from 1 January 2026; [ZIMRA Finance Act / Charging Act materials](https://www.zimra.co.zw/legislation/category/17-acts?download=3977%3Afinance-act-chapter-2304) state the 5% rate in section 14(2)(k); [SI 81 of 2025](https://zimlii.org/akn/zw/act/si/2025/81/eng%402025-08-28/source.pdf) sets the electronic-commerce return due dates.
