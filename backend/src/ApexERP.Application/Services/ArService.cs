@@ -211,6 +211,11 @@ namespace ApexERP.Application.Services
             if (allocations.Values.Sum() > amount)
                 throw new InvalidOperationException("Total allocated amount exceeds the receipt amount.");
 
+            // Lock every affected invoice in deterministic order so concurrent partial receipts
+            // cannot consume the same remaining line/tax-component balance.
+            foreach (var invoiceId in allocations.Keys.OrderBy(x => x))
+                await _db.TryAcquireTransactionLockAsync($"ar-settlement:{companyId:N}:{invoiceId:N}", ct);
+
             var receiptNo = await GenerateNoAsync(companyId, "RCT", ct);
             var receipt = new ArReceipt
             {
