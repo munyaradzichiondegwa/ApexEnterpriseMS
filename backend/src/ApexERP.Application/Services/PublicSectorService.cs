@@ -58,7 +58,8 @@ namespace ApexERP.Application.Services
             decimal? FinancialStatementExpenseActual, bool ExpenseCovered);
         public sealed record BudgetComparisonReport(Guid OriginalBudgetVersionId, Guid? FinalBudgetVersionId,
             int FinancialYear, string Currency, string AccountingBasis, string ClassificationBasis,
-            string EntityScope, DateTime PeriodStart, DateTime PeriodEnd, bool FinalBudgetAvailable,
+            string EntityScope, string FinancialStatementEntityScope, DateTime PeriodStart, DateTime PeriodEnd,
+            DateTime StatementPeriodStart, DateTime StatementPeriodEnd, bool FinalBudgetAvailable,
             bool ComparableActualsAvailable, string ComparabilityMessage,
             IReadOnlyList<BudgetComparisonLine> Lines,
             IReadOnlyList<PublicSectorBudgetReconciliation> Reconciliations,
@@ -1408,7 +1409,8 @@ namespace ApexERP.Application.Services
         }
 
         public async Task<BudgetComparisonReport> GetBudgetComparisonAsync(Guid companyId, int financialYear,
-            CancellationToken ct = default)
+            CancellationToken ct = default, DateTime? financialStatementPeriodStart = null,
+            DateTime? financialStatementPeriodEnd = null, string? financialStatementEntityScope = null)
         {
             if (financialYear < 2000 || financialYear > 2200)
                 throw new InvalidOperationException("A valid financial year is required.");
@@ -1424,12 +1426,20 @@ namespace ApexERP.Application.Services
             // Where no revised budget was approved, the final budget is the original budget.
             // A draft/unapproved revision never displaces the last legally approved budget.
             final ??= original;
+            var statementPeriodStart = financialStatementPeriodStart ?? original.PeriodStart;
+            var statementPeriodEnd = financialStatementPeriodEnd ?? original.PeriodEnd;
+            if (statementPeriodStart >= statementPeriodEnd)
+                throw new InvalidOperationException("A valid financial-statement reporting period is required.");
 
             // Company is tenant-filtered by CurrentTenantId. Resolve the selected company explicitly
             // because this service already receives the authenticated CompanyId; PostgreSQL RLS remains active.
             var companyProfile = await _db.Companies.IgnoreQueryFilters().Where(x => x.Id == companyId)
                 .Select(x => new { x.Name, x.FunctionalCurrency }).FirstOrDefaultAsync(ct);
+            var statementEntityScope = string.IsNullOrWhiteSpace(financialStatementEntityScope)
+                ? companyProfile?.Name ?? string.Empty : financialStatementEntityScope.Trim();
             var comparabilityIssues = new List<string>();
+            if (companyProfile != null && !string.Equals(statementEntityScope, companyProfile.Name, StringComparison.OrdinalIgnoreCase))
+                comparabilityIssues.Add("The financial-statement entity scope must match the registered company because no external entity ledger adapter is registered.");
             var cashActualsByBudgetLine = new Dictionary<Guid, decimal>();
             var usesZfrmClassification =
                 original.ClassificationBasis.Contains("ZFRM", StringComparison.OrdinalIgnoreCase) ||
@@ -1664,8 +1674,9 @@ namespace ApexERP.Application.Services
                 comparabilityIssues.Add("The registered company profile could not be resolved.");
             else
             {
-                if (!string.Equals(original.EntityScope.Trim(), companyProfile.Name.Trim(), StringComparison.OrdinalIgnoreCase))
-                    comparabilityIssues.Add("The budget entity scope does not exactly match the registered company name.");
+                // Budget EntityScope may describe a subset of the registered entity. The approved
+                // Fund Centre/Cost Centre dimensions define that subset and are reconciled to the
+                // full registered financial-statement entity below.
                 if (!string.Equals(original.Currency, companyProfile.FunctionalCurrency, StringComparison.OrdinalIgnoreCase))
                     comparabilityIssues.Add("The budget currency does not match the company's functional currency.");
             }
@@ -1804,8 +1815,11 @@ namespace ApexERP.Application.Services
             }
 
             var reconciliations = await _db.PublicSectorBudgetReconciliations
-                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear && x.Status == PublicSectorBudgetReconciliationStatus.Approved)
-                .OrderBy(x => x.Type).ThenBy(x => x.Description).ToListAsync(ct);
+                .Where(x => x.CompanyId == companyId && x.BudgetVersionId == final!.Id &&
+                    x.StatementPeriodStart == statementPeriodStart && x.StatementPeriodEnd == statementPeriodEnd &&
+                    x.StatementEntityScope == statementEntityScope &&
+                    x.Status == PublicSectorBudgetReconciliationStatus.Approved)
+                .OrderBy(x => x.Type).ThenBy(x => x.StatementSection).ThenBy(x => x.Description).ToListAsync(ct);
             var varianceExplanations = await _db.PublicSectorBudgetVarianceExplanations
                 .Where(x => x.CompanyId == companyId && x.BudgetVersionId == final!.Id)
                 .OrderBy(x => x.CreatedAt).ToListAsync(ct);
@@ -1859,7 +1873,8 @@ namespace ApexERP.Application.Services
 
             return new BudgetComparisonReport(original.Id, final.Id, financialYear, original.Currency,
                 original.AccountingBasis.ToString(), original.ClassificationBasis, original.EntityScope,
-                original.PeriodStart, original.PeriodEnd, true, comparable,
+                statementEntityScope, original.PeriodStart, original.PeriodEnd,
+                statementPeriodStart, statementPeriodEnd, true, comparable,
                 comparabilityMessage, rows, reconciliations, varianceExplanations, explanationComplete,
                 originalToFinalExplanationsComplete, financialStatementReconciliation);
         }
