@@ -123,6 +123,27 @@ namespace ApexERP.Domain.Entities
         public Guid? ReviewedBy { get; set; }
         public DateTime? ReviewedAt { get; set; }
         public string? ReviewNote { get; set; }
+        // Separate transaction-level reconciliation lifecycle; source control totals above remain immutable.
+        public string RecordLevelStatus { get; set; } = "NotStarted";
+        public Guid? RecordLevelSubmittedBy { get; set; }
+        public DateTime? RecordLevelSubmittedAt { get; set; }
+        public Guid? RecordLevelReviewedBy { get; set; }
+        public DateTime? RecordLevelReviewedAt { get; set; }
+        public string? RecordLevelReviewNote { get; set; }
+    }
+
+    /// <summary>One source transaction-to-budget-actual allocation, or a single reason-coded exclusion.
+    /// Multiple rows may share a source record key when one receipt/payment is split across budget lines.</summary>
+    public class PublicSectorCashSourceReconciliationLine : TenantEntity
+    {
+        public Guid CashSourceSubmissionId { get; set; }
+        public Guid SourceRecordId { get; set; }
+        public string SourceReference { get; set; } = string.Empty;
+        public decimal SourceAmount { get; set; }
+        public Guid? BudgetExecutionActualId { get; set; }
+        public decimal AllocatedAmount { get; set; }
+        public bool IsExcluded { get; set; }
+        public string? ExclusionReason { get; set; }
     }
 
     /// <summary>
