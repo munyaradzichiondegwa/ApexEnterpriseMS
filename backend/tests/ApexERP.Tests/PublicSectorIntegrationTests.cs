@@ -1727,6 +1727,20 @@ namespace ApexERP.Tests
             Assert.Equal("Reviewed", reviewedReconciliation.RecordLevelStatus);
             Assert.Equal(reconciliationReviewerId, reviewedReconciliation.RecordLevelReviewedBy);
 
+            var registerAttestation = await service.CreateExpectedCashSourceRegisterAttestationAsync(
+                companyId, budgetVersionId, 1, "Expected Source MDA",
+                "Signed management bank-account inventory", preparerId);
+            Assert.Equal("Draft", registerAttestation.Status);
+            await service.SubmitExpectedCashSourceRegisterAttestationAsync(companyId, registerAttestation.Id, preparerId);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ReviewExpectedCashSourceRegisterAttestationAsync(companyId, registerAttestation.Id,
+                    preparerId, true, null));
+            var registerCertified = await service.ReviewExpectedCashSourceRegisterAttestationAsync(
+                companyId, registerAttestation.Id, Guid.NewGuid(), true,
+                "Register completeness independently checked against the signed inventory.");
+            Assert.Equal("Certified", registerCertified.Status);
+            Assert.NotNull(registerCertified.CertifiedAt);
+
             // Database triggers protect both approved register history and independently reviewed controls.
             reviewed.ControlTotal = 999999m;
             await Assert.ThrowsAsync<DbUpdateException>(() => ctx.SaveChangesAsync());
@@ -1735,6 +1749,12 @@ namespace ApexERP.Tests
             var immutableSource = await immutableContext.PublicSectorExpectedCashSources.SingleAsync(x => x.Id == approved.Id);
             immutableSource.SourceName = "Silently altered account";
             await Assert.ThrowsAsync<DbUpdateException>(() => immutableContext.SaveChangesAsync());
+
+            await using var frozenContext = db.NewContext(companyId);
+            var frozenService = new PublicSectorService(frozenContext, new AuditService(frozenContext));
+            await Assert.ThrowsAsync<DbUpdateException>(() => frozenService.CreateExpectedCashSourceAsync(
+                companyId, budgetVersionId, "BankAccount", "BANK-SECONDARY-01",
+                "Secondary account", null, true, periodStart, periodEnd, preparerId));
         }
     }
 }
