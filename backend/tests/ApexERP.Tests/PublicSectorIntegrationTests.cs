@@ -1556,6 +1556,7 @@ namespace ApexERP.Tests
             Assert.Equal(0, certified.ObservedBankTransactionCount);
             Assert.Equal(0, certified.ObservedArReceiptCount);
             Assert.Equal(0, certified.ObservedApPaymentCount);
+            Assert.True(await service.HasValidCertifiedZeroActivityAttestationAsync(companyId, budgetVersionId));
 
             var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
