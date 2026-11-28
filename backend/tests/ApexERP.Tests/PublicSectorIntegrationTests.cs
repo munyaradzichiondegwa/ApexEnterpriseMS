@@ -1136,8 +1136,10 @@ namespace ApexERP.Tests
             var bankAccountId = Guid.NewGuid();
             var periodId = Guid.NewGuid();
             var journalId = Guid.NewGuid();
+            var excludedJournalId = Guid.NewGuid();
             var bankTransactionId = Guid.NewGuid();
             var unmappedBankTransactionId = Guid.NewGuid();
+            var lateBankTransactionId = Guid.NewGuid();
             var budgetVersionId = Guid.NewGuid();
             var budgetLineId = Guid.NewGuid();
             var preparerId = Guid.NewGuid();
@@ -1174,12 +1176,19 @@ namespace ApexERP.Tests
                     EndDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
                     Status = PeriodStatus.Open
                 });
-                seed.JournalEntries.Add(new JournalEntry
-                {
-                    Id = journalId, CompanyId = companyId, EntryNo = "JE-CASH-ACT",
-                    Description = "Reconciled cash execution", EntryDate = effectiveDate,
-                    PeriodId = periodId, Source = JournalSource.Bank, Status = JournalStatus.Posted
-                });
+                seed.JournalEntries.AddRange(
+                    new JournalEntry
+                    {
+                        Id = journalId, CompanyId = companyId, EntryNo = "JE-CASH-ACT",
+                        Description = "Reconciled cash execution", EntryDate = effectiveDate,
+                        PeriodId = periodId, Source = JournalSource.Bank, Status = JournalStatus.Posted
+                    },
+                    new JournalEntry
+                    {
+                        Id = excludedJournalId, CompanyId = companyId, EntryNo = "JE-CASH-EXCLUDED",
+                        Description = "Separately identified bank charge", EntryDate = effectiveDate,
+                        PeriodId = periodId, Source = JournalSource.Bank, Status = JournalStatus.Posted
+                    });
                 seed.BankTransactions.Add(new BankTransaction
                 {
                     Id = bankTransactionId, CompanyId = companyId, BankAccountId = bankAccountId,
@@ -1190,10 +1199,10 @@ namespace ApexERP.Tests
                 seed.BankTransactions.Add(new BankTransaction
                 {
                     Id = unmappedBankTransactionId, CompanyId = companyId, BankAccountId = bankAccountId,
-                    TransactionDate = new DateTime(2025, 6, 30, 0, 0, 0, DateTimeKind.Utc),
-                    Description = "Unmapped bank movement",
+                    TransactionDate = effectiveDate,
+                    Description = "Bank charge excluded from budget actual allocation",
                     Debit = 25m, Credit = 0m, Reference = "BANK-REF-002",
-                    IsReconciled = true, JournalEntryId = null
+                    IsReconciled = true, JournalEntryId = excludedJournalId
                 });
                 seed.JournalLines.Add(new JournalLine
                 {
@@ -1256,12 +1265,16 @@ namespace ApexERP.Tests
             await service.SubmitExpectedCashSourceAsync(companyId, expectedSource.Id, preparerId);
             await service.ApproveExpectedCashSourceAsync(companyId, expectedSource.Id, sourceReviewerId);
             var submission = await service.CreateCashSourceSubmissionAsync(companyId, expectedSource.Id,
-                1, 75m, 1000m, 925m, "USD", "Operating bank statement and reconciliation", preparerId);
+                2, 100m, 1000m, 900m, "USD", "Operating bank statement and reconciliation", preparerId);
             await service.SubmitCashSourceSubmissionAsync(companyId, submission.Id, preparerId);
             await service.ReviewCashSourceSubmissionAsync(companyId, submission.Id, sourceReviewerId,
                 true, "Statement control total independently confirmed.");
             await service.AddCashSourceReconciliationLineAsync(companyId, submission.Id,
                 bankTransactionId, "BANK-REF-001", certified.Id, false, null, reconciliationPreparerId);
+            await service.AddCashSourceReconciliationLineAsync(companyId, submission.Id,
+                unmappedBankTransactionId, "BANK-REF-002", null, true,
+                "Separately identified bank charge excluded from this budget line under the approved classification workpaper.",
+                reconciliationPreparerId);
             await service.SubmitCashSourceRecordReconciliationAsync(companyId, submission.Id,
                 reconciliationPreparerId);
             await service.ReviewCashSourceRecordReconciliationAsync(companyId, submission.Id,
@@ -1281,10 +1294,15 @@ namespace ApexERP.Tests
             var comparisonLine = Assert.Single(comparison.Lines);
             Assert.Equal(75m, comparisonLine.ActualOnComparableBasis);
 
-            // An unlinked bank statement movement inside the budget period must block
-            // comparability rather than disappear from the source-coverage denominator.
-            var unlinkedMovement = await ctx.BankTransactions.SingleAsync(x => x.Id == unmappedBankTransactionId);
-            unlinkedMovement.TransactionDate = effectiveDate;
+            // A new, unlinked bank movement after certification must block comparability;
+            // the earlier independently reviewed exclusion remains a valid covered source row.
+            ctx.BankTransactions.Add(new BankTransaction
+            {
+                Id = lateBankTransactionId, CompanyId = companyId, BankAccountId = bankAccountId,
+                TransactionDate = effectiveDate, Description = "Late unreconciled bank movement",
+                Debit = 15m, Credit = 0m, Reference = "BANK-REF-003",
+                IsReconciled = false, JournalEntryId = null
+            });
             await ctx.SaveChangesAsync();
             var incompleteComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.False(incompleteComparison.ComparableActualsAvailable);
