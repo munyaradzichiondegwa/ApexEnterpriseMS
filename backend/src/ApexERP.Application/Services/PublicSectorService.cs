@@ -43,10 +43,12 @@ namespace ApexERP.Application.Services
 
 
         public sealed record BudgetVersionLineInput(Guid FundCentreId, Guid GlAccountId, Guid? CostCentreId,
-            string Description, string ClassificationCode, decimal Amount, string? NoteReference = null);
+            string Description, string ClassificationCode, decimal Amount, string? NoteReference = null,
+            string? TreasuryClassificationCode = null);
         public sealed record BudgetComparisonLine(int LineNumber, string Description, string FundCentreCode,
             string FundCentreName, string FundCentreLevel, string CostCentreCode, string CostCentreName,
-            string AccountCode, string AccountName, string ClassificationCode, string? NoteReference,
+            string AccountCode, string AccountName, string ClassificationCode,
+            string? TreasuryClassificationCode, string? NoteReference,
             decimal OriginalBudget, decimal? FinalBudget, decimal? ActualOnComparableBasis,
             decimal? Variance, decimal? VariancePercent, string? OriginalToFinalExplanation,
             Guid BudgetVersionLineId);
@@ -79,7 +81,10 @@ namespace ApexERP.Application.Services
             if (kind == PublicSectorBudgetVersionKind.Original && amendmentNature.HasValue)
                 throw new InvalidOperationException("An original budget cannot carry an amendment nature.");
             if (lines.Any(x => x.Amount < 0 || string.IsNullOrWhiteSpace(x.Description) || string.IsNullOrWhiteSpace(x.ClassificationCode)))
-                throw new InvalidOperationException("Budget lines require non-negative amounts, descriptions and classification codes.");
+                throw new InvalidOperationException("Budget lines require non-negative amounts, descriptions and GL SubType classification codes.");
+            var requiresTreasuryClassification = classificationBasis.Contains("ZFRM", StringComparison.OrdinalIgnoreCase);
+            if (requiresTreasuryClassification && lines.Any(x => string.IsNullOrWhiteSpace(x.TreasuryClassificationCode)))
+                throw new InvalidOperationException("A ZFRM Appendix 5 Treasury classification is required for every budget line.");
 
             var originalExists = await _db.PublicSectorBudgetVersions.AnyAsync(x =>
                 x.CompanyId == companyId && x.FinancialYear == financialYear &&
@@ -135,6 +140,8 @@ namespace ApexERP.Application.Services
                     CompanyId = companyId, FundCentreId = line.FundCentreId, GlAccountId = line.GlAccountId,
                     CostCentreId = line.CostCentreId, LineNumber = index + 1, Description = line.Description.Trim(),
                     ClassificationCode = line.ClassificationCode.Trim(),
+                    TreasuryClassificationCode = string.IsNullOrWhiteSpace(line.TreasuryClassificationCode)
+                        ? null : line.TreasuryClassificationCode.Trim(),
                     NoteReference = string.IsNullOrWhiteSpace(line.NoteReference) ? null : line.NoteReference.Trim(),
                     Amount = line.Amount, CreatedBy = actorId
                 }).ToList()
@@ -1611,6 +1618,7 @@ namespace ApexERP.Application.Services
                     line.Description, fund.Code, fund.Name, fund.Level.ToString(),
                     costCentre?.Code ?? string.Empty, costCentre?.Name ?? string.Empty,
                     account.Code, account.Name, line.ClassificationCode,
+                    dimension.FinalLine != null ? dimension.FinalLine.TreasuryClassificationCode : dimension.OriginalLine?.TreasuryClassificationCode,
                     dimension.FinalLine != null ? dimension.FinalLine.NoteReference : dimension.OriginalLine?.NoteReference,
                     originalAmount, finalAmount, actual, variance,
                     actual.HasValue && finalAmount != 0m
