@@ -15,6 +15,10 @@ export default function PublicSectorPage() {
   const [batches, setBatches] = useState<any[]>([]);
   const [budgetComparison, setBudgetComparison] = useState<any | null>(null);
   const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);
+  const [approvedBudgetVersions, setApprovedBudgetVersions] = useState<any[]>([]);
+  const [budgetExecutionActuals, setBudgetExecutionActuals] = useState<any[]>([]);
+  const [cashBankTransactions, setCashBankTransactions] = useState<any[]>([]);
+  const [cashActualDraft, setCashActualDraft] = useState({ budgetVersionId: "", budgetVersionLineId: "", sourceRecordId: "", eventKind: "CashPayment", effectiveDate: new Date().toISOString().slice(0, 10), cashFlowSection: "Operating" });
   const [budgetDraftId, setBudgetDraftId] = useState<string | null>(null);
   const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "" });
   const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", amount: 0 }]);
@@ -101,6 +105,56 @@ export default function PublicSectorPage() {
     }
   }
 
+  async function loadCashActuals() {
+    try {
+      const [versions, actuals, accounts] = await Promise.all([
+        api.get(`/public-sector/budget-versions/approved?year=${year}`),
+        api.get(`/public-sector/budget-execution-actuals?year=${year}`),
+        api.get("/cashbank/accounts"),
+      ]);
+      setApprovedBudgetVersions(versions.data.filter((v: any) => v.accountingBasis === "Cash"));
+      setBudgetExecutionActuals(actuals.data);
+      const accountTransactions = await Promise.all(accounts.data.map((account: any) =>
+        api.get(`/cashbank/accounts/${account.id}/transactions`).then((r) => r.data)
+      ));
+      setCashBankTransactions(accountTransactions.flat().filter((t: any) =>
+        t.isReconciled && t.journalEntryId && (Number(t.debit) > 0 || Number(t.credit) > 0)
+      ));
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    }
+  }
+
+  async function createCashActual(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api.post("/public-sector/budget-execution-actuals", {
+        ...cashActualDraft,
+        sourceKind: "BankTransaction",
+        effectiveDate: `${cashActualDraft.effectiveDate}T00:00:00.000Z`,
+      });
+      setMsg("Cash actual captured as a draft. Submit it for independent certification.");
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function submitCashActual(id: string) {
+    try {
+      await api.post(`/public-sector/budget-execution-actuals/${id}/submit`);
+      setMsg("Cash actual submitted for independent certification.");
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function certifyCashActual(id: string) {
+    try {
+      await api.post(`/public-sector/budget-execution-actuals/${id}/certify`);
+      setMsg("Cash actual certified.");
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
   async function createTender(e: React.FormEvent) {
     e.preventDefault();
     try {
@@ -123,7 +177,7 @@ export default function PublicSectorPage() {
         <button className={tab === "funds" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("funds")}>Fund Centres & Budget</button>
         <button className={tab === "tenders" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("tenders")}>E-Tendering</button>
         <button className={tab === "assets" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("assets")}>Asset Verification</button>
-        <button className={tab === "ipsas24" ? "btn-primary" : "btn-secondary"} onClick={() => { setTab("ipsas24"); loadBudgetComparison(); }}>IPSAS 24 Budget Statement</button>
+        <button className={tab === "ipsas24" ? "btn-primary" : "btn-secondary"} onClick={() => { setTab("ipsas24"); loadBudgetComparison(); loadCashActuals(); }}>IPSAS 24 Budget Statement</button>
       </div>
 
       {tab === "funds" && (
@@ -230,6 +284,71 @@ export default function PublicSectorPage() {
             </div>
             {budgetAccounts.length === 0 && <p className="text-xs text-amber-700">Configure active income and expense GL accounts before entering budget lines.</p>}
           </form>
+          <div className="border rounded-lg p-4 space-y-3">
+            <div>
+              <h3 className="font-semibold">Cash-basis budget execution actuals</h3>
+              <p className="text-xs text-slate-500">Only reconciled bank transactions linked to posted journals are selectable. The journal must match the selected budget line, Fund Centre and cost centre exactly. AR/AP settlement allocation capture and modified-cash commitments are not enabled yet.</p>
+            </div>
+            <form onSubmit={createCashActual} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="label">Approved cash budget</label>
+                <select className="input" required value={cashActualDraft.budgetVersionId} onChange={(e) => {
+                  const selected = approvedBudgetVersions.find((v: any) => v.id === e.target.value);
+                  setCashActualDraft({ ...cashActualDraft, budgetVersionId: e.target.value, budgetVersionLineId: selected?.lines?.[0]?.id ?? "" });
+                }}>
+                  <option value="">Select approved cash budget</option>
+                  {approvedBudgetVersions.map((v: any) => <option key={v.id} value={v.id}>{v.kind} v{v.versionNumber} · {v.currency} · {v.authorityReference}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Budget line</label>
+                <select className="input" required value={cashActualDraft.budgetVersionLineId} onChange={(e) => setCashActualDraft({ ...cashActualDraft, budgetVersionLineId: e.target.value })}>
+                  <option value="">Select budget line</option>
+                  {(approvedBudgetVersions.find((v: any) => v.id === cashActualDraft.budgetVersionId)?.lines ?? []).map((line: any) => <option key={line.id} value={line.id}>{line.description} · {line.classificationCode}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Reconciled bank transaction</label>
+                <select className="input" required value={cashActualDraft.sourceRecordId} onChange={(e) => setCashActualDraft({ ...cashActualDraft, sourceRecordId: e.target.value })}>
+                  <option value="">Select bank transaction</option>
+                  {cashBankTransactions.map((t: any) => <option key={t.id} value={t.id}>{t.reference || t.id} · {new Date(t.transactionDate).toLocaleDateString()} · debit {fmt(t.debit)} / credit {fmt(t.credit)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Cash event</label>
+                <select className="input" value={cashActualDraft.eventKind} onChange={(e) => setCashActualDraft({ ...cashActualDraft, eventKind: e.target.value })}>
+                  <option value="CashPayment">Cash payment</option><option value="CashReceipt">Cash receipt</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Statement of Cash Flows section</label>
+                <select className="input" value={cashActualDraft.cashFlowSection} onChange={(e) => setCashActualDraft({ ...cashActualDraft, cashFlowSection: e.target.value })}>
+                  <option value="Operating">Operating</option><option value="Investing">Investing</option><option value="Financing">Financing</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Budget effective date</label>
+                <input className="input" type="date" required value={cashActualDraft.effectiveDate} onChange={(e) => setCashActualDraft({ ...cashActualDraft, effectiveDate: e.target.value })} />
+              </div>
+              <div className="md:col-span-3"><button className="btn-primary" disabled={!approvedBudgetVersions.length || !cashBankTransactions.length}>Capture cash actual</button></div>
+            </form>
+            <div className="overflow-x-auto">
+              <table className="table-base">
+                <thead><tr><th>Source reference</th><th>Event</th><th>Effective date</th><th>Cash-flow section</th><th className="text-right">Amount</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
+                  {budgetExecutionActuals.map((actual: any) => (
+                    <tr key={actual.id}>
+                      <td className="font-mono">{actual.sourceReference}</td><td>{actual.eventKind}</td>
+                      <td>{new Date(actual.effectiveDate).toLocaleDateString()}</td><td>{actual.cashFlowSection}</td>
+                      <td className="text-right">{actual.currency} {fmt(actual.amount)}</td><td>{actual.status}</td>
+                      <td>{actual.status === "Draft" ? <button className="btn-secondary" onClick={() => submitCashActual(actual.id)}>Submit</button> : actual.status === "PendingCertification" ? <button className="btn-secondary" onClick={() => certifyCashActual(actual.id)}>Certify</button> : "—"}</td>
+                    </tr>
+                  ))}
+                  {budgetExecutionActuals.length === 0 && <tr><td colSpan={7} className="text-center text-slate-500">No cash actuals captured for this financial year.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
           {!budgetComparisonLoading && !budgetComparison && (
             <p className="text-sm text-slate-500">No comparison is available. An approved original budget version is required before the statement can be generated.</p>
           )}
