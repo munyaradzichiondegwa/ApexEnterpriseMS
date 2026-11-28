@@ -1427,7 +1427,7 @@ namespace ApexERP.Application.Services
             var comparable = comparabilityIssues.Count == 0;
             var comparabilityMessage = comparable
                 ? original.AccountingBasis == AccountingBasis.Cash
-                    ? "Cash-basis actuals are sourced from certified reconciled bank transactions mapped to the approved budget lines. Source coverage, entity, currency, classification and reporting period checks passed. Complete the separate Statement of Cash Flows reconciliation before statutory issue."
+                    ? "Cash-basis actuals are sourced from certified bank transactions, AR receipts and AP payments mapped to approved budget lines; independently reviewed exclusions account for out-of-budget source records. Source register completeness, live record populations, control totals, entity, currency, classification and reporting-period checks passed. Complete the separate Statement of Cash Flows reconciliation before statutory issue."
                     : "Accrual-basis ledger actuals are comparable because the budget basis, registered entity, functional currency, classification basis and reporting period agree."
                 : string.Join(" ", comparabilityIssues);
             var rows = new List<BudgetComparisonLine>();
