@@ -172,6 +172,9 @@ namespace ApexERP.Infrastructure.Data
         // Public Sector & Government
         public DbSet<FundCentre> FundCentres => Set<FundCentre>();
         public DbSet<PublicSectorBudgetAllocation> PublicSectorBudgetAllocations => Set<PublicSectorBudgetAllocation>();
+        public DbSet<PublicSectorBudgetVersion> PublicSectorBudgetVersions => Set<PublicSectorBudgetVersion>();
+        public DbSet<PublicSectorBudgetVersionLine> PublicSectorBudgetVersionLines => Set<PublicSectorBudgetVersionLine>();
+        public DbSet<PublicSectorBudgetReconciliation> PublicSectorBudgetReconciliations => Set<PublicSectorBudgetReconciliation>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
@@ -494,6 +497,9 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<NettingBatch>(modelBuilder);
             ApplyTenantFilter<FundCentre>(modelBuilder);
             ApplyTenantFilter<PublicSectorBudgetAllocation>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetVersion>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetVersionLine>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetReconciliation>(modelBuilder);
             ApplyTenantFilter<Commitment>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
@@ -618,6 +624,34 @@ namespace ApexERP.Infrastructure.Data
                 .HasDatabaseName("UX_PublicSectorBudgetAllocation_Unassigned");
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
                 .HasCheckConstraint("CK_PublicSectorBudgetAllocations_Amount", "\"Amount\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetVersion>()
+                .HasIndex(x => new { x.CompanyId, x.FinancialYear, x.Kind, x.VersionNumber }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorBudgetVersion_Sequence");
+            modelBuilder.Entity<PublicSectorBudgetVersion>()
+                .HasCheckConstraint("CK_PublicSectorBudgetVersion_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+            modelBuilder.Entity<PublicSectorBudgetVersion>()
+                .HasCheckConstraint("CK_PublicSectorBudgetVersion_Sequence", "\"VersionNumber\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetVersion>()
+                .HasOne<Company>().WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.LineNumber }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorBudgetVersionLine_Number");
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasCheckConstraint("CK_PublicSectorBudgetVersionLine_Amount", "\"Amount\" >= 0");
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany(x => x.Lines).HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasOne<CostCentre>().WithMany().HasForeignKey(x => x.CostCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetReconciliation>()
+                .HasIndex(x => new { x.CompanyId, x.FinancialYear, x.Type, x.Description }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorBudgetRecon_Description");
+            modelBuilder.Entity<PublicSectorBudgetReconciliation>()
+                .HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
+                    "\"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0");
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
                 .HasOne<FundCentre>().WithMany().HasForeignKey(a => a.FundCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
