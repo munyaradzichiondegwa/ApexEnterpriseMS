@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ApexERP.API.Controllers
 {
     public record CreateArInvoiceRequest(Guid CustomerId, DateTime InvoiceDate, string Currency, decimal ExchangeRate,
-        List<ArInvoiceLineRequest> Lines, Guid VatControlAccountId, Guid? GrantId);
+        List<ArInvoiceLineRequest> Lines, Guid VatControlAccountId, Guid? GrantId, Guid? FundCentreId = null);
     public record PostArInvoiceRequest(Guid ArControlAccountId, Guid VatOutputAccountId, bool FiscaliseWithFdms = false);
     public record ArReceiptRequest(Guid CustomerId, DateTime ReceiptDate, string Currency, decimal Amount,
         PaymentMethod Method, string? Reference, Guid BankGlAccountId, Guid ArControlAccountId, Dictionary<Guid, decimal> Allocations);
@@ -71,7 +71,7 @@ namespace ApexERP.API.Controllers
             try
             {
                 var invoice = await _ar.CreateInvoiceAsync(CompanyId, req.CustomerId, req.InvoiceDate, req.Currency,
-                    req.ExchangeRate, req.Lines, req.VatControlAccountId, req.GrantId);
+                    req.ExchangeRate, req.Lines, req.VatControlAccountId, req.GrantId, fundCentreId: req.FundCentreId);
                 return Ok(invoice);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
