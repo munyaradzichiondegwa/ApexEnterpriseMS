@@ -22,6 +22,7 @@ public sealed class AddIpsas24TaxAllocationControls : Migration
                 Id = table.Column<Guid>(type: "uuid", nullable: false),
                 CompanyId = table.Column<Guid>(type: "uuid", nullable: false),
                 TaxType = table.Column<int>(type: "integer", nullable: false),
+                Purpose = table.Column<string>(type: "text", nullable: false),
                 TaxCodeId = table.Column<Guid>(type: "uuid", nullable: true),
                 GlAccountId = table.Column<Guid>(type: "uuid", nullable: false),
                 VersionNumber = table.Column<int>(type: "integer", nullable: false),
@@ -137,7 +138,7 @@ public sealed class AddIpsas24TaxAllocationControls : Migration
                 table.CheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP')");
             });
 
-        migrationBuilder.CreateIndex(name: "IX_TaxAccountMappings_CompanyId_TaxType_TaxCodeId_VersionNumber",
+        migrationBuilder.CreateIndex(name: "IX_TaxAccountMappings_CompanyId_Purpose_TaxCodeId_VersionNumber",
             table: "TaxAccountMappings", columns: new[] { "CompanyId", "Purpose", "TaxCodeId", "VersionNumber" }, unique: true);
         migrationBuilder.CreateIndex(name: "IX_TaxAccountMappings_Effective", table: "TaxAccountMappings",
             columns: new[] { "CompanyId", "Purpose", "TaxCodeId", "EffectiveFrom", "EffectiveTo" });
