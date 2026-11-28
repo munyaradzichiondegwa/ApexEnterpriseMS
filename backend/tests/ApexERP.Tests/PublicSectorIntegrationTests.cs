@@ -744,6 +744,18 @@ namespace ApexERP.Tests
                 companyId, varianceExplanation.Id, approverId, true,
                 "Explanation and supporting workpaper reviewed.");
             Assert.Equal("Approved", approvedVariance.Status);
+            foreach (var remainingVariance in report.Lines.Where(x =>
+                x.Variance.HasValue && x.Variance.Value != 0m &&
+                x.BudgetVersionLineId != expense.BudgetVersionLineId))
+            {
+                var additionalExplanation = await service.CreateBudgetVarianceExplanationAsync(
+                    companyId, revised.Id, remainingVariance.BudgetVersionLineId,
+                    $"Actual activity differed from the final approved budget for {remainingVariance.AccountName}; the difference is supported by the period variance workpaper.",
+                    $"WP-IPSAS24-VARIANCE-{remainingVariance.AccountCode}", preparerId);
+                await service.SubmitBudgetVarianceExplanationAsync(companyId, additionalExplanation.Id, preparerId);
+                await service.ReviewBudgetVarianceExplanationAsync(companyId, additionalExplanation.Id,
+                    approverId, true, "Explanation and supporting workpaper reviewed.");
+            }
             var explainedReport = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(explainedReport.VarianceExplanationsComplete);
             Assert.Contains(explainedReport.VarianceExplanations, x => x.Id == varianceExplanation.Id);
