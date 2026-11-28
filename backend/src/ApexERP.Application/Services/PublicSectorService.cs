@@ -1951,30 +1951,58 @@ namespace ApexERP.Application.Services
                 }
             }
 
-            var revenueReconciliationRows = reconciliations.Where(x =>
-                string.Equals(x.StatementSection, "Revenue", StringComparison.OrdinalIgnoreCase)).ToList();
-            var expenseReconciliationRows = reconciliations.Where(x =>
-                string.Equals(x.StatementSection, "Expense", StringComparison.OrdinalIgnoreCase)).ToList();
-            var revenueHasAdjustment = revenueReconciliationRows.Any(x => x.RevenueAmount != 0m);
-            var expenseHasAdjustment = expenseReconciliationRows.Any(x => x.ExpenseAmount != 0m);
-            var revenueHasNoDifference = revenueReconciliationRows.Any(x => x.IsNoDifferenceAttestation);
-            var expenseHasNoDifference = expenseReconciliationRows.Any(x => x.IsNoDifferenceAttestation);
-            var revenueCovered = (revenueHasAdjustment || revenueHasNoDifference) &&
-                !(revenueHasAdjustment && revenueHasNoDifference);
-            var expenseCovered = (expenseHasAdjustment || expenseHasNoDifference) &&
-                !(expenseHasAdjustment && expenseHasNoDifference);
-            var revenueAdjustment = revenueReconciliationRows.Sum(x => x.RevenueAmount);
-            var expenseAdjustment = expenseReconciliationRows.Sum(x => x.ExpenseAmount);
-            var financialStatementReconciliationRequired = original.AccountingBasis == AccountingBasis.Cash;
+            bool CategoryCovered(PublicSectorBudgetReconciliationType type, string section)
+            {
+                var candidate = automaticReconciliationCandidates.SingleOrDefault(x =>
+                    x.Type == type && string.Equals(x.StatementSection, section, StringComparison.OrdinalIgnoreCase));
+                if (candidate == null) return false;
+                var rowsForCategory = reconciliations.Where(x => x.Type == type &&
+                    string.Equals(x.StatementSection, section, StringComparison.OrdinalIgnoreCase)).ToList();
+                var noDifferenceRows = rowsForCategory.Where(x => x.IsNoDifferenceAttestation).ToList();
+                var adjustmentRows = rowsForCategory.Where(x => !x.IsNoDifferenceAttestation).ToList();
+                if (candidate.ExpectedAdjustment == 0m)
+                    return noDifferenceRows.Count == 1 && adjustmentRows.Count == 0 &&
+                        noDifferenceRows[0].SourceFingerprint == candidate.SourceFingerprint;
+                if (noDifferenceRows.Count != 0 || adjustmentRows.Count == 0 ||
+                    adjustmentRows.Any(x => x.SourceFingerprint != candidate.SourceFingerprint))
+                    return false;
+                return section == "Revenue"
+                    ? adjustmentRows.All(x => x.ExpenseAmount == 0m && x.OperatingAmount == 0m &&
+                        x.InvestingAmount == 0m && x.FinancingAmount == 0m) &&
+                        adjustmentRows.Sum(x => x.RevenueAmount) == candidate.ExpectedAdjustment
+                    : adjustmentRows.All(x => x.RevenueAmount == 0m && x.OperatingAmount == 0m &&
+                        x.InvestingAmount == 0m && x.FinancingAmount == 0m) &&
+                        adjustmentRows.Sum(x => x.ExpenseAmount) == candidate.ExpectedAdjustment;
+            }
+
+            var reconciliationTypes = new[]
+            {
+                PublicSectorBudgetReconciliationType.Basis,
+                PublicSectorBudgetReconciliationType.Timing,
+                PublicSectorBudgetReconciliationType.Entity,
+                PublicSectorBudgetReconciliationType.Presentation
+            };
+            var revenueCovered = automaticReconciliationCandidates.Count == 8 &&
+                reconciliationTypes.All(type => CategoryCovered(type, "Revenue"));
+            var expenseCovered = automaticReconciliationCandidates.Count == 8 &&
+                reconciliationTypes.All(type => CategoryCovered(type, "Expense"));
+            var revenueAdjustment = automaticReconciliationCandidates
+                .Where(x => x.StatementSection == "Revenue").Sum(x => x.ExpectedAdjustment);
+            var expenseAdjustment = automaticReconciliationCandidates
+                .Where(x => x.StatementSection == "Expense").Sum(x => x.ExpectedAdjustment);
+            var scopeDifference = !string.Equals(original.EntityScope, statementEntityScope, StringComparison.OrdinalIgnoreCase);
+            var periodDifference = statementPeriodStart != original.PeriodStart || statementPeriodEnd != original.PeriodEnd;
+            var financialStatementReconciliationRequired = original.AccountingBasis == AccountingBasis.Cash ||
+                scopeDifference || periodDifference || automaticReconciliationCandidates.Any(x => x.ExpectedAdjustment != 0m);
             var financialStatementReconciliationComplete = comparable &&
                 (!financialStatementReconciliationRequired || (revenueCovered && expenseCovered));
             var financialStatementReconciliationMessage = !comparable
-                ? "Comparable budget actuals are not available, so the financial-statement reconciliation cannot be completed."
+                ? "Comparable budget actuals or source evidence are incomplete, so automated financial-statement reconciliation cannot be completed."
                 : !financialStatementReconciliationRequired
-                    ? "Accrual-basis actuals are already on the financial-statement basis. No separate basis reconciliation is required unless an approved difference is recorded."
+                    ? "Budget and financial statements use the same accrual basis, entity scope and reporting period; automated basis, timing, entity and presentation differences are zero."
                     : financialStatementReconciliationComplete
-                        ? "Revenue and expense actuals on the budget's cash basis are reconciled to financial-statement actuals using independently approved adjustments or explicit no-difference attestations."
-                        : $"Cash-basis budget actuals require approved financial-statement reconciliation for: {string.Join(" and ", new[] { !revenueCovered ? "Revenue" : null, !expenseCovered ? "Expense" : null }.Where(x => x != null))}.";
+                        ? "Basis, timing, entity/scope and presentation adjustments for both revenue and expense match the current system calculation and have independent approval."
+                        : $"Independent approval is still required for: {string.Join(", ", automaticReconciliationCandidates.Where(x => !CategoryCovered(x.Type, x.StatementSection)).Select(x => $"{x.Type}/{x.StatementSection}"))}.";
             var financialStatementReconciliation = new BudgetFinancialStatementReconciliation(
                 financialStatementReconciliationRequired, financialStatementReconciliationComplete,
                 financialStatementReconciliationMessage, comparableRevenueActual, revenueAdjustment,
@@ -1989,7 +2017,8 @@ namespace ApexERP.Application.Services
                 original.AccountingBasis.ToString(), original.ClassificationBasis, original.EntityScope,
                 statementEntityScope, original.PeriodStart, original.PeriodEnd,
                 statementPeriodStart, statementPeriodEnd, true, comparable,
-                comparabilityMessage, rows, reconciliations, varianceExplanations, explanationComplete,
+                comparabilityMessage, rows, reconciliations, automaticReconciliationCandidates,
+                varianceExplanations, explanationComplete,
                 originalToFinalExplanationsComplete, financialStatementReconciliation);
         }
 
