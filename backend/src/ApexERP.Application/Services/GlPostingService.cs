@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ApexERP.Application.Services
 {
     public record GlLineRequest(Guid GlAccountId, decimal Debit, decimal Credit, string Currency,
-        decimal ExchangeRate, Guid? CostCentreId = null, string? Narrative = null, Guid? FundCentreId = null, Guid? GrantId = null);
+        decimal ExchangeRate, Guid? CostCentreId = null, string? Narrative = null, Guid? FundCentreId = null, Guid? GrantId = null, Guid? TaxCodeId = null);
 
     /// <summary>Settings for the manual-journal controls (bound from configuration "Controls:JournalApproval").</summary>
     public sealed class JournalControlOptions
@@ -159,7 +159,7 @@ namespace ApexERP.Application.Services
                 // reports are neutralised exactly as the original was recorded.
                 var reversedLines = original.Lines.Select(l => new GlLineRequest(
                     l.GlAccountId, l.Credit, l.Debit, l.Currency, l.ExchangeRate,
-                    l.CostCentreId, $"Reversal: {reason}", l.FundCentreId, l.GrantId)).ToList();
+                    l.CostCentreId, $"Reversal: {reason}", l.FundCentreId, l.GrantId, l.TaxCodeId)).ToList();
 
                 var reversal = await PostCoreAsync(companyId, reversalDate, original.Source,
                     $"Reversal of {original.EntryNo}: {reason}", original.Reference, reversedLines,
@@ -398,7 +398,8 @@ namespace ApexERP.Application.Services
             CostCentreId = v.Source.CostCentreId,
             Narrative = v.Source.Narrative,
             FundCentreId = v.Source.FundCentreId,
-            GrantId = v.Source.GrantId
+            GrantId = v.Source.GrantId,
+            TaxCodeId = v.Source.TaxCodeId
         };
 
         private static void EnsurePeriodOpen(AccountingPeriod period)
