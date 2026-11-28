@@ -68,6 +68,13 @@ namespace ApexERP.Domain.Entities
     public class PublicSectorBudgetReconciliation : TenantEntity
     {
         public int FinancialYear { get; set; }
+        // Null only for legacy rows created before reconciliations were tied to a specific approved budget.
+        public Guid? BudgetVersionId { get; set; }
+        public DateTime? StatementPeriodStart { get; set; }
+        public DateTime? StatementPeriodEnd { get; set; }
+        public string? StatementEntityScope { get; set; }
+        public string? SourceFingerprint { get; set; }
+        public DateTime? CalculatedAt { get; set; }
         public PublicSectorBudgetReconciliationType Type { get; set; }
         public string Description { get; set; } = string.Empty;
         public string StatementSection { get; set; } = string.Empty;
