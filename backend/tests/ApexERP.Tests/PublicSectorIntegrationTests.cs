@@ -1695,6 +1695,8 @@ namespace ApexERP.Tests
             var certifierId = Guid.NewGuid();
             var customerId = Guid.NewGuid();
             var budgetVersionId = Guid.NewGuid();
+            var bankAccountId = Guid.NewGuid();
+            var bankGlId = Guid.NewGuid();
             var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
@@ -1704,6 +1706,18 @@ namespace ApexERP.Tests
                 {
                     Id = companyId, Name = "Zero Activity MDA",
                     BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.GlAccounts.Add(new GlAccount
+                {
+                    Id = bankGlId, CompanyId = companyId, Code = "1000", Name = "Operating Bank",
+                    Type = GlAccountType.Asset, SubType = "BANK", Currency = "USD",
+                    CashFlowCategory = CashFlowCategory.CashAndCashEquivalents
+                });
+                seed.BankAccounts.Add(new BankAccount
+                {
+                    Id = bankAccountId, CompanyId = companyId, Name = "Operating account",
+                    AccountNo = "ZERO-OPERATING-01", BankName = "Test Bank",
+                    Currency = "USD", GlAccountId = bankGlId
                 });
                 seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
                 {
@@ -1743,6 +1757,30 @@ namespace ApexERP.Tests
             Assert.Equal(0, certified.ObservedArReceiptCount);
             Assert.Equal(0, certified.ObservedApPaymentCount);
             Assert.True(await service.HasValidCertifiedZeroActivityAttestationAsync(companyId, budgetVersionId));
+
+            var sourceReviewerId = Guid.NewGuid();
+            var reconciliationPreparerId = Guid.NewGuid();
+            var reconciliationReviewerId = Guid.NewGuid();
+            var source = await service.CreateExpectedCashSourceAsync(companyId, budgetVersionId,
+                "BankAccount", "ZERO-OPERATING-01", "Operating bank account",
+                bankAccountId.ToString(), true, periodStart, periodEnd, preparerId);
+            await service.SubmitExpectedCashSourceAsync(companyId, source.Id, preparerId);
+            await service.ApproveExpectedCashSourceAsync(companyId, source.Id, sourceReviewerId);
+            var submission = await service.CreateCashSourceSubmissionAsync(companyId, source.Id,
+                0, 0m, 1000m, 1000m, "USD", "Bank statement nil-activity evidence", preparerId);
+            await service.SubmitCashSourceSubmissionAsync(companyId, submission.Id, preparerId);
+            await service.ReviewCashSourceSubmissionAsync(companyId, submission.Id, sourceReviewerId,
+                true, "Zero bank transactions confirmed.");
+            await service.SubmitCashSourceRecordReconciliationAsync(companyId, submission.Id,
+                reconciliationPreparerId);
+            await service.ReviewCashSourceRecordReconciliationAsync(companyId, submission.Id,
+                reconciliationReviewerId, true, "Zero source records confirmed against the bank statement.");
+            var registerAttestation = await service.CreateExpectedCashSourceRegisterAttestationAsync(
+                companyId, budgetVersionId, 1, "Zero Activity MDA",
+                "Signed bank account inventory for the reporting entity", preparerId);
+            await service.SubmitExpectedCashSourceRegisterAttestationAsync(companyId, registerAttestation.Id, preparerId);
+            await service.ReviewExpectedCashSourceRegisterAttestationAsync(companyId, registerAttestation.Id,
+                certifierId, true, "All expected source populations are complete.");
 
             var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
