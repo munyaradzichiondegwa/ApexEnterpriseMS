@@ -45,7 +45,8 @@ namespace ApexERP.Application.Services
         public sealed record BudgetVersionLineInput(Guid FundCentreId, Guid GlAccountId, Guid? CostCentreId,
             string Description, string ClassificationCode, decimal Amount);
         public sealed record BudgetComparisonLine(int LineNumber, string Description, string FundCentreCode,
-            string FundCentreName, string AccountCode, string AccountName, string ClassificationCode,
+            string FundCentreName, string FundCentreLevel, string CostCentreCode, string CostCentreName,
+            string AccountCode, string AccountName, string ClassificationCode,
             decimal OriginalBudget, decimal? FinalBudget, decimal? ActualOnComparableBasis,
             decimal? Variance, decimal? VariancePercent, string? OriginalToFinalExplanation,
             Guid BudgetVersionLineId);
@@ -1439,11 +1440,18 @@ namespace ApexERP.Application.Services
                         x.GlAccountId == g.First().GlAccountId && x.CostCentreId == g.First().CostCentreId &&
                         x.ClassificationCode == g.First().ClassificationCode)
                 }).ToList();
+            var costCentreIds = dimensions.Select(x => (x.FinalLine ?? x.OriginalLine!).CostCentreId)
+                .Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+            var costCentres = await _db.CostCentres.Where(x =>
+                x.CompanyId == companyId && costCentreIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, ct);
             foreach (var dimension in dimensions)
             {
                 var line = dimension.OriginalLine ?? dimension.FinalLine!;
                 var account = await _db.GlAccounts.FirstAsync(x => x.Id == line.GlAccountId && x.CompanyId == companyId, ct);
                 var fund = await _db.FundCentres.FirstAsync(x => x.Id == line.FundCentreId && x.CompanyId == companyId, ct);
+                var costCentre = line.CostCentreId.HasValue && costCentres.TryGetValue(line.CostCentreId.Value, out var foundCostCentre)
+                    ? foundCostCentre : null;
                 decimal? actual = null;
                 if (comparable)
                 {
@@ -1483,7 +1491,9 @@ namespace ApexERP.Application.Services
                 var finalAmount = dimension.FinalLine?.Amount ?? 0m;
                 var variance = actual.HasValue ? finalAmount - actual.Value : (decimal?)null;
                 rows.Add(new BudgetComparisonLine(dimension.OriginalLine?.LineNumber ?? dimension.FinalLine!.LineNumber,
-                    line.Description, fund.Code, fund.Name, account.Code, account.Name, line.ClassificationCode,
+                    line.Description, fund.Code, fund.Name, fund.Level.ToString(),
+                    costCentre?.Code ?? string.Empty, costCentre?.Name ?? string.Empty,
+                    account.Code, account.Name, line.ClassificationCode,
                     originalAmount, finalAmount, actual, variance,
                     actual.HasValue && finalAmount != 0m
                         ? Math.Round(variance!.Value / finalAmount * 100m, 2) : null,
