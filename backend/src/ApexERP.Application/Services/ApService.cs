@@ -183,12 +183,14 @@ namespace ApexERP.Application.Services
                     if (taxableLines.Sum(x => x.LineVat) != invoice.VatAmount ||
                         invoice.Lines.Sum(x => x.LineSubtotal) != invoice.Subtotal)
                         throw new InvalidOperationException("AP invoice line tax and subtotal amounts must reconcile exactly to the invoice header.");
-                    var mappings = await _db.TaxAccountMappings.Where(x =>
+                    var mappingCandidates = await _db.TaxAccountMappings.Where(x =>
                         x.CompanyId == companyId && x.Purpose == "AP-VAT-INPUT" &&
                         x.TaxCodeId.HasValue && taxCodeIds.Contains(x.TaxCodeId.Value) &&
                         x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
                         (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
                         .ToListAsync(token);
+                    var mappings = mappingCandidates.GroupBy(x => x.TaxCodeId)
+                        .Select(g => g.OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).First()).ToList();
                     if (mappings.Count != taxCodeIds.Length ||
                         mappings.Select(x => x.TaxCodeId).Distinct().Count() != taxCodeIds.Length ||
                         mappings.Any(x => x.GlAccountId != vatInputAccountId))
@@ -205,7 +207,7 @@ namespace ApexERP.Application.Services
                         x.CompanyId == companyId && x.Purpose == "AP-WHT-PAYABLE" && x.TaxType == TaxType.WHT &&
                         !x.TaxCodeId.HasValue && x.Status == TaxConfigurationStatus.Approved &&
                         x.EffectiveFrom <= invoice.InvoiceDate && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
-                        .SingleOrDefaultAsync(token);
+                        .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstOrDefaultAsync(token);
                     if (mapping == null || mapping.GlAccountId != whtPayableAccountId)
                         throw new InvalidOperationException("AP withholding requires one approved, effective AP-WHT-PAYABLE mapping matching the requested control account.");
                     var taxAccount = await _db.GlAccounts.SingleOrDefaultAsync(x =>
@@ -268,7 +270,7 @@ namespace ApexERP.Application.Services
                             x.CompanyId == companyId && x.Purpose == "AP-VAT-INPUT" && x.TaxCodeId == taxCodeId &&
                             x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
                             (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
-                            .SingleAsync(token);
+                            .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstAsync(token);
                         var journalLine = journal.Lines.Single(x => x.TaxCodeId == taxCodeId &&
                             x.GlAccountId == mapping.GlAccountId && x.Debit ==
                             invoice.Lines.Where(l => l.TaxCodeId == taxCodeId).Sum(l => l.LineVat));
