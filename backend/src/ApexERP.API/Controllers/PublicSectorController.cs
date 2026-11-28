@@ -26,7 +26,8 @@ namespace ApexERP.API.Controllers
     public record CreateBudgetReconciliationRequest(int FinancialYear, PublicSectorBudgetReconciliationType Type,
         string Description, string StatementSection, decimal OperatingAmount, decimal InvestingAmount,
         decimal FinancingAmount, string SupportingReference, decimal RevenueAmount = 0m, decimal ExpenseAmount = 0m,
-        bool IsNoDifferenceAttestation = false);
+        bool IsNoDifferenceAttestation = false, Guid? BudgetVersionId = null,
+        DateTime? StatementPeriodStart = null, DateTime? StatementPeriodEnd = null, string? StatementEntityScope = null);
     public record CreateBudgetExecutionActualReversalRequest(string Reason);
     public record CreateBudgetExecutionActualRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
         PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualSourceKind SourceKind,
@@ -445,7 +446,8 @@ namespace ApexERP.API.Controllers
                 var item = await _publicSector.CreateBudgetReconciliationAsync(CompanyId, req.FinancialYear,
                     req.Type, req.Description, req.StatementSection, req.OperatingAmount,
                     req.InvestingAmount, req.FinancingAmount, req.SupportingReference, UserId, ct,
-                    req.RevenueAmount, req.ExpenseAmount, req.IsNoDifferenceAttestation);
+                    req.RevenueAmount, req.ExpenseAmount, req.IsNoDifferenceAttestation,
+                    req.BudgetVersionId, req.StatementPeriodStart, req.StatementPeriodEnd, req.StatementEntityScope);
                 return Ok(item);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
@@ -552,9 +554,12 @@ namespace ApexERP.API.Controllers
         /// <summary>IPSAS 24 statement: approved original and final budgets, comparable actuals and variance explanations.</summary>
         [HttpGet("budget-versions/comparison")]
         [HasPermission(Permissions.ReportsFinancialRead)]
-        public async Task<IActionResult> GetBudgetComparison([FromQuery] int year, CancellationToken ct)
+        public async Task<IActionResult> GetBudgetComparison([FromQuery] int year,
+            [FromQuery] DateTime? statementPeriodStart, [FromQuery] DateTime? statementPeriodEnd,
+            [FromQuery] string? statementEntityScope, CancellationToken ct)
         {
-            try { return Ok(await _publicSector.GetBudgetComparisonAsync(CompanyId, year, ct)); }
+            try { return Ok(await _publicSector.GetBudgetComparisonAsync(CompanyId, year, ct,
+                statementPeriodStart, statementPeriodEnd, statementEntityScope)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
