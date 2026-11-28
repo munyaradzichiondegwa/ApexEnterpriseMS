@@ -223,7 +223,9 @@ namespace ApexERP.Application.Services
             int financialYear, PublicSectorBudgetReconciliationType type, string description, string statementSection,
             decimal operatingAmount, decimal investingAmount, decimal financingAmount, string supportingReference,
             Guid actorId, CancellationToken ct = default, decimal revenueAmount = 0m, decimal expenseAmount = 0m,
-            bool isNoDifferenceAttestation = false)
+            bool isNoDifferenceAttestation = false, Guid? budgetVersionId = null,
+            DateTime? statementPeriodStart = null, DateTime? statementPeriodEnd = null,
+            string? statementEntityScope = null)
         {
             if (financialYear < 2000 || financialYear > 2200 || string.IsNullOrWhiteSpace(description) ||
                 string.IsNullOrWhiteSpace(statementSection) || string.IsNullOrWhiteSpace(supportingReference))
@@ -233,12 +235,21 @@ namespace ApexERP.Application.Services
                 .Contains(statementSection, StringComparer.OrdinalIgnoreCase))
                 statementSection = new[] { "Revenue", "Expense", "Operating", "Investing", "Financing" }
                     .First(x => string.Equals(x, statementSection, StringComparison.OrdinalIgnoreCase));
-            var approvedBudget = await _db.PublicSectorBudgetVersions.Where(x =>
+            var approvedBudget = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
                     x.CompanyId == companyId && x.FinancialYear == financialYear &&
-                    x.Status == PublicSectorBudgetVersionStatus.Approved)
-                .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber)
-                .FirstOrDefaultAsync(ct)
-                ?? throw new InvalidOperationException("An approved IPSAS 24 budget version is required before recording a reconciliation.");
+                    x.Status == PublicSectorBudgetVersionStatus.Approved &&
+                    (!budgetVersionId.HasValue || x.Id == budgetVersionId.Value), ct)
+                ?? throw new InvalidOperationException("The selected approved IPSAS 24 budget version is required before recording a reconciliation.");
+            var companyName = await _db.Companies.IgnoreQueryFilters().Where(x => x.Id == companyId)
+                .Select(x => x.Name).SingleAsync(ct);
+            var reconciliationPeriodStart = statementPeriodStart ?? approvedBudget.PeriodStart;
+            var reconciliationPeriodEnd = statementPeriodEnd ?? approvedBudget.PeriodEnd;
+            var reconciliationEntityScope = string.IsNullOrWhiteSpace(statementEntityScope)
+                ? companyName : statementEntityScope.Trim();
+            if (reconciliationPeriodStart >= reconciliationPeriodEnd)
+                throw new InvalidOperationException("The financial-statement reconciliation period must have a valid start and end.");
+            if (!string.Equals(reconciliationEntityScope, companyName, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Only the registered company financial-statement entity is currently available as a source; budget subsets are reconciled against that registered entity.");
             if (approvedBudget.AccountingBasis != AccountingBasis.Accrual &&
                 approvedBudget.AccountingBasis != AccountingBasis.Cash)
                 throw new InvalidOperationException("This budget accounting basis does not yet have an approved IPSAS 24 reconciliation adapter.");
@@ -253,8 +264,11 @@ namespace ApexERP.Application.Services
                 string.Equals(statementSection.Trim(), "Expense", StringComparison.OrdinalIgnoreCase))
             {
                 var existingSectionRows = await _db.PublicSectorBudgetReconciliations.Where(x =>
-                    x.CompanyId == companyId && x.FinancialYear == financialYear &&
-                    x.StatementSection == statementSection.Trim() &&
+                    x.CompanyId == companyId && x.BudgetVersionId == approvedBudget.Id &&
+                    x.StatementPeriodStart == reconciliationPeriodStart &&
+                    x.StatementPeriodEnd == reconciliationPeriodEnd &&
+                    x.StatementEntityScope == reconciliationEntityScope &&
+                    x.Type == type && x.StatementSection == statementSection.Trim() &&
                     x.Status != PublicSectorBudgetReconciliationStatus.Rejected).ToListAsync(ct);
                 if (isNoDifferenceAttestation && existingSectionRows.Count > 0)
                     throw new InvalidOperationException("A no-difference attestation cannot coexist with another active reconciliation for the same financial-statement section.");
@@ -266,7 +280,9 @@ namespace ApexERP.Application.Services
             // operating/investing/financing adjustments remain available for the separate cash-flow bridge.
             var reconciliation = new PublicSectorBudgetReconciliation
             {
-                CompanyId = companyId, FinancialYear = financialYear, Type = type,
+                CompanyId = companyId, FinancialYear = financialYear, BudgetVersionId = approvedBudget.Id,
+                StatementPeriodStart = reconciliationPeriodStart, StatementPeriodEnd = reconciliationPeriodEnd,
+                StatementEntityScope = reconciliationEntityScope, Type = type,
                 Description = description.Trim(), StatementSection = statementSection.Trim(),
                 RevenueAmount = revenueAmount, ExpenseAmount = expenseAmount,
                 OperatingAmount = operatingAmount, InvestingAmount = investingAmount,
