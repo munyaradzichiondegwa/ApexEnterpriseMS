@@ -56,6 +56,20 @@ BEGIN
               AND original."Status" = 2
               AND original."ReversalOfId" IS NULL
               AND original."Amount" = NEW."Amount"
+              AND original."SourceAmount" = NEW."SourceAmount"
+              AND original."Currency" = NEW."Currency"
+              AND original."ExchangeRateToBudgetCurrency" = NEW."ExchangeRateToBudgetCurrency"
+              AND original."ExchangeRateDate" IS NOT DISTINCT FROM NEW."ExchangeRateDate"
+              AND original."ExchangeRateSource" IS NOT DISTINCT FROM NEW."ExchangeRateSource"
+              AND original."ExchangeRateSourceReference" IS NOT DISTINCT FROM NEW."ExchangeRateSourceReference"
+              AND original."ExchangeRateIsInverse" = NEW."ExchangeRateIsInverse"
+              AND original."SourceDate" = NEW."SourceDate"
+              AND original."EffectiveDate" = NEW."EffectiveDate"
+              AND original."SourceReference" = NEW."SourceReference"
+              AND original."CashFlowSection" = NEW."CashFlowSection"
+              AND original."FundCentreId" = NEW."FundCentreId"
+              AND original."GlAccountId" = NEW."GlAccountId"
+              AND original."CostCentreId" IS NOT DISTINCT FROM NEW."CostCentreId"
               AND original."BudgetVersionId" = NEW."BudgetVersionId"
               AND original."BudgetVersionLineId" = NEW."BudgetVersionLineId"
               AND original."SourceKind" = NEW."SourceKind"
@@ -90,6 +104,8 @@ BEGIN
             SELECT 1 FROM "PublicSectorBudgetExecutionActuals" reversal
             WHERE reversal."ReversalOfId" = OLD."Id"
               AND reversal."CompanyId" = OLD."CompanyId"
+              AND reversal."Status" = 2
+              AND reversal."CertifiedBy" IS NOT NULL
         ) THEN
             RAISE EXCEPTION 'An original actual cannot be marked reversed without a linked compensating event.' USING ERRCODE = 'restrict_violation';
         END IF;
