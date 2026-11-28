@@ -25,6 +25,7 @@ namespace ApexERP.API.Controllers
         PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualSourceKind SourceKind,
         Guid SourceRecordId, DateTime EffectiveDate, CashFlowCategory CashFlowSection);
     public record CreateCashPeriodAttestationRequest(Guid BudgetVersionId, string EvidenceReference);
+    public record CreateExpectedCashSourceRequest(Guid BudgetVersionId, string SourceKind, string SourceCode, string SourceName, string? SourceIdentifier, bool IsRequired, DateTime EffectiveFrom, DateTime EffectiveTo);
 
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
@@ -390,6 +391,46 @@ namespace ApexERP.API.Controllers
         [HttpGet("asset-verification/batches")]
         public async Task<IActionResult> GetBatches() =>
             Ok(await _db.AssetVerificationBatches.Include(b => b.Scans).Where(b => b.CompanyId == CompanyId).OrderByDescending(b => b.VerificationDate).ToListAsync());
+
+        // ---- IPSAS 24: expected source population register ----
+
+        [HttpGet("expected-cash-sources")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetExpectedCashSources([FromQuery] Guid budgetVersionId, CancellationToken ct)
+        {
+            if (budgetVersionId == Guid.Empty) return BadRequest(new { error = "A budget version is required." });
+            return Ok(await _publicSector.GetExpectedCashSourcesAsync(CompanyId, budgetVersionId, ct));
+        }
+
+        [HttpPost("expected-cash-sources")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateExpectedCashSource(CreateExpectedCashSourceRequest req, CancellationToken ct)
+        {
+            try
+            {
+                var item = await _publicSector.CreateExpectedCashSourceAsync(CompanyId, req.BudgetVersionId,
+                    req.SourceKind, req.SourceCode, req.SourceName, req.SourceIdentifier, req.IsRequired,
+                    req.EffectiveFrom, req.EffectiveTo, UserId, ct);
+                return Ok(item);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("expected-cash-sources/{id}/submit")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitExpectedCashSource(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.SubmitExpectedCashSourceAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("expected-cash-sources/{id}/approve")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> ApproveExpectedCashSource(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.ApproveExpectedCashSourceAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
 
         // ---- IPSAS 24: source-backed cash budget actuals ----
 
