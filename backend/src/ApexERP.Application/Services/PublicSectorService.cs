@@ -278,14 +278,35 @@ namespace ApexERP.Application.Services
 
             var companyProfile = await _db.Companies.Where(x => x.Id == companyId)
                 .Select(x => new { x.Name, x.FunctionalCurrency }).FirstOrDefaultAsync(ct);
-            var comparable = original.AccountingBasis == AccountingBasis.Accrual &&
-                companyProfile != null &&
-                string.Equals(original.EntityScope.Trim(), companyProfile.Name.Trim(), StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(original.Currency, companyProfile.FunctionalCurrency, StringComparison.OrdinalIgnoreCase) &&
-                (final == null || (final.AccountingBasis == original.AccountingBasis &&
-                    final.PeriodStart == original.PeriodStart && final.PeriodEnd == original.PeriodEnd &&
-                    final.Currency == original.Currency && final.ClassificationBasis == original.ClassificationBasis &&
-                    final.EntityScope == original.EntityScope));
+            var comparabilityIssues = new List<string>();
+            if (original.AccountingBasis != AccountingBasis.Accrual)
+                comparabilityIssues.Add("The budget is not accrual basis; accrual GL actuals cannot be substituted.");
+            if (companyProfile == null)
+                comparabilityIssues.Add("The registered company profile could not be resolved.");
+            else
+            {
+                if (!string.Equals(original.EntityScope.Trim(), companyProfile.Name.Trim(), StringComparison.OrdinalIgnoreCase))
+                    comparabilityIssues.Add("The budget entity scope does not exactly match the registered company name.");
+                if (!string.Equals(original.Currency, companyProfile.FunctionalCurrency, StringComparison.OrdinalIgnoreCase))
+                    comparabilityIssues.Add("The budget currency does not match the company's functional currency.");
+            }
+            if (final != null)
+            {
+                if (final.AccountingBasis != original.AccountingBasis)
+                    comparabilityIssues.Add("Original and final budgets use different accounting bases.");
+                if (final.PeriodStart != original.PeriodStart || final.PeriodEnd != original.PeriodEnd)
+                    comparabilityIssues.Add("Original and final budgets cover different reporting periods.");
+                if (final.Currency != original.Currency)
+                    comparabilityIssues.Add("Original and final budgets use different currencies.");
+                if (final.ClassificationBasis != original.ClassificationBasis)
+                    comparabilityIssues.Add("Original and final budgets use different classification bases.");
+                if (final.EntityScope != original.EntityScope)
+                    comparabilityIssues.Add("Original and final budgets use different entity scopes.");
+            }
+            var comparable = comparabilityIssues.Count == 0;
+            var comparabilityMessage = comparable
+                ? "Accrual-basis ledger actuals are comparable because the budget basis, registered entity, functional currency, classification basis and reporting period agree."
+                : string.Join(" ", comparabilityIssues);
             var rows = new List<BudgetComparisonLine>();
             var dimensions = original.Lines.Concat(final?.Lines ?? Array.Empty<PublicSectorBudgetVersionLine>())
                 .GroupBy(x => $"{x.FundCentreId:N}|{x.GlAccountId:N}|{x.CostCentreId?.ToString("N") ?? "none"}|{x.ClassificationCode}")
@@ -330,9 +351,7 @@ namespace ApexERP.Application.Services
             return new BudgetComparisonReport(original.Id, final?.Id, financialYear, original.Currency,
                 original.AccountingBasis.ToString(), original.ClassificationBasis, original.EntityScope,
                 original.PeriodStart, original.PeriodEnd, final != null, comparable,
-                comparable ? "Accrual-basis ledger actuals are comparable only where the approved budget period and entity scope match the ledger reporting scope." :
-                    "Comparable-basis actuals are not derived from accrual GL postings for this budget. Load and approve actuals on the budget basis and complete the IPSAS 24 reconciliation before issuing the statement.",
-                rows, reconciliations);
+                comparabilityMessage, rows, reconciliations);
         }
 
         public async Task<PublicSectorBudgetAllocation> CreateBudgetAllocationAsync(Guid companyId, Guid fundCentreId,
