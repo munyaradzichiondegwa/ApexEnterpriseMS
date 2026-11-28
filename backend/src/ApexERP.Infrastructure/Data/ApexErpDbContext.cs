@@ -783,6 +783,7 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorBudgetReconciliation>()
                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.StatementPeriodStart, x.StatementPeriodEnd, x.Type, x.Description }).IsUnique()
                 .HasDatabaseName("UX_PublicSectorBudgetRecon_ScopeDescription");
+            modelBuilder.Entity<PublicSectorBudgetReconciliation>().Property(x => x.SourceFingerprint).HasMaxLength(128);
             modelBuilder.Entity<PublicSectorBudgetReconciliation>()
                 .HasCheckConstraint("CK_PublicSectorBudgetRecon_StatementPeriod",
                     "\"StatementPeriodStart\" IS NULL OR \"StatementPeriodEnd\" IS NULL OR \"StatementPeriodEnd\" > \"StatementPeriodStart\"");
