@@ -58,8 +58,8 @@ public static class BankStatementCsvParser
         if (csv.Length > 0 && csv[0] == '\uFEFF') csv = csv[1..];
 
         var rows = ParseRecords(csv);
-        if (rows.Count < 2)
-            throw new InvalidOperationException("Statement CSV must contain a header and at least one transaction.");
+        if (rows.Count < 1)
+            throw new InvalidOperationException("Statement CSV must contain the required header; an authenticated zero-activity statement may contain no transaction rows.");
         if (rows[0].Count != RequiredHeaders.Length ||
             !rows[0].Select(x => x.Trim()).SequenceEqual(RequiredHeaders, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException(
