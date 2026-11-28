@@ -49,6 +49,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<DateTime?>("RemittedToZimraAt").HasColumnType("timestamp with time zone");
                     b.Property<string>("EvidenceReference").HasColumnType("text");
                     b.Property<Guid?>("ApPaymentId").HasColumnType("uuid");
+                    b.Property<Guid?>("BankStatementTransactionId").HasColumnType("uuid");
+                    b.Property<DateTime?>("BankReconciledAt").HasColumnType("timestamp with time zone");
                     b.Property<int>("Status").HasColumnType("integer");
                     b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
                     b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
