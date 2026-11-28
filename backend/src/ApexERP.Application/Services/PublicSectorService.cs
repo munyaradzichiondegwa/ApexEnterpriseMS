@@ -11,8 +11,8 @@ namespace ApexERP.Application.Services
         FundCentreLevel Level, Guid? ParentId, string? ParentCode, string? ParentName,
         decimal Appropriation, decimal CarriedForward, decimal TotalBudget,
         decimal CommittedToDate, decimal RealisedAgainstCommitments, decimal OutstandingCommitments,
-        decimal PostedActuals, decimal AvailableBudget, decimal PercentUtilised, decimal LapsedAmount,
-        bool IsClosed);
+        decimal PostedActuals, decimal ActualVariance, decimal ActualVariancePercent,
+        decimal AvailableBudget, decimal PercentUtilised, decimal LapsedAmount, bool IsClosed);
     public record YearEndCloseResult(Guid FundCentreId, decimal UnexpendedBalance, decimal CarriedForward, decimal Lapsed, Guid? NewFundCentreId);
 
     /// <summary>
@@ -352,6 +352,12 @@ namespace ApexERP.Application.Services
                 var committed = commitments?.Committed ?? 0m;
                 var realised = commitments?.Realised ?? 0m;
                 var outstanding = commitments?.Outstanding ?? 0m;
+                // Actual variance is appropriation less posted expense actuals (positive is
+                // favourable underspend; negative is an overspend). Outstanding encumbrances
+                // remain separately visible and are reflected in AvailableBudget, not actuals.
+                var actualVariance = totalBudget - actuals;
+                var actualVariancePercent = totalBudget == 0m ? 0m :
+                    Math.Round(actualVariance / totalBudget * 100m, 2);
                 var available = fundCentre.IsClosed ? 0m : totalBudget - outstanding - actuals;
                 var utilised = totalBudget == 0m ? 0m :
                     Math.Round((outstanding + actuals) / totalBudget * 100m, 2);
@@ -360,7 +366,8 @@ namespace ApexERP.Application.Services
                     fundCentre.Id, fundCentre.Code, fundCentre.Name, fundCentre.Level,
                     fundCentre.ParentId, parent?.Code, parent?.Name,
                     appropriation, carriedForward, totalBudget, committed, realised, outstanding,
-                    actuals, available, utilised, fundCentre.LapsedAmount, fundCentre.IsClosed));
+                    actuals, actualVariance, actualVariancePercent, available, utilised,
+                    fundCentre.LapsedAmount, fundCentre.IsClosed));
             }
             return report;
         }
