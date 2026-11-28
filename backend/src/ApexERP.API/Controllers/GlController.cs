@@ -298,14 +298,15 @@ namespace ApexERP.API.Controllers
                         r.FromCurrency == from && r.ToCurrency == to && r.RateDate == rateDate, token);
                     var before = existing == null ? null : new { existing.FromCurrency, existing.ToCurrency,
                         existing.RateDate, existing.Rate, existing.IsManualOverride,
-                        existing.RateSource, existing.SourceReference };
+                        existing.RateSource, existing.SourceReference, existing.ApprovedBy, existing.ApprovedAt };
                     if (existing == null)
                     {
                         existing = new ExchangeRate { CompanyId = CompanyId, FromCurrency = from,
                             ToCurrency = to, RateDate = rateDate, Rate = request.Rate,
                             IsManualOverride = request.IsManualOverride,
                             RateSource = request.RateSource.Trim(),
-                            SourceReference = string.IsNullOrWhiteSpace(request.SourceReference) ? null : request.SourceReference.Trim() };
+                            SourceReference = string.IsNullOrWhiteSpace(request.SourceReference) ? null : request.SourceReference.Trim(),
+                            CreatedBy = UserId };
                         _db.ExchangeRates.Add(existing);
                     }
                     else
@@ -314,14 +315,62 @@ namespace ApexERP.API.Controllers
                         existing.IsManualOverride = request.IsManualOverride;
                         existing.RateSource = request.RateSource.Trim();
                         existing.SourceReference = string.IsNullOrWhiteSpace(request.SourceReference) ? null : request.SourceReference.Trim();
+                        existing.CreatedBy ??= UserId;
+                        existing.UpdatedBy = UserId;
+                        existing.ApprovedBy = null;
+                        existing.ApprovedAt = null;
                     }
                     _audit.Record(CompanyId, UserId, "FxRate.Upserted", "GL", nameof(ExchangeRate), existing.Id,
                         before, new { existing.FromCurrency, existing.ToCurrency, existing.RateDate,
-                            existing.Rate, existing.IsManualOverride, existing.RateSource, existing.SourceReference });
+                            existing.Rate, existing.IsManualOverride, existing.RateSource, existing.SourceReference,
+                            existing.ApprovedBy, existing.ApprovedAt });
                     await _db.SaveChangesAsync(token);
                 });
                 return Ok(await _db.ExchangeRates.FirstAsync(r => r.CompanyId == CompanyId &&
                     r.FromCurrency == from && r.ToCurrency == to && r.RateDate == rateDate));
+            });
+
+        [HttpPost("fx-rates/{id}/approve")]
+        [HasPermission(Permissions.GlAccountsManage)]
+        public Task<IActionResult> ApproveExchangeRate(Guid id) =>
+            Run(async () =>
+            {
+                var rate = await _db.ExchangeRates.FirstOrDefaultAsync(x =>
+                    x.Id == id && x.CompanyId == CompanyId);
+                if (rate == null) return NotFound(new { error = "Exchange rate not found." });
+                if (string.IsNullOrWhiteSpace(rate.RateSource) ||
+                    string.Equals(rate.RateSource.Trim(), "Unspecified", StringComparison.OrdinalIgnoreCase) ||
+                    string.IsNullOrWhiteSpace(rate.SourceReference))
+                    return BadRequest(new { error = "An exchange rate requires a named source and source-document reference before approval." });
+                if (!rate.CreatedBy.HasValue)
+                    return BadRequest(new { error = "The exchange-rate preparer is not recorded; re-enter the rate before approval." });
+                if (rate.CreatedBy == UserId)
+                    return BadRequest(new { error = "The exchange-rate preparer cannot approve their own rate." });
+                if (rate.ApprovedBy.HasValue || rate.ApprovedAt.HasValue)
+                    return Conflict(new { error = "This exchange rate is already approved. Amend it to create a new approval cycle." });
+
+                await _db.InTransactionAsync(async token =>
+                {
+                    await _db.AcquireTransactionLockAsync($"fx-rate-approval:{CompanyId:N}:{rate.Id:N}", token);
+                    var current = await _db.ExchangeRates.FirstOrDefaultAsync(x =>
+                        x.Id == id && x.CompanyId == CompanyId, token)
+                        ?? throw new InvalidOperationException("Exchange rate not found.");
+                    if (current.CreatedBy == UserId)
+                        throw new InvalidOperationException("The exchange-rate preparer cannot approve their own rate.");
+                    if (current.ApprovedBy.HasValue || current.ApprovedAt.HasValue)
+                        throw new InvalidOperationException("This exchange rate has already been approved.");
+                    if (string.IsNullOrWhiteSpace(current.SourceReference))
+                        throw new InvalidOperationException("The exchange rate requires its source-document reference before approval.");
+                    current.ApprovedBy = UserId;
+                    current.ApprovedAt = DateTime.UtcNow;
+                    current.UpdatedBy = UserId;
+                    current.UpdatedAt = DateTime.UtcNow;
+                    _audit.Record(CompanyId, UserId, "FxRate.Approved", "GL", nameof(ExchangeRate), current.Id,
+                        new { current.ApprovedBy, current.ApprovedAt },
+                        new { current.ApprovedBy, current.ApprovedAt, current.Rate, current.RateSource, current.SourceReference });
+                    await _db.SaveChangesAsync(token);
+                });
+                return Ok(await _db.ExchangeRates.FirstAsync(x => x.Id == id && x.CompanyId == CompanyId));
             });
 
         [HttpPost("journal-entries/{id}/reject")]
