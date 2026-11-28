@@ -443,8 +443,10 @@ namespace ApexERP.Application.Services
 
             if (expected.SourceKind == "ReceivablesControl")
             {
-                if (!await _db.GlAccounts.AnyAsync(x => x.Id == sourceId && x.CompanyId == companyId &&
-                    x.Type == GlAccountType.Asset, ct))
+                var controlCurrency = await _db.GlAccounts.Where(x => x.Id == sourceId &&
+                    x.CompanyId == companyId && x.Type == GlAccountType.Asset)
+                    .Select(x => x.Currency).SingleOrDefaultAsync(ct);
+                if (string.IsNullOrWhiteSpace(controlCurrency))
                     throw new InvalidOperationException($"Receivables control account for {expected.SourceCode} is not a valid asset account in this company.");
                 var rows = await _db.ArReceipts.Where(x => x.CompanyId == companyId &&
                     x.ReceiptDate >= periodStart && x.ReceiptDate < periodEnd &&
@@ -453,13 +455,16 @@ namespace ApexERP.Application.Services
                     .Select(x => new { x.Id, x.Amount, x.Currency }).ToListAsync(ct);
                 return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
                     rows.Sum(x => x.Amount),
+                    string.Equals(controlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
                     rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)), null);
             }
 
             if (expected.SourceKind == "PayablesControl")
             {
-                if (!await _db.GlAccounts.AnyAsync(x => x.Id == sourceId && x.CompanyId == companyId &&
-                    x.Type == GlAccountType.Liability, ct))
+                var controlCurrency = await _db.GlAccounts.Where(x => x.Id == sourceId &&
+                    x.CompanyId == companyId && x.Type == GlAccountType.Liability)
+                    .Select(x => x.Currency).SingleOrDefaultAsync(ct);
+                if (string.IsNullOrWhiteSpace(controlCurrency))
                     throw new InvalidOperationException($"Payables control account for {expected.SourceCode} is not a valid liability account in this company.");
                 var rows = await _db.ApPayments.Where(x => x.CompanyId == companyId &&
                     x.PaymentDate >= periodStart && x.PaymentDate < periodEnd &&
@@ -468,6 +473,7 @@ namespace ApexERP.Application.Services
                     .Select(x => new { x.Id, x.Amount, x.Currency }).ToListAsync(ct);
                 return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
                     rows.Sum(x => x.Amount),
+                    string.Equals(controlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
                     rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)), null);
             }
 
