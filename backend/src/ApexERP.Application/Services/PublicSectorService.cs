@@ -589,7 +589,7 @@ namespace ApexERP.Application.Services
                 return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
                     rows.Sum(x => Math.Max(x.Debit, x.Credit)),
                     string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase),
-                    rows.Sum(x => x.Credit - x.Debit));
+                    rows.Sum(x => x.Credit - x.Debit), null, null, null, null);
             }
 
             if (expected.SourceKind == "ReceivablesControl")
@@ -608,10 +608,20 @@ namespace ApexERP.Application.Services
                 var records = rows.ToDictionary(x => x.Id, x => new ExpectedCashSourceRecord(
                     x.Amount, string.IsNullOrWhiteSpace(x.ReceiptNo) ? x.Id.ToString("N") : x.ReceiptNo,
                     x.ReceiptDate, x.Currency, x.JournalEntryId, true));
+                var normalisedControlCurrency = controlCurrency.Trim().ToUpperInvariant();
+                var openingSubledger = await GetArControlSubledgerBalanceAsync(
+                    companyId, sourceId, normalisedControlCurrency, periodStart, ct);
+                var closingSubledger = await GetArControlSubledgerBalanceAsync(
+                    companyId, sourceId, normalisedControlCurrency, periodEnd, ct);
+                var openingGl = await GetControlGlBalanceAsync(
+                    companyId, sourceId, normalisedControlCurrency, periodStart, liability: false, ct);
+                var closingGl = await GetControlGlBalanceAsync(
+                    companyId, sourceId, normalisedControlCurrency, periodEnd, liability: false, ct);
                 return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
                     rows.Sum(x => x.Amount),
-                    string.Equals(controlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
-                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)), null);
+                    string.Equals(normalisedControlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
+                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)),
+                    null, openingSubledger, closingSubledger, openingGl, closingGl);
             }
 
             if (expected.SourceKind == "PayablesControl")
@@ -630,10 +640,20 @@ namespace ApexERP.Application.Services
                 var records = rows.ToDictionary(x => x.Id, x => new ExpectedCashSourceRecord(
                     x.Amount, string.IsNullOrWhiteSpace(x.PaymentNo) ? x.Id.ToString("N") : x.PaymentNo,
                     x.PaymentDate, x.Currency, x.JournalEntryId, true));
+                var normalisedControlCurrency = controlCurrency.Trim().ToUpperInvariant();
+                var openingSubledger = await GetApControlSubledgerBalanceAsync(
+                    companyId, sourceId, normalisedControlCurrency, periodStart, ct);
+                var closingSubledger = await GetApControlSubledgerBalanceAsync(
+                    companyId, sourceId, normalisedControlCurrency, periodEnd, ct);
+                var openingGl = await GetControlGlBalanceAsync(
+                    companyId, sourceId, normalisedControlCurrency, periodStart, liability: true, ct);
+                var closingGl = await GetControlGlBalanceAsync(
+                    companyId, sourceId, normalisedControlCurrency, periodEnd, liability: true, ct);
                 return new ExpectedCashSourcePopulation(records.Keys.ToHashSet(), records,
                     rows.Sum(x => x.Amount),
-                    string.Equals(controlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
-                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)), null);
+                    string.Equals(normalisedControlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
+                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)),
+                    null, openingSubledger, closingSubledger, openingGl, closingGl);
             }
 
             throw new InvalidOperationException($"Source kind {expected.SourceKind} has no configured source adapter.");
