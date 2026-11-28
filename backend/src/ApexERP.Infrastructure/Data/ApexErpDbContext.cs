@@ -374,6 +374,13 @@ namespace ApexERP.Infrastructure.Data
 
             // ---- Unique/business indexes ----
             modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.PaymentReference }).IsUnique();
+            modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_ZimbabweDswtWithholdingRecords_Amounts",
+                    "\"GrossPaymentAmount\" > 0 AND \"WithholdingRate\" > 0 AND \"WithheldAmount\" > 0 AND \"SupplierRemittanceAmount\" >= 0 AND \"GrossPaymentAmount\" = \"WithheldAmount\" + \"SupplierRemittanceAmount\"");
+                t.HasCheckConstraint("CK_ZimbabweDswtWithholdingRecords_TaxPeriod",
+                    "\"TaxPeriodYear\" BETWEEN 2026 AND 9999 AND \"TaxPeriodMonth\" BETWEEN 1 AND 12");
+            });
             modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.TaxPeriodYear, x.TaxPeriodMonth, x.Status });
             modelBuilder.Entity<User>().HasIndex(u => new { u.CompanyId, u.Email }).IsUnique();
             modelBuilder.Entity<GlAccount>().HasIndex(a => new { a.CompanyId, a.Code }).IsUnique();
