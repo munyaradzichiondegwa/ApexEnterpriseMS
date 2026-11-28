@@ -18,6 +18,9 @@ namespace ApexERP.API.Controllers
         AccountingBasis AccountingBasis, string ClassificationBasis, string EntityScope, DateTime PeriodStart,
         DateTime PeriodEnd, string AuthorityReference, string? AmendmentReason,
         IReadOnlyCollection<CreateBudgetVersionLineRequest> Lines);
+    public record CreateBudgetReconciliationRequest(int FinancialYear, PublicSectorBudgetReconciliationType Type,
+        string Description, string StatementSection, decimal OperatingAmount, decimal InvestingAmount,
+        decimal FinancingAmount, string SupportingReference);
 
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
@@ -105,6 +108,53 @@ namespace ApexERP.API.Controllers
             CancellationToken ct)
         {
             try { return Ok(await _publicSector.GetClassificationScheduleAsync(CompanyId, year, fundCentreId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-reconciliations")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateBudgetReconciliation(CreateBudgetReconciliationRequest req, CancellationToken ct)
+        {
+            try
+            {
+                var item = await _publicSector.CreateBudgetReconciliationAsync(CompanyId, req.FinancialYear,
+                    req.Type, req.Description, req.StatementSection, req.OperatingAmount,
+                    req.InvestingAmount, req.FinancingAmount, req.SupportingReference, UserId, ct);
+                return Ok(item);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-reconciliations/{id}/submit-for-approval")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitBudgetReconciliationForApproval(Guid id, CancellationToken ct)
+        {
+            try
+            {
+                var item = await _db.PublicSectorBudgetReconciliations.FirstOrDefaultAsync(x =>
+                    x.Id == id && x.CompanyId == CompanyId, ct);
+                if (item == null) return NotFound(new { error = "Budget reconciliation row not found." });
+                if (item.Status != PublicSectorBudgetReconciliationStatus.Draft)
+                    return BadRequest(new { error = "Only a draft reconciliation row can be submitted." });
+                var amount = Math.Abs(item.OperatingAmount) + Math.Abs(item.InvestingAmount) + Math.Abs(item.FinancingAmount);
+                var workflow = await _db.InTransactionAsync(async token =>
+                {
+                    var request = await _approvalChains.SubmitForApprovalAsync(CompanyId,
+                        "PublicSectorBudgetReconciliation", item.Id, "PublicSectorBudgetReconciliation",
+                        UserId, amount, null, $"Approve IPSAS 24 {item.Type} reconciliation: {item.Description}", token);
+                    await _publicSector.MarkBudgetReconciliationPendingAsync(CompanyId, item.Id, request.Id, token);
+                    return request;
+                }, ct);
+                return Ok(workflow);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-reconciliations/{id}/finalise-approval")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> FinaliseBudgetReconciliationApproval(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.FinaliseBudgetReconciliationApprovalAsync(CompanyId, id, UserId, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
