@@ -79,6 +79,28 @@ namespace ApexERP.Domain.Entities
     }
 
     /// <summary>
+    /// An expected bank, receivables, payables or cashbook source for one approved IPSAS 24
+    /// cash-budget reporting period. Approved entries are immutable; changes require a new
+    /// controlled register entry rather than editing the approved source population.
+    /// </summary>
+    public class PublicSectorExpectedCashSource : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public string SourceKind { get; set; } = string.Empty;
+        public string SourceCode { get; set; } = string.Empty;
+        public string SourceName { get; set; } = string.Empty;
+        public string? SourceIdentifier { get; set; }
+        public bool IsRequired { get; set; } = true;
+        public DateTime EffectiveFrom { get; set; }
+        public DateTime EffectiveTo { get; set; }
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+    }
+
+    /// <summary>
     /// Independent period-level declaration that no cash source activity occurred.
     /// This is evidence of completeness, not a mechanism for assuming missing records are zero.
     /// Certification is permitted only after re-counting all supported source populations.
