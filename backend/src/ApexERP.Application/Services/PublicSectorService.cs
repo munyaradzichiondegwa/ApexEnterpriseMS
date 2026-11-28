@@ -1379,7 +1379,7 @@ namespace ApexERP.Application.Services
             {
                 var receipt = await _db.ArReceipts.FirstOrDefaultAsync(x =>
                     x.Id == actual.SourceRecordId && x.CompanyId == companyId, ct);
-                if (receipt == null || !receipt.JournalEntryId.HasValue || !receipt.BankAccountId.HasValue ||
+                if (receipt == null || !receipt.JournalEntryId.HasValue ||
                     receipt.Amount != actual.Amount || receipt.Currency != actual.Currency ||
                     receipt.ReceiptDate.Date != actual.SourceDate.Date || actual.EffectiveDate.Date != receipt.ReceiptDate.Date)
                     return false;
@@ -1422,7 +1422,7 @@ namespace ApexERP.Application.Services
             {
                 var payment = await _db.ApPayments.FirstOrDefaultAsync(x =>
                     x.Id == actual.SourceRecordId && x.CompanyId == companyId, ct);
-                if (payment == null || !payment.JournalEntryId.HasValue || !payment.BankAccountId.HasValue ||
+                if (payment == null || !payment.JournalEntryId.HasValue ||
                     payment.Amount != actual.Amount || payment.Currency != actual.Currency ||
                     payment.PaymentDate.Date != actual.SourceDate.Date || actual.EffectiveDate.Date != payment.PaymentDate.Date ||
                     !payment.PreparedBy.HasValue || !payment.AuthorisedBy.HasValue ||
