@@ -396,7 +396,7 @@ namespace ApexERP.Infrastructure.Data
                 .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
             modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.Purpose, x.TaxCodeId, x.VersionNumber }).IsUnique();
             modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.Purpose, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo }).HasDatabaseName("IX_TaxAccountMappings_Effective");
-            modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.InvoiceKind, x.InvoiceId, x.JournalLineId }).IsUnique();
+            modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.InvoiceKind, x.InvoiceId, x.JournalLineId, x.InvoiceLineId }).IsUnique();
             modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.TaxAccountMappingId, x.InvoiceId });
             modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.VersionNumber }).IsUnique();
             modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo }).HasDatabaseName("IX_PublicSectorTaxBudgetPolicies_Effective");
