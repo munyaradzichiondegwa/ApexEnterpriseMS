@@ -613,6 +613,7 @@ namespace ApexERP.Tests
             var expenseId = Guid.NewGuid();
             var incomeId = Guid.NewGuid();
             var addedExpenseId = Guid.NewGuid();
+            var removedExpenseId = Guid.NewGuid();
             var periodId = Guid.NewGuid();
 
             await using (var seed = db.NewContext(companyId))
@@ -630,7 +631,8 @@ namespace ApexERP.Tests
                 seed.GlAccounts.AddRange(
                     new GlAccount { Id = expenseId, CompanyId = companyId, Code = "5100", Name = "Operating Expense", SubType = "EC-01", Type = GlAccountType.Expense, Currency = "USD" },
                     new GlAccount { Id = incomeId, CompanyId = companyId, Code = "4100", Name = "Service Revenue", SubType = "REV-01", Type = GlAccountType.Income, Currency = "USD" },
-                    new GlAccount { Id = addedExpenseId, CompanyId = companyId, Code = "5200", Name = "New Programme Expense", SubType = "EC-02", Type = GlAccountType.Expense, Currency = "USD" });
+                    new GlAccount { Id = addedExpenseId, CompanyId = companyId, Code = "5200", Name = "New Programme Expense", SubType = "EC-02", Type = GlAccountType.Expense, Currency = "USD" },
+                    new GlAccount { Id = removedExpenseId, CompanyId = companyId, Code = "5300", Name = "Removed Programme Expense", SubType = "EC-03", Type = GlAccountType.Expense, Currency = "USD" });
                 seed.AccountingPeriods.Add(new AccountingPeriod
                 {
                     Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 1,
@@ -662,7 +664,8 @@ namespace ApexERP.Tests
                 new[]
                 {
                     new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 100m),
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 50m)
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 50m),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, removedExpenseId, null, "Removed Programme Expense", "EC-03", 20m)
                 }, Guid.NewGuid());
             original.Status = PublicSectorBudgetVersionStatus.Approved;
             original.ApprovedBy = Guid.NewGuid();
@@ -716,7 +719,7 @@ namespace ApexERP.Tests
             Assert.True(report.FinalBudgetAvailable);
             Assert.True(report.ComparableActualsAvailable, report.ComparabilityMessage);
             Assert.True(report.OriginalToFinalExplanationsComplete);
-            Assert.Equal(3, report.Lines.Count);
+            Assert.Equal(4, report.Lines.Count);
             Assert.Equal("Vote", report.Lines[0].FundCentreLevel);
             Assert.Equal(string.Empty, report.Lines[0].CostCentreCode);
             var expense = Assert.Single(report.Lines, x => x.AccountCode == "5100");
@@ -730,6 +733,11 @@ namespace ApexERP.Tests
             Assert.Equal(0m, added.OriginalBudget);
             Assert.Equal(30m, added.FinalBudget);
             Assert.Equal(10m, added.ActualOnComparableBasis);
+            var removed = Assert.Single(report.Lines, x => x.AccountCode == "5300");
+            Assert.Equal(20m, removed.OriginalBudget);
+            Assert.Equal(0m, removed.FinalBudget);
+            Assert.Equal(0m, removed.ActualOnComparableBasis);
+            Assert.Equal(0m, removed.Variance);
             var approvedRecon = Assert.Single(report.Reconciliations);
             Assert.Equal(PublicSectorBudgetReconciliationStatus.Approved, approvedRecon.Status);
             Assert.Equal(10m, approvedRecon.RevenueAmount);
