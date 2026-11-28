@@ -112,6 +112,7 @@ namespace ApexERP.Domain.Entities
     {
         public Guid ExpectedCashSourceId { get; set; }
         public Guid BudgetVersionId { get; set; }
+        public int SubmissionRevision { get; set; } = 1;
         public DateTime PeriodStart { get; set; }
         public DateTime PeriodEnd { get; set; }
         public int RecordCount { get; set; }
