@@ -33,7 +33,7 @@ export default function PublicSectorPage() {
   const [cashApPayments, setCashApPayments] = useState<any[]>([]);
   const [cashActualDraft, setCashActualDraft] = useState({ budgetVersionId: "", budgetVersionLineId: "", sourceKind: "BankTransaction", sourceRecordId: "", eventKind: "CashPayment", effectiveDate: new Date().toISOString().slice(0, 10), cashFlowSection: "Operating" });
   const [budgetDraftId, setBudgetDraftId] = useState<string | null>(null);
-  const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "" });
+  const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "", amendmentNature: "" });
   const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", amount: 0 }]);
   const [varianceDraft, setVarianceDraft] = useState({ budgetVersionLineId: "", explanation: "", evidenceReference: "" });
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +66,7 @@ export default function PublicSectorPage() {
       const response = await api.post("/public-sector/budget-versions", {
         financialYear: year,
         ...budgetDraft,
+        amendmentNature: budgetDraft.kind === "Revised" ? budgetDraft.amendmentNature : null,
         lines: budgetLines.map((line) => ({ ...line, amount: Number(line.amount) })),
       });
       setBudgetDraftId(response.data.id);
@@ -475,7 +476,7 @@ export default function PublicSectorPage() {
             <h3 className="font-semibold">Create an original or revised budget version</h3>
             <p className="text-xs text-slate-500">The draft is not included in the financial statement until an independent approver finalises its approval workflow.</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div><label className="label">Version type</label><select className="input" value={budgetDraft.kind} onChange={(e) => setBudgetDraft({ ...budgetDraft, kind: e.target.value })}><option value="Original">Original</option><option value="Revised">Revised</option></select></div>
+              <div><label className="label">Version type</label><select className="input" value={budgetDraft.kind} onChange={(e) => setBudgetDraft({ ...budgetDraft, kind: e.target.value, amendmentNature: "" })}><option value="Original">Original</option><option value="Revised">Revised</option></select></div>
               <div><label className="label">Currency</label><input className="input" maxLength={3} required value={budgetDraft.currency} onChange={(e) => setBudgetDraft({ ...budgetDraft, currency: e.target.value.toUpperCase() })} /></div>
               <div><label className="label">Budget accounting basis</label><select className="input" value={budgetDraft.accountingBasis} onChange={(e) => setBudgetDraft({ ...budgetDraft, accountingBasis: e.target.value })}><option value="Accrual">Accrual</option><option value="Cash">Cash</option></select></div>
               <div><label className="label">Classification basis</label><input className="input" required value={budgetDraft.classificationBasis} onChange={(e) => setBudgetDraft({ ...budgetDraft, classificationBasis: e.target.value })} placeholder="Approved Treasury classification" /></div>
@@ -484,7 +485,10 @@ export default function PublicSectorPage() {
               <div><label className="label">Authority reference</label><input className="input" required value={budgetDraft.authorityReference} onChange={(e) => setBudgetDraft({ ...budgetDraft, authorityReference: e.target.value })} placeholder="Appropriation Act / authority" /></div>
               <div><label className="label">Period start</label><input className="input" type="date" required value={budgetDraft.periodStart.slice(0, 10)} onChange={(e) => setBudgetDraft({ ...budgetDraft, periodStart: `${e.target.value}T00:00:00.000Z` })} /></div>
               <div><label className="label">Period end (exclusive)</label><input className="input" type="date" required value={budgetDraft.periodEnd.slice(0, 10)} onChange={(e) => setBudgetDraft({ ...budgetDraft, periodEnd: `${e.target.value}T00:00:00.000Z` })} /></div>
-              {budgetDraft.kind === "Revised" && <div className="md:col-span-3"><label className="label">Reason for revision</label><textarea className="input" required value={budgetDraft.amendmentReason} onChange={(e) => setBudgetDraft({ ...budgetDraft, amendmentReason: e.target.value })} /></div>}
+              {budgetDraft.kind === "Revised" && <>
+                <div><label className="label">Nature of authorised change</label><select className="input" required value={budgetDraft.amendmentNature} onChange={(e) => setBudgetDraft({ ...budgetDraft, amendmentNature: e.target.value })}><option value="">Select amendment nature</option><option value="ReallocationWithinBudget">Reallocation within the approved budget</option><option value="OtherAuthorisedFactors">Other authorised factors</option><option value="Mixed">Both reallocations and other authorised factors</option></select></div>
+                <div className="md:col-span-3"><label className="label">Reason for revision</label><textarea className="input" required value={budgetDraft.amendmentReason} onChange={(e) => setBudgetDraft({ ...budgetDraft, amendmentReason: e.target.value })} /></div>
+              </>}
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between"><h4 className="font-medium text-sm">Budget lines</h4><button type="button" className="btn-secondary" onClick={() => setBudgetLines((current) => [...current, { fundCentreId: "", glAccountId: "", costCentreId: null, description: "", classificationCode: "", amount: 0 }])}>Add line</button></div>
