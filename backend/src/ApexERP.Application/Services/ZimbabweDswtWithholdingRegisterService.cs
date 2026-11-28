@@ -33,6 +33,21 @@ public sealed record ZimbabweDswtMonthlyReturnLine(
     DateTime? BankReconciledAt,
     ZimbabweDswtRecordStatus Status);
 
+
+public sealed record ZimbabweDswtMonthlyReturnSummary(
+    string TaxpayerTin,
+    string TaxpayerName,
+    int TaxYear,
+    int TaxPeriod,
+    string CurrencyOfDeclaration,
+    decimal GrossPaymentsSubjectToDswt,
+    decimal TaxableIncome,
+    decimal CalculatedTaxAmount,
+    decimal SupplierNetRemittance,
+    decimal RemittedToZimra,
+    decimal NotYetRemitted,
+    int PaymentCount);
+
 /// <summary>
 /// Persists intermediary-confirmed DSWT withholding evidence and produces a company-scoped
 /// monthly register. It deliberately does not post GL journals or infer an AP cash settlement:
@@ -314,6 +329,65 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             new { record.RemittedToZimraAt, EvidenceReference = evidenceReference.Trim() });
         await _db.SaveChangesAsync(ct);
         return record;
+    }
+
+
+    /// <summary>
+    /// Produces a form-aligned monthly preparation summary. The published ZIMRA return
+    /// expresses the declaration in USD; this implementation refuses to invent FX
+    /// conversions when any source payment is denominated in another currency.
+    /// This is a preparation/export schedule, not TaRMS submission.
+    /// </summary>
+    public async Task<ZimbabweDswtMonthlyReturnSummary> GenerateMonthlyReturnSummaryAsync(
+        Guid companyId, int year, int month, string taxpayerTin, CancellationToken ct = default)
+    {
+        if (companyId == Guid.Empty) throw new ArgumentException("A company is required.", nameof(companyId));
+        if (year < 2026 || month is < 1 or > 12)
+            throw new ArgumentOutOfRangeException(nameof(month), "DSWT reporting period must be a valid month from 2026 onward.");
+        if (string.IsNullOrWhiteSpace(taxpayerTin) || taxpayerTin.Trim().Length > 40)
+            throw new ArgumentException("The registered ZIMRA TIN is required and must not exceed 40 characters.", nameof(taxpayerTin));
+
+        var company = await _db.Companies.FirstOrDefaultAsync(x => x.Id == companyId, ct)
+            ?? throw new InvalidOperationException("Company not found.");
+        var records = await _db.ZimbabweDswtWithholdingRecords
+            .Where(x => x.CompanyId == companyId && x.TaxPeriodYear == year &&
+                        x.TaxPeriodMonth == month && x.Status != ZimbabweDswtRecordStatus.Reversed)
+            .ToListAsync(ct);
+        if (records.Any(x => !string.Equals(x.Currency, "USD", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("The ZIMRA DSWT return requires a USD declaration. At least one source payment is non-USD; no return has been produced because transaction-level approved USD conversion evidence is not yet captured.");
+
+        var gross = records.Sum(x => x.GrossPaymentAmount);
+        var tax = records.Sum(x => x.WithheldAmount);
+        var net = records.Sum(x => x.SupplierRemittanceAmount);
+        var remitted = records.Where(x => x.Status == ZimbabweDswtRecordStatus.RemittedToZimra)
+            .Sum(x => x.WithheldAmount);
+        return new ZimbabweDswtMonthlyReturnSummary(
+            taxpayerTin.Trim(), company.Name, year, month, "USD",
+            gross, gross, tax, net, remitted, tax - remitted, records.Count);
+    }
+
+    public async Task<string> GenerateMonthlyReturnCsvAsync(
+        Guid companyId, int year, int month, string taxpayerTin, CancellationToken ct = default)
+    {
+        var summary = await GenerateMonthlyReturnSummaryAsync(companyId, year, month, taxpayerTin, ct);
+        static string Q(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
+        var rows = new[]
+        {
+            "TIN,Name of tax payer,Tax year,Tax period,Currency of declaration,Gross payments subject to DSWT (USD),Taxable income (USD),Calculated tax amount (USD),Supplier net remittance (USD),Remitted to ZIMRA (USD),Not yet remitted (USD),Payment count",
+            string.Join(",", new[]
+            {
+                Q(summary.TaxpayerTin), Q(summary.TaxpayerName), summary.TaxYear.ToString(),
+                summary.TaxPeriod.ToString("00"), Q(summary.CurrencyOfDeclaration),
+                summary.GrossPaymentsSubjectToDswt.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                summary.TaxableIncome.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                summary.CalculatedTaxAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                summary.SupplierNetRemittance.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                summary.RemittedToZimra.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                summary.NotYetRemitted.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                summary.PaymentCount.ToString()
+            })
+        };
+        return string.Join(Environment.NewLine, rows) + Environment.NewLine;
     }
 
     public Task<List<ZimbabweDswtMonthlyReturnLine>> GenerateMonthlyRegisterAsync(
