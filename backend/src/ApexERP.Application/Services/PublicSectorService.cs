@@ -1298,6 +1298,7 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("The AR receipt must be posted to the general ledger before budget capture.");
                 var allocations = await _db.ArReceiptAllocations.Where(x => x.ArReceiptId == receipt.Id).ToListAsync(ct);
                 if (allocations.Count == 0 || allocations.Any(x => x.AmountApplied <= 0m) ||
+                    allocations.Select(x => x.ArInvoiceId).Distinct().Count() != allocations.Count ||
                     allocations.Sum(x => x.AmountApplied) != receipt.Amount)
                     throw new InvalidOperationException("The AR receipt must be fully allocated across its invoice settlements before IPSAS 24 capture.");
                 var invoiceIds = allocations.Select(x => x.ArInvoiceId).Distinct().ToArray();
@@ -1367,6 +1368,7 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("The AP payment requires a recorded independent authorisation before budget capture.");
                 var allocations = await _db.ApPaymentAllocations.Where(x => x.ApPaymentId == payment.Id).ToListAsync(ct);
                 if (allocations.Count == 0 || allocations.Any(x => x.AmountApplied <= 0m) ||
+                    allocations.Select(x => x.ApInvoiceId).Distinct().Count() != allocations.Count ||
                     allocations.Sum(x => x.AmountApplied) != payment.Amount)
                     throw new InvalidOperationException("The AP payment must be fully allocated across its invoice settlements before IPSAS 24 capture.");
                 var invoiceIds = allocations.Select(x => x.ApInvoiceId).Distinct().ToArray();
