@@ -16,6 +16,7 @@ public sealed record CreateModifiedCashPolicyRequest(
     DateTime ReportingPeriodStart, DateTime ReportingPeriodEnd, int PostPeriodRecognitionWindowDays,
     ModifiedCashBudgetTreatment Treatment, IReadOnlyCollection<ModifiedCashMappingInput> Mappings);
 public sealed record CreateModifiedCashRecognitionRequest(Guid CommitmentId, Guid GoodsReceiptLineId, string EvidenceReference);
+public sealed record CreateModifiedCashReversalRequest(string EvidenceReference);
 
 [Route("api/v1/public-sector/modified-cash")]
 public sealed class ModifiedCashRecognitionController : ApiControllerBase
@@ -257,6 +258,62 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
     }
 
+    [HttpPost("ledger-events/{id:guid}/reverse")]
+    [HasPermission(Permissions.PublicSectorBudgetOverride)]
+    public async Task<IActionResult> CreateReversal(Guid id, CreateModifiedCashReversalRequest req, CancellationToken ct)
+    {
+        try
+        {
+            var reversal = await _db.InTransactionAsync(async token =>
+            {
+                await _db.AcquireTransactionLockAsync($"ipsas24-modified-cash-reversal:{CompanyId:N}:{id:N}", token);
+                var original = await _db.ModifiedCashRecognitionLedgerEvents.SingleOrDefaultAsync(x =>
+                    x.Id == id && x.CompanyId == CompanyId &&
+                    x.Status == ModifiedCashLedgerEventStatus.Certified &&
+                    x.EventKind == ModifiedCashLedgerEventKind.Recognition &&
+                    !x.OriginalEventId.HasValue, token)
+                    ?? throw new InvalidOperationException("Only an original certified recognition event can be reversed.");
+                if (original.PreparedBy == UserId || original.CertifiedBy == UserId)
+                    throw new InvalidOperationException("The original preparer or certifier cannot initiate its reversal.");
+                if (string.IsNullOrWhiteSpace(req.EvidenceReference) || req.EvidenceReference.Trim().Length > 1000)
+                    throw new InvalidOperationException("A reversal evidence reference of up to 1,000 characters is required.");
+                if (await _db.ModifiedCashRecognitionLedgerEvents.AnyAsync(x =>
+                    x.CompanyId == CompanyId && x.OriginalEventId == original.Id, token))
+                    throw new InvalidOperationException("This recognition event already has a reversal.");
+                var policy = await _db.ModifiedCashRecognitionPolicies.SingleOrDefaultAsync(x =>
+                    x.Id == original.PolicyId && x.CompanyId == CompanyId &&
+                    x.Status == ModifiedCashRecognitionPolicyStatus.Approved, token)
+                    ?? throw new InvalidOperationException("The original recognition policy is no longer approved.");
+                var commitment = await _db.Commitments.SingleOrDefaultAsync(x =>
+                    x.Id == original.CommitmentId && x.CompanyId == CompanyId, token)
+                    ?? throw new InvalidOperationException("The source commitment no longer exists.");
+                if (commitment.RealisedAmount != 0m)
+                    throw new InvalidOperationException("A commitment with realised expenditure cannot be fully reversed through this workflow; a linked settlement/liquidation adapter is required.");
+                var acceptedAt = DateTime.UtcNow;
+                if (acceptedAt > policy.ReportingPeriodEnd.AddDays(policy.PostPeriodRecognitionWindowDays))
+                    throw new InvalidOperationException("The reversal evidence falls outside the approved post-period recognition window.");
+                var reversal = new ModifiedCashRecognitionLedgerEvent
+                {
+                    CompanyId = CompanyId, PolicyId = policy.Id, CommitmentId = original.CommitmentId,
+                    SourceEventId = original.SourceEventId, SourceEventKind = original.SourceEventKind,
+                    EventKind = ModifiedCashLedgerEventKind.Reversal, OriginalEventId = original.Id,
+                    Amount = original.Amount, EventDate = original.EventDate,
+                    EvidenceAcceptedAt = acceptedAt, EvidenceReference = req.EvidenceReference.Trim(),
+                    Status = ModifiedCashLedgerEventStatus.Draft, PreparedBy = UserId, CreatedBy = UserId
+                };
+                _db.ModifiedCashRecognitionLedgerEvents.Add(reversal);
+                _audit.Record(CompanyId, UserId, "ModifiedCashRecognitionLedgerEvent.ReversalCreated",
+                    "PublicSector", nameof(ModifiedCashRecognitionLedgerEvent), reversal.Id, null,
+                    new { OriginalEventId = original.Id, original.CommitmentId, original.SourceEventId,
+                        original.Amount, ReversalEvidence = reversal.EvidenceReference });
+                await _db.SaveChangesAsync(token);
+                return reversal;
+            }, ct);
+            return Ok(reversal);
+        }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
     [HttpPost("ledger-events/{id:guid}/submit")]
     [HasPermission(Permissions.PublicSectorBudgetOverride)]
     public async Task<IActionResult> SubmitLedgerEvent(Guid id, CancellationToken ct)
@@ -309,8 +366,6 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                     x.Id == ledger.PolicyId && x.CompanyId == CompanyId &&
                     x.Status == ModifiedCashRecognitionPolicyStatus.Approved, token)
                     ?? throw new InvalidOperationException("The recognition policy is no longer approved.");
-                if (ledger.EventKind != ModifiedCashLedgerEventKind.Recognition)
-                    throw new InvalidOperationException("Only GoodsReceived recognition events are enabled. Liquidation and reversal events require dedicated source adapters and are fail-closed.");
                 if (ledger.EventKind == ModifiedCashLedgerEventKind.Recognition)
                 {
                     var commitment = await _db.Commitments.SingleOrDefaultAsync(x =>
@@ -343,6 +398,39 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                     if (ledger.Amount > commitment.Amount - commitment.RealisedAmount - recognisedBalance)
                         throw new InvalidOperationException("The live commitment balance no longer supports this recognition.");
                 }
+                else if (ledger.EventKind == ModifiedCashLedgerEventKind.Reversal)
+                {
+                    if (!ledger.OriginalEventId.HasValue)
+                        throw new InvalidOperationException("A reversal must identify its original recognition event.");
+                    var original = await _db.ModifiedCashRecognitionLedgerEvents.SingleOrDefaultAsync(x =>
+                        x.Id == ledger.OriginalEventId.Value && x.CompanyId == CompanyId &&
+                        x.Status == ModifiedCashLedgerEventStatus.Certified &&
+                        x.EventKind == ModifiedCashLedgerEventKind.Recognition &&
+                        !x.OriginalEventId.HasValue, token);
+                    var commitment = await _db.Commitments.SingleOrDefaultAsync(x =>
+                        x.Id == ledger.CommitmentId && x.CompanyId == CompanyId, token);
+                    if (original == null || commitment == null ||
+                        original.CommitmentId != ledger.CommitmentId ||
+                        original.PolicyId != ledger.PolicyId ||
+                        original.SourceEventId != ledger.SourceEventId ||
+                        original.Amount != ledger.Amount || original.EventDate != ledger.EventDate ||
+                        commitment.RealisedAmount != 0m ||
+                        await _db.ModifiedCashRecognitionLedgerEvents.AnyAsync(x =>
+                            x.CompanyId == CompanyId && x.OriginalEventId == original.Id && x.Id != ledger.Id, token))
+                        throw new InvalidOperationException("The reversal no longer matches an unreversed, unsettled certified recognition event.");
+                    if (original.PreparedBy == UserId || original.CertifiedBy == UserId)
+                        throw new InvalidOperationException("The original preparer or certifier cannot certify its reversal.");
+                    var mapping = await _db.ModifiedCashRecognitionMappings.SingleOrDefaultAsync(x =>
+                        x.CompanyId == CompanyId && x.PolicyId == policy.Id &&
+                        x.SourceEventKind == ledger.SourceEventKind, token);
+                    if (mapping == null || !await _db.PublicSectorBudgetVersionLines.AnyAsync(x =>
+                        x.Id == mapping.BudgetVersionLineId && x.CompanyId == CompanyId &&
+                        x.BudgetVersionId == policy.BudgetVersionId &&
+                        x.FundCentreId == commitment.FundCentreId, token))
+                        throw new InvalidOperationException("The reversal budget classification mapping is no longer valid.");
+                }
+                else
+                    throw new InvalidOperationException("Unsupported modified-cash ledger event kind.");
                 ledger.Status = ModifiedCashLedgerEventStatus.Certified;
                 ledger.CertifiedBy = UserId;
                 ledger.CertifiedAt = DateTime.UtcNow;
