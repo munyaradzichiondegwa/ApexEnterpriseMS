@@ -713,7 +713,7 @@ namespace ApexERP.Tests
             Assert.Equal(original.Id, report.OriginalBudgetVersionId);
             Assert.Equal(revised.Id, report.FinalBudgetVersionId);
             Assert.True(report.FinalBudgetAvailable);
-            Assert.True(report.ComparableActualsAvailable);
+            Assert.True(report.ComparableActualsAvailable, report.ComparabilityMessage);
             Assert.Equal(3, report.Lines.Count);
             var expense = Assert.Single(report.Lines, x => x.AccountCode == "5100");
             Assert.Equal(100m, expense.OriginalBudget);
