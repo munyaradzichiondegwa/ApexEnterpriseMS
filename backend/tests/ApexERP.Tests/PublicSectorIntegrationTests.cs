@@ -1329,6 +1329,16 @@ namespace ApexERP.Tests
             var comparisonLine = Assert.Single(comparison.Lines);
             Assert.Equal(75m, comparisonLine.ActualOnComparableBasis);
 
+            // Reconciliation must also revalidate each record, not just the aggregate
+            // count and control total. A changed reference on an excluded record is stale.
+            var changedExcludedSource = await ctx.BankTransactions.SingleAsync(x => x.Id == unmappedBankTransactionId);
+            changedExcludedSource.Reference = "BANK-REF-CHANGED-AFTER-REVIEW";
+            await ctx.SaveChangesAsync();
+            var changedSourceComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.False(changedSourceComparison.ComparableActualsAvailable);
+            Assert.Contains("source record population", changedSourceComparison.ComparabilityMessage,
+                StringComparison.OrdinalIgnoreCase);
+
             // A new, unlinked bank movement after certification must block comparability;
             // the earlier independently reviewed exclusion remains a valid covered source row.
             ctx.BankTransactions.Add(new BankTransaction
