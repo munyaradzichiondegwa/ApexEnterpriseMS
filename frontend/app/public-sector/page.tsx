@@ -36,6 +36,12 @@ export default function PublicSectorPage() {
   const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "", amendmentNature: "" });
   const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", amount: 0 }]);
   const [varianceDraft, setVarianceDraft] = useState({ budgetVersionLineId: "", explanation: "", evidenceReference: "" });
+  const [budgetReconciliations, setBudgetReconciliations] = useState<any[]>([]);
+  const [budgetReconciliationDraft, setBudgetReconciliationDraft] = useState({
+    type: "Basis", description: "", statementSection: "Revenue",
+    revenueAmount: 0, expenseAmount: 0, operatingAmount: 0,
+    investingAmount: 0, financingAmount: 0, supportingReference: "",
+  });
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [newFund, setNewFund] = useState({ code: "", name: "", level: "Vote", financialYear: year, appropriationAmount: 0, carriedForward: 0 });
@@ -115,14 +121,61 @@ export default function PublicSectorPage() {
     setBudgetComparisonLoading(true);
     setError(null);
     try {
-      const response = await api.get(`/public-sector/budget-versions/comparison?year=${year}`);
+      const [response, reconciliations] = await Promise.all([
+        api.get(`/public-sector/budget-versions/comparison?year=${year}`),
+        api.get(`/public-sector/budget-reconciliations?year=${year}`),
+      ]);
       setBudgetComparison(response.data);
+      setBudgetReconciliations(reconciliations.data);
     } catch (err) {
       setBudgetComparison(null);
       setError(extractErrorMessage(err));
+      try {
+        const reconciliations = await api.get(`/public-sector/budget-reconciliations?year=${year}`);
+        setBudgetReconciliations(reconciliations.data);
+      } catch { setBudgetReconciliations([]); }
     } finally {
       setBudgetComparisonLoading(false);
     }
+  }
+
+  async function createBudgetReconciliation(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const cashBasis = budgetComparison?.accountingBasis === "Cash";
+      const payload = {
+        financialYear: year,
+        ...budgetReconciliationDraft,
+        revenueAmount: cashBasis ? 0 : Number(budgetReconciliationDraft.revenueAmount),
+        expenseAmount: cashBasis ? 0 : Number(budgetReconciliationDraft.expenseAmount),
+        operatingAmount: Number(budgetReconciliationDraft.operatingAmount),
+        investingAmount: Number(budgetReconciliationDraft.investingAmount),
+        financingAmount: Number(budgetReconciliationDraft.financingAmount),
+      };
+      await api.post("/public-sector/budget-reconciliations", payload);
+      setBudgetReconciliationDraft({
+        type: "Basis", description: "", statementSection: cashBasis ? "Operating" : "Revenue",
+        revenueAmount: 0, expenseAmount: 0, operatingAmount: 0,
+        investingAmount: 0, financingAmount: 0, supportingReference: "",
+      });
+      setMsg("Reconciliation adjustment created. Submit it for independent workflow approval.");
+      await loadBudgetComparison();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function budgetReconciliationAction(id: string, action: "submit" | "finalise") {
+    setError(null);
+    try {
+      if (action === "submit")
+        await api.post(`/public-sector/budget-reconciliations/${id}/submit-for-approval`);
+      else
+        await api.post(`/public-sector/budget-reconciliations/${id}/finalise-approval`);
+      setMsg(action === "submit"
+        ? "Reconciliation submitted to the approval workflow. An independent approver must approve it before finalisation."
+        : "Approved reconciliation finalised.");
+      await loadBudgetComparison();
+    } catch (err) { setError(extractErrorMessage(err)); }
   }
 
   async function loadCashActuals() {
@@ -851,9 +904,80 @@ export default function PublicSectorPage() {
                   </table>
                 </div>
               </div>
+              <div className="border rounded-lg p-4 space-y-3">
+                <h3 className="font-semibold">Reconciliation of budget and financial-statement actuals</h3>
+                <p className="text-xs text-slate-500">Record basis, timing, entity or presentation differences with supporting evidence. Accrual budgets may reconcile revenue, expense and the three net cash-flow sections; cash budgets may reconcile only operating, investing and financing cash flows. Every row requires independent workflow approval.</p>
+                <form onSubmit={createBudgetReconciliation} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <select className="input" required value={budgetReconciliationDraft.type}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, type: e.target.value })}>
+                    <option value="Basis">Basis difference</option><option value="Timing">Timing difference</option>
+                    <option value="Entity">Entity difference</option><option value="Presentation">Presentation difference</option>
+                  </select>
+                  <select className="input" required value={budgetReconciliationDraft.statementSection}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, statementSection: e.target.value })}>
+                    {budgetComparison?.accountingBasis === "Cash" ? <>
+                      <option value="Operating">Net cash flows — operating</option>
+                      <option value="Investing">Net cash flows — investing</option>
+                      <option value="Financing">Net cash flows — financing</option>
+                    </> : <>
+                      <option value="Revenue">Total revenue</option><option value="Expense">Total expense</option>
+                      <option value="Operating">Net cash flows — operating</option>
+                      <option value="Investing">Net cash flows — investing</option>
+                      <option value="Financing">Net cash flows — financing</option>
+                    </>}
+                  </select>
+                  <input className="input" required placeholder="Description of difference"
+                    value={budgetReconciliationDraft.description}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, description: e.target.value })} />
+                  {budgetComparison?.accountingBasis !== "Cash" && <>
+                    <input className="input" type="number" step="0.01" placeholder="Revenue adjustment"
+                      value={budgetReconciliationDraft.revenueAmount}
+                      onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, revenueAmount: Number(e.target.value) })} />
+                    <input className="input" type="number" step="0.01" placeholder="Expense adjustment"
+                      value={budgetReconciliationDraft.expenseAmount}
+                      onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, expenseAmount: Number(e.target.value) })} />
+                  </>}
+                  <input className="input" type="number" step="0.01" placeholder="Operating cash-flow adjustment"
+                    value={budgetReconciliationDraft.operatingAmount}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, operatingAmount: Number(e.target.value) })} />
+                  <input className="input" type="number" step="0.01" placeholder="Investing cash-flow adjustment"
+                    value={budgetReconciliationDraft.investingAmount}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, investingAmount: Number(e.target.value) })} />
+                  <input className="input" type="number" step="0.01" placeholder="Financing cash-flow adjustment"
+                    value={budgetReconciliationDraft.financingAmount}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, financingAmount: Number(e.target.value) })} />
+                  <input className="input md:col-span-2" required placeholder="Supporting workpaper / evidence reference"
+                    value={budgetReconciliationDraft.supportingReference}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, supportingReference: e.target.value })} />
+                  <button className="btn-secondary md:col-span-3"
+                    disabled={!budgetComparison?.finalBudgetAvailable || !budgetReconciliationDraft.description.trim() || !budgetReconciliationDraft.supportingReference.trim()}>
+                    Create reconciliation adjustment
+                  </button>
+                </form>
+                <div className="overflow-x-auto">
+                  <table className="table-base">
+                    <thead><tr><th>Type</th><th>Description</th><th>Section</th><th>Revenue</th><th>Expense</th><th>Operating</th><th>Investing</th><th>Financing</th><th>Status</th><th>Action</th></tr></thead>
+                    <tbody>{budgetReconciliations.map((item: any) => (
+                      <tr key={item.id}>
+                        <td>{item.type}</td><td>{item.description}</td><td>{item.statementSection}</td>
+                        <td>{fmt(item.revenueAmount)}</td><td>{fmt(item.expenseAmount)}</td>
+                        <td>{fmt(item.operatingAmount)}</td><td>{fmt(item.investingAmount)}</td>
+                        <td>{fmt(item.financingAmount)}</td><td>{item.status}</td>
+                        <td>{item.status === "Draft"
+                          ? <button type="button" className="btn-secondary" onClick={() => budgetReconciliationAction(item.id, "submit")}>Submit</button>
+                          : item.status === "PendingApproval"
+                            ? <button type="button" className="btn-secondary" onClick={() => budgetReconciliationAction(item.id, "finalise")}>Finalise approved workflow</button>
+                            : "—"}</td>
+                      </tr>
+                    ))}
+                    {!budgetReconciliations.length && <tr><td colSpan={10} className="text-center text-slate-500">No reconciliation adjustments recorded.</td></tr>}</tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-slate-500">For pending rows, complete the independent approval in the Approvals workspace first, then finalise it here. Draft and pending rows are not included in the published comparison.</p>
+              </div>
               {budgetComparison.reconciliations?.length > 0 && (
                 <div>
-                  <h3 className="font-semibold mb-2">Reconciliation to financial statements</h3>
+                  <h3 className="font-semibold mb-2">Approved reconciliation adjustments included in comparison</h3>
                   <table className="table-base">
                     <thead><tr><th>Difference type</th><th>Description</th><th>Statement section</th><th className="text-right">Revenue</th><th className="text-right">Expense</th><th className="text-right">Operating</th><th className="text-right">Investing</th><th className="text-right">Financing</th></tr></thead>
                     <tbody>{budgetComparison.reconciliations.map((item: any) => (
