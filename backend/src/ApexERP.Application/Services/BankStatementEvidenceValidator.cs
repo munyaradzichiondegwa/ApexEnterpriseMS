@@ -46,7 +46,7 @@ namespace ApexERP.Application.Services
     /// </summary>
     public static class BankStatementEvidenceValidator
     {
-        public static BankStatementEvidenceValidation Validate(
+        public static BankStatementEvidenceValidation ValidateIntegrity(
             BankStatementEvidenceEnvelope envelope,
             IReadOnlySet<Guid> existingImportBatchIds,
             IReadOnlySet<string> existingStatementKeys)
@@ -74,17 +74,29 @@ namespace ApexERP.Application.Services
             if (!CryptographicOperations.FixedTimeEquals(expectedDigest, actualDigest))
                 return Reject("The original statement bytes do not match the supplied SHA-256 digest.");
 
+            return new BankStatementEvidenceValidation(
+                true,
+                "Statement bytes, identity and metadata passed integrity validation; bank origin remains unauthenticated.",
+                Convert.ToHexString(actualDigest).ToLowerInvariant(),
+                envelope.OriginalBytes.Length);
+        }
+
+        public static BankStatementEvidenceValidation Validate(
+            BankStatementEvidenceEnvelope envelope,
+            IReadOnlySet<Guid> existingImportBatchIds,
+            IReadOnlySet<string> existingStatementKeys)
+        {
+            var integrity = ValidateIntegrity(envelope, existingImportBatchIds, existingStatementKeys);
+            if (!integrity.IsValid) return integrity;
             if (envelope.AuthenticationMethod == BankStatementAuthenticationMethod.UnverifiedUpload ||
                 !Enum.IsDefined(envelope.AuthenticationMethod) ||
                 !envelope.AuthenticationVerified ||
                 string.IsNullOrWhiteSpace(envelope.AuthenticationEvidenceReference))
                 return Reject("Verified bank-origin authentication is required; a file hash alone is insufficient.");
-
-            return new BankStatementEvidenceValidation(
-                true,
-                "Statement bytes and verified source-authentication metadata passed validation.",
-                Convert.ToHexString(actualDigest).ToLowerInvariant(),
-                envelope.OriginalBytes.Length);
+            return integrity with
+            {
+                Reason = "Statement bytes and verified source-authentication metadata passed validation."
+            };
         }
 
         private static bool TryParseSha256(string? value, out byte[] digest)
