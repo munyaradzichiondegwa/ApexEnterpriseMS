@@ -3624,6 +3624,37 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("FundCentres");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetAllocation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<Guid?>("CostCentreId").HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<Guid>("FundCentreId").HasColumnType("uuid");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CostCentreId");
+                    b.HasIndex("FundCentreId");
+                    b.HasIndex("GlAccountId");
+                    b.HasIndex("CompanyId", "FundCentreId", "GlAccountId", "CostCentreId", "FinancialYear")
+                        .IsUnique().HasFilter("\"CostCentreId\" IS NOT NULL");
+                    b.HasIndex("CompanyId", "FundCentreId", "GlAccountId", "FinancialYear")
+                        .IsUnique().HasFilter("\"CostCentreId\" IS NULL");
+                    b.ToTable("PublicSectorBudgetAllocations", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetAllocations_Amount", "\"Amount\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.GlAccount", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7529,6 +7560,26 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasOne("ApexERP.Domain.Entities.CustomerOrganisation", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetAllocation", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.CostCentre", null)
+                        .WithMany()
+                        .HasForeignKey("CostCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.GlAccount", null)
+                        .WithMany()
+                        .HasForeignKey("GlAccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
