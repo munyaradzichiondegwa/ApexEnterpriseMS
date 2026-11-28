@@ -3763,6 +3763,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
                     b.HasIndex("BudgetVersionId");
+                    b.HasIndex("ExpectedCashSourceId")
+                        .HasDatabaseName("IX_PublicSectorCashSourceSubmissions_ExpectedCashSourceId");
                     b.HasIndex("CompanyId", "ExpectedCashSourceId")
                         .IsUnique().HasDatabaseName("UX_PublicSectorCashSourceSubmission_Source");
                     b.ToTable("PublicSectorCashSourceSubmissions", t =>
