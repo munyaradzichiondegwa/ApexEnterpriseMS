@@ -1392,6 +1392,8 @@ namespace ApexERP.Tests
                     ExchangeRateSource = certifiedReversal.ExchangeRateSource,
                     ExchangeRateSourceReference = certifiedReversal.ExchangeRateSourceReference,
                     ExchangeRateIsInverse = certifiedReversal.ExchangeRateIsInverse,
+                    ExchangeRateApprovedBy = certifiedReversal.ExchangeRateApprovedBy,
+                    ExchangeRateApprovedAt = certifiedReversal.ExchangeRateApprovedAt,
                     CashFlowSection = certifiedReversal.CashFlowSection,
                     ReversalOfId = certifiedReversal.Id,
                     ReversalReason = "Attempt to chain a second compensating reversal.",
