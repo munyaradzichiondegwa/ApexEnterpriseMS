@@ -17,11 +17,13 @@ namespace ApexERP.Application.Services
     {
         private readonly ApexErpDbContext _db;
         private readonly ApprovalChainService _approvalChains;
+        private readonly AuditService _audit;
 
-        public TenderService(ApexErpDbContext db, ApprovalChainService approvalChains)
+        public TenderService(ApexErpDbContext db, ApprovalChainService approvalChains, AuditService? audit = null)
         {
             _db = db;
             _approvalChains = approvalChains;
+            _audit = audit ?? new AuditService(db);
         }
 
         public async Task<TenderNotice> CreateTenderAsync(Guid companyId, string title, string? specifications, DateTime submissionDeadline, CancellationToken ct = default)
@@ -40,6 +42,9 @@ namespace ApexERP.Application.Services
                 Status = TenderStatus.Open
             };
             _db.TenderNotices.Add(tender);
+            _audit.Record(companyId, _db.CurrentUserId, "Tender.Created", "PublicSector",
+                nameof(TenderNotice), tender.Id, null,
+                new { tender.TenderNo, tender.Title, tender.SubmissionDeadline, tender.Status });
             await _db.SaveChangesAsync(ct);
             return tender;
         }
@@ -79,6 +84,9 @@ namespace ApexERP.Application.Services
                     IsLateRejected = now > tender.SubmissionDeadline
                 };
                 _db.TenderBids.Add(bid);
+                _audit.Record(companyId, _db.CurrentUserId, "Tender.BidSubmitted", "PublicSector",
+                    nameof(TenderBid), bid.Id, null,
+                    new { bid.TenderNoticeId, bid.VendorId, bid.PriceAmount, bid.SubmittedAt, bid.IsLateRejected });
                 await _db.SaveChangesAsync(token);
                 return bid;
             }, ct);
@@ -111,7 +119,11 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("Only an open tender can enter evaluation.");
                 if (DateTime.UtcNow <= tender.SubmissionDeadline)
                     throw new InvalidOperationException("Tender evaluation cannot begin before the submission deadline.");
+                var previousStatus = tender.Status;
                 tender.Status = TenderStatus.Evaluation;
+                _audit.Record(companyId, _db.CurrentUserId, "Tender.EvaluationStarted", "PublicSector",
+                    nameof(TenderNotice), tender.Id, new { Status = previousStatus },
+                    new { tender.Status, StartedAt = DateTime.UtcNow });
                 await _db.SaveChangesAsync(token);
                 return tender;
             }, ct);
@@ -166,10 +178,15 @@ namespace ApexERP.Application.Services
                         throw new InvalidOperationException("Evaluation weights are locked by the first scored bid and cannot be changed for this tender.");
                 }
 
+                var previousScores = new { bid.PriceScore, bid.TechnicalScore, bid.LocalContentScore, bid.TotalScore };
                 bid.PriceScore = priceScore;
                 bid.TechnicalScore = technicalScore;
                 bid.LocalContentScore = localContentScore;
                 bid.TotalScore = (priceScore * priceWeight) + (technicalScore * technicalWeight) + (localContentScore * localContentWeight);
+                _audit.Record(companyId, _db.CurrentUserId, "Tender.BidScored", "PublicSector",
+                    nameof(TenderBid), bid.Id, previousScores,
+                    new { bid.PriceScore, bid.TechnicalScore, bid.LocalContentScore, bid.TotalScore,
+                        PriceWeight = priceWeight, TechnicalWeight = technicalWeight, LocalContentWeight = localContentWeight });
                 await _db.SaveChangesAsync(token);
                 return bid;
             }, ct);
@@ -236,9 +253,15 @@ namespace ApexERP.Application.Services
                 .ThenBy(b => b.PriceAmount).ThenBy(b => b.SubmittedAt).First();
             if (highestRankedBid.Id != winningBid.Id)
                 throw new InvalidOperationException("The award must go to the highest-scoring eligible bid (lowest price breaks a score tie).");
+            var beforeAward = new { tender.Status, tender.AwardedVendorId, tender.AwardJustification };
             tender.Status = TenderStatus.Awarded;
             tender.AwardedVendorId = winningVendorId;
             tender.AwardJustification = justification;
+            _audit.Record(companyId, _db.CurrentUserId, "Tender.Awarded", "PublicSector",
+                nameof(TenderNotice), tender.Id, beforeAward,
+                new { tender.Status, tender.AwardedVendorId, tender.AwardJustification,
+                    WinningBidId = winningBid.Id, WinningBidAmount = winningBid.PriceAmount,
+                    ApprovalWorkflowId = approvedWorkflow.Id });
             await _db.SaveChangesAsync(ct);
             return tender;
         }
