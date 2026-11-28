@@ -376,6 +376,13 @@ namespace ApexERP.Infrastructure.Data
             // (PostgreSQL permits many NULLs in a unique index, so ordinary entries are unaffected).
             modelBuilder.Entity<JournalEntry>().HasIndex(j => j.ReversalOfId).IsUnique();
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => x.CashSourceSubmissionId)
+                .HasDatabaseName("IX_CashSourceReconciliationLines_Submission");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId })
+                .IsUnique().HasFilter("\"IsExcluded\" = TRUE")
+                .HasDatabaseName("UX_CashSourceReconciliationLine_Exclusion");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
                 .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId, x.BudgetExecutionActualId })
                 .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
