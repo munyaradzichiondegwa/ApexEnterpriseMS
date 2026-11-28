@@ -25,7 +25,8 @@ namespace ApexERP.API.Controllers
     public record ReviewBudgetVarianceExplanationRequest(bool Accepted, string? ReviewNote);
     public record CreateBudgetReconciliationRequest(int FinancialYear, PublicSectorBudgetReconciliationType Type,
         string Description, string StatementSection, decimal OperatingAmount, decimal InvestingAmount,
-        decimal FinancingAmount, string SupportingReference, decimal RevenueAmount = 0m, decimal ExpenseAmount = 0m);
+        decimal FinancingAmount, string SupportingReference, decimal RevenueAmount = 0m, decimal ExpenseAmount = 0m,
+        bool IsNoDifferenceAttestation = false);
     public record CreateBudgetExecutionActualRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
         PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualSourceKind SourceKind,
         Guid SourceRecordId, DateTime EffectiveDate, CashFlowCategory CashFlowSection);
@@ -152,7 +153,7 @@ namespace ApexERP.API.Controllers
                 var item = await _publicSector.CreateBudgetReconciliationAsync(CompanyId, req.FinancialYear,
                     req.Type, req.Description, req.StatementSection, req.OperatingAmount,
                     req.InvestingAmount, req.FinancingAmount, req.SupportingReference, UserId, ct,
-                    req.RevenueAmount, req.ExpenseAmount);
+                    req.RevenueAmount, req.ExpenseAmount, req.IsNoDifferenceAttestation);
                 return Ok(item);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
