@@ -16,6 +16,7 @@
 ### Implemented controls
 
 - Original and final budget snapshots are separately approved, immutable versions. The comparison presents original budget, final budget and actual on a comparable basis. A budget dimension absent from one version is shown as zero in that version, not as an unknown amount.
+- Comparison rows expose the Fund Centre hierarchy level (Vote, Programme or Sub-Programme) and the Cost Centre code/name alongside GL classification, so the legislative and management dimensions are visible in both the UI and CSV export.
 - Accrual actuals are derived from posted/reversed GL journal lines and are withheld when reporting period, company entity scope, functional currency, classification, Fund Centre or cost-centre dimensions do not agree. Untagged actuals in budgeted GL accounts block comparability.
 - Cash actuals are derived only from certified bank transactions, AR receipts and AP payments. Accrual GL totals are never substituted for cash actuals. The supported AR/AP adapter is deliberately restricted to fully allocated, posted, tax-free invoice settlements with explicit Fund Centre/GL mapping; VAT/WHT and cost-centre splits are not inferred.
 - Revised budgets require an authority reference, a reason and an explicit amendment nature: reallocation within the approved budget, other authorised factors, or both. The comparison exposes the classification and reason for original-to-final changes. Legacy revised budgets without this new metadata remain incomplete for disclosure.
