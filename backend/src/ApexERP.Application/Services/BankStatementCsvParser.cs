@@ -129,6 +129,7 @@ public static class BankStatementCsvParser
         var record = new List<string>();
         var field = new StringBuilder();
         var inQuotes = false;
+        var quoteClosed = false;
         var fieldStarted = false;
         for (var i = 0; i < text.Length; i++)
         {
@@ -142,7 +143,11 @@ public static class BankStatementCsvParser
                         field.Append('"');
                         i++;
                     }
-                    else inQuotes = false;
+                    else
+                    {
+                        inQuotes = false;
+                        quoteClosed = true;
+                    }
                 }
                 else field.Append(ch);
                 continue;
