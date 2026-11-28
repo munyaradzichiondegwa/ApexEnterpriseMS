@@ -2,6 +2,14 @@
 
 Maps every section of *APEXERP: Enterprise Readiness and Accounting Controls Enhancement Specification v1.0* to the repository, and says how each item was checked.
 
+## Zimbabwe IPSAS regulatory update (28 November 2026)
+
+- Zimbabwe's current prescription framework is SI 137 of 2026, which replaces SI 41 of 2019. The 2026 regulations include IPSAS in the prescribed standards; IFAC still describes public-sector accrual IPSAS implementation as phased / partially adopted. See [IFAC's Zimbabwe jurisdiction profile](https://www.ifac.org/about-ifac/membership/profile/zimbabwe).
+- The [IPSASB 2026 Handbook](https://www.ipsasb.org/publications/2026-handbook-international-public-sector-accounting-standards-board-pronouncements) is now the current international handbook reference (standards published through 31 January 2026).
+- Added `docs/ZIMBABWE_IPSAS_REPORTING_REQUIREMENTS.md` to map the Treasury Circular No. 3 of 2025 reporting set and supporting schedules to existing ApexERP capabilities, with explicit implementation gaps. The circular is for the 2024 reporting year and is not asserted to be the current 2026 submission instruction.
+- The Zimbabwe 2026 statutory-pack baseline already contains ZIMRA's published ZWG monthly PAYE bands. Added a PostgreSQL regression that pins all six monthly thresholds, rates and deductions to the official ZIMRA source URL. The pack remains Draft/baseline-only; this test does not constitute legal approval or authorise activation.
+- Full IPSAS 24 budget comparison remains incomplete: current approved allocations are expense-only and do not yet represent original/final budget amendments, revenue budgets, comparable-basis actuals and the required basis reconciliation. Official government classification dictionaries must come from Treasury/Accountant-General; ApexERP must not invent them.
+
 | Mark | Meaning |
 |---|---|
 | ✔ **Verified** | Executed in the build environment: unit tests, real PostgreSQL 16, shell scripts, or the frontend type-check, tests and production build |
