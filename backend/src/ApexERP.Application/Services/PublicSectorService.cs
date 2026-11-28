@@ -496,6 +496,32 @@ namespace ApexERP.Application.Services
             throw new InvalidOperationException($"Source kind {expected.SourceKind} has no configured source adapter.");
         }
 
+        public async Task<IReadOnlyList<(string SourceKind, Guid SourceRecordId)>> GetReviewedCashSourceExclusionsAsync(
+            Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
+        {
+            var latestSubmissions = (await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId).ToListAsync(ct))
+                .GroupBy(x => x.ExpectedCashSourceId)
+                .Select(group => group.OrderByDescending(x => x.SubmissionRevision).First())
+                .Where(x => x.Status == "Reviewed" && x.RecordLevelStatus == "Reviewed")
+                .Select(x => x.Id).ToArray();
+            if (latestSubmissions.Length == 0)
+                return Array.Empty<(string SourceKind, Guid SourceRecordId)>();
+
+            var rows = await (
+                from line in _db.PublicSectorCashSourceReconciliationLines
+                join submission in _db.PublicSectorCashSourceSubmissions
+                    on line.CashSourceSubmissionId equals submission.Id
+                join expected in _db.PublicSectorExpectedCashSources
+                    on submission.ExpectedCashSourceId equals expected.Id
+                where line.CompanyId == companyId && submission.CompanyId == companyId &&
+                    expected.CompanyId == companyId && latestSubmissions.Contains(submission.Id) &&
+                    line.IsExcluded
+                select new { expected.SourceKind, line.SourceRecordId }
+            ).ToListAsync(ct);
+            return rows.Select(x => (x.SourceKind, x.SourceRecordId)).Distinct().ToList();
+        }
+
         public async Task<bool> HasCompleteCashSourceRegisterAsync(
             Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
         {
@@ -1164,15 +1190,23 @@ namespace ApexERP.Application.Services
                         x.Status == "Certified", ct);
                     var liveCounts = await GetCashPeriodSourceCountsAsync(companyId, actualVersion.PeriodStart,
                         actualVersion.PeriodEnd, ct);
-                    if (zeroAttestation == null &&
-                        liveCounts.Bank + liveCounts.Ar + liveCounts.Ap == 0)
+                    var liveSourceCount = liveCounts.Bank + liveCounts.Ar + liveCounts.Ap;
+                    var excludedBankCount = reviewedExclusions.Count(x => x.SourceKind == "BankAccount");
+                    var excludedArCount = reviewedExclusions.Count(x => x.SourceKind == "ReceivablesControl");
+                    var excludedApCount = reviewedExclusions.Count(x => x.SourceKind == "PayablesControl");
+                    var allActivityExplicitlyExcluded = liveSourceCount > 0 &&
+                        liveCounts.Bank == excludedBankCount && liveCounts.Ar == excludedArCount &&
+                        liveCounts.Ap == excludedApCount &&
+                        await HasCompleteCashSourceRegisterAsync(companyId, actualVersion.Id, ct);
+                    if (liveSourceCount == 0 && zeroAttestation == null)
                         comparabilityIssues.Add("No source-backed cash actuals or independently certified zero-activity attestation are available.");
-                    else if (zeroAttestation != null &&
-                        (liveCounts.Bank + liveCounts.Ar + liveCounts.Ap != 0 ||
-                         zeroAttestation.ObservedBankTransactionCount != 0 ||
+                    else if (liveSourceCount > 0 && !allActivityExplicitlyExcluded)
+                        comparabilityIssues.Add("Cash source activity exists but no cash actuals were captured and the complete source population is not covered by independently reviewed exclusions.");
+                    else if (zeroAttestation != null && liveSourceCount == 0 &&
+                        (zeroAttestation.ObservedBankTransactionCount != 0 ||
                          zeroAttestation.ObservedArReceiptCount != 0 ||
                          zeroAttestation.ObservedApPaymentCount != 0))
-                        comparabilityIssues.Add("The zero-activity attestation is no longer valid: source activity exists or its recorded source counts are inconsistent.");
+                        comparabilityIssues.Add("The zero-activity attestation is no longer valid: its recorded source counts are inconsistent.");
                 }
 
                 var capturedSourceIds = cashActuals
@@ -1183,19 +1217,9 @@ namespace ApexERP.Application.Services
                 var apPaymentIds = cashActuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ApPayment)
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
                 // A source record may instead be explicitly excluded, with a mandatory reason,
-                // in a record-level reconciliation that has been independently reviewed.
-                var reviewedExclusions = await (
-                    from line in _db.PublicSectorCashSourceReconciliationLines
-                    join submission in _db.PublicSectorCashSourceSubmissions
-                        on line.CashSourceSubmissionId equals submission.Id
-                    join expected in _db.PublicSectorExpectedCashSources
-                        on submission.ExpectedCashSourceId equals expected.Id
-                    where line.CompanyId == companyId && submission.CompanyId == companyId &&
-                        expected.CompanyId == companyId && submission.BudgetVersionId == actualVersion.Id &&
-                        submission.Status == "Reviewed" && submission.RecordLevelStatus == "Reviewed" &&
-                        line.IsExcluded
-                    select new { line.SourceRecordId, expected.SourceKind }
-                ).ToListAsync(ct);
+                // in the latest record-level reconciliation revision independently reviewed.
+                var reviewedExclusions = await GetReviewedCashSourceExclusionsAsync(
+                    companyId, actualVersion.Id, ct);
                 var excludedBankSourceIds = reviewedExclusions.Where(x => x.SourceKind == "BankAccount")
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
                 var excludedArReceiptIds = reviewedExclusions.Where(x => x.SourceKind == "ReceivablesControl")
