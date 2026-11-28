@@ -304,38 +304,39 @@ namespace ApexERP.Application.Services
                 if (cashActuals.Count == 0)
                     comparabilityIssues.Add("No source-backed cash actuals or explicit zero-activity certification are available. Load and approve actuals on the budget basis before presenting comparable amounts.");
 
-                var capturedSourceIds = cashActuals.Select(x => x.SourceRecordId).Distinct().ToArray();
-                // Every bank-statement movement in the budget period must be accounted for.
-                // Unreconciled, unlinked and unposted movements are exceptions too; filtering
-                // them out would make source coverage appear complete when cash evidence is missing.
+                var capturedSourceIds = cashActuals
+                    .Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
+                    .Select(x => x.SourceRecordId).Distinct().ToArray();
+                var arReceiptIds = cashActuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ArReceipt)
+                    .Select(x => x.SourceRecordId).Distinct().ToArray();
+                var apPaymentIds = cashActuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ApPayment)
+                    .Select(x => x.SourceRecordId).Distinct().ToArray();
+                var capturedSettlementJournalIds = await _db.ArReceipts
+                    .Where(x => x.CompanyId == companyId && arReceiptIds.Contains(x.Id) && x.JournalEntryId.HasValue)
+                    .Select(x => x.JournalEntryId!.Value)
+                    .Concat(_db.ApPayments.Where(x => x.CompanyId == companyId &&
+                        apPaymentIds.Contains(x.Id) && x.JournalEntryId.HasValue)
+                        .Select(x => x.JournalEntryId!.Value))
+                    .Distinct().ToArrayAsync(ct);
+
+                // A reconciled bank movement may be represented by its posted AR receipt/AP
+                // payment source. Match those settlements through their posted journal identity;
+                // do not require duplicate capture of the same underlying cash movement.
                 var periodBankMovements = _db.BankTransactions.Where(x => x.CompanyId == companyId &&
                     x.TransactionDate >= actualVersion.PeriodStart && x.TransactionDate < actualVersion.PeriodEnd);
                 var uncapturedMovements = await periodBankMovements.CountAsync(x =>
                     !x.IsReconciled || !x.JournalEntryId.HasValue ||
                     !_db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
                         j.CompanyId == companyId && j.Status == JournalStatus.Posted) ||
-                    !capturedSourceIds.Contains(x.Id), ct);
+                    (!capturedSourceIds.Contains(x.Id) && !capturedSettlementJournalIds.Contains(x.JournalEntryId.Value)), ct);
                 var pendingCashActuals = cashActuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
-                var invalidCertifiedCashActuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
-                        x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id &&
-                        x.Status == PublicSectorBudgetActualStatus.Certified)
-                    .CountAsync(actual => !_db.BankTransactions.Any(bank => bank.Id == actual.SourceRecordId &&
-                        bank.CompanyId == companyId && bank.IsReconciled && bank.JournalEntryId.HasValue &&
-                        ((actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt &&
-                            bank.Credit == actual.Amount && bank.Debit == 0m) ||
-                         (actual.EventKind == PublicSectorBudgetActualEventKind.CashPayment &&
-                            bank.Debit == actual.Amount && bank.Credit == 0m)) &&
-                        _db.BankAccounts.Any(account => account.Id == bank.BankAccountId &&
-                            account.CompanyId == companyId && account.Currency == actual.Currency) &&
-                        _db.JournalEntries.Any(journal => journal.Id == bank.JournalEntryId.Value &&
-                            journal.CompanyId == companyId && journal.Status == JournalStatus.Posted) &&
-                        _db.GlAccounts.Any(account => account.Id == actual.GlAccountId &&
-                            account.CompanyId == companyId && account.CashFlowCategory == actual.CashFlowSection) &&
-                        _db.JournalLines.Where(line => line.JournalEntryId == bank.JournalEntryId.Value &&
-                            line.GlAccountId == actual.GlAccountId && line.FundCentreId == actual.FundCentreId &&
-                            line.CostCentreId == actual.CostCentreId)
-                            .Sum(line => actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt
-                                ? line.Credit - line.Debit : line.Debit - line.Credit) == actual.Amount), ct);
+                var certifiedActuals = cashActuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
+                var invalidCertifiedCashActuals = 0;
+                foreach (var certifiedActual in certifiedActuals)
+                {
+                    if (!await IsCertifiedCashActualSourceValidAsync(companyId, certifiedActual, ct))
+                        invalidCertifiedCashActuals++;
+                }
 
                 if (uncapturedMovements > 0)
                     comparabilityIssues.Add($"Cash actual source coverage is incomplete: {uncapturedMovements} posted bank movements are unreconciled or have not been captured.");
