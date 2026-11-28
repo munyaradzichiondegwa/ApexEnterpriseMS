@@ -380,7 +380,7 @@ namespace ApexERP.Infrastructure.Data
                 .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
                 .HasIndex(x => x.BudgetExecutionActualId).IsUnique()
-                .HasFilter("\\"BudgetExecutionActualId\\" IS NOT NULL")
+                .HasFilter("\"BudgetExecutionActualId\" IS NOT NULL")
                 .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
             // One accounting period per company per month (guards concurrent first-posting races).
             modelBuilder.Entity<AccountingPeriod>().HasIndex(p => new { p.CompanyId, p.Year, p.PeriodNo }).IsUnique();
@@ -403,8 +403,8 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>().ToTable(t =>
             {
                 t.HasCheckConstraint("CK_CashSourceReconciliationLine_Amounts",
-                    "(\\"IsExcluded\\" = TRUE AND \\"BudgetExecutionActualId\\" IS NULL AND \\"AllocatedAmount\\" = 0 AND length(trim(\\"ExclusionReason\\")) > 0) OR (\\"IsExcluded\\" = FALSE AND \\"BudgetExecutionActualId\\" IS NOT NULL AND \\"AllocatedAmount\\" > 0 AND \\"ExclusionReason\\" IS NULL)");
-                t.HasCheckConstraint("CK_CashSourceReconciliationLine_SourceAmount", "\\"SourceAmount\\" > 0");
+                    "(\"IsExcluded\" = TRUE AND \"BudgetExecutionActualId\" IS NULL AND \"AllocatedAmount\" = 0 AND length(trim(\"ExclusionReason\")) > 0) OR (\"IsExcluded\" = FALSE AND \"BudgetExecutionActualId\" IS NOT NULL AND \"AllocatedAmount\" > 0 AND \"ExclusionReason\" IS NULL)");
+                t.HasCheckConstraint("CK_CashSourceReconciliationLine_SourceAmount", "\"SourceAmount\" > 0");
             });
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
                 .HasOne<PublicSectorCashSourceSubmission>().WithMany()
