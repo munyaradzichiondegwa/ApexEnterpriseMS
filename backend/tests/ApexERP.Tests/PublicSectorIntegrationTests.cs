@@ -1343,6 +1343,28 @@ namespace ApexERP.Tests
             var comparisonLine = Assert.Single(comparison.Lines);
             Assert.Equal(75m, comparisonLine.ActualOnComparableBasis);
 
+            // A certified actual is corrected only through an independently certified
+            // compensating event. The original source evidence remains in the audit trail.
+            var reversalInitiatorId = Guid.NewGuid();
+            var reversalCertifierId = Guid.NewGuid();
+            var reversal = await service.CreateBudgetExecutionActualReversalAsync(companyId,
+                certified.Id, "Correct the original classification after independent source review.",
+                reversalInitiatorId);
+            Assert.Equal(PublicSectorBudgetActualStatus.Draft, reversal.Status);
+            Assert.Equal(certified.Id, reversal.ReversalOfId);
+            Assert.Equal(PublicSectorBudgetActualEventKind.CashReceipt, reversal.EventKind);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CreateBudgetExecutionActualReversalAsync(companyId, certified.Id,
+                    "Attempt a duplicate reversal of the same certified source allocation.", Guid.NewGuid()));
+            await service.SubmitBudgetExecutionActualAsync(companyId, reversal.Id, reversalInitiatorId);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CertifyBudgetExecutionActualAsync(companyId, reversal.Id, reversalInitiatorId));
+            var certifiedReversal = await service.CertifyBudgetExecutionActualAsync(
+                companyId, reversal.Id, reversalCertifierId);
+            Assert.Equal(PublicSectorBudgetActualStatus.Certified, certifiedReversal.Status);
+            Assert.Equal(PublicSectorBudgetActualStatus.Reversed,
+                (await ctx.PublicSectorBudgetExecutionActuals.SingleAsync(x => x.Id == certified.Id)).Status);
+
             // A source population can be corrected by a new numbered revision without
             // mutating the previously reviewed submission. Certified actuals are reused
             // only within the latest revision's record-level mapping.
@@ -1356,8 +1378,20 @@ namespace ApexERP.Tests
             await service.SubmitCashSourceSubmissionAsync(companyId, revisedSubmission.Id, preparerId);
             await service.ReviewCashSourceSubmissionAsync(companyId, revisedSubmission.Id, sourceReviewerId,
                 true, "Replacement statement control totals independently confirmed.");
+
+            // Reuse the genuine bank transaction identifier only after the certified
+            // reversal and in the new source-submission revision; no fabricated source ID.
+            var replacementPreparerId = Guid.NewGuid();
+            var replacementCertifierId = Guid.NewGuid();
+            var replacementActual = await service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
+                budgetLineId, PublicSectorBudgetActualEventKind.CashPayment,
+                PublicSectorBudgetActualSourceKind.BankTransaction, bankTransactionId,
+                effectiveDate, CashFlowCategory.Operating, replacementPreparerId);
+            await service.SubmitBudgetExecutionActualAsync(companyId, replacementActual.Id, replacementPreparerId);
+            await service.CertifyBudgetExecutionActualAsync(companyId, replacementActual.Id, replacementCertifierId);
+
             await service.AddCashSourceReconciliationLineAsync(companyId, revisedSubmission.Id,
-                bankTransactionId, "BANK-REF-001", certified.Id, false, null, reconciliationPreparerId);
+                bankTransactionId, "BANK-REF-001", replacementActual.Id, false, null, reconciliationPreparerId);
             await service.AddCashSourceReconciliationLineAsync(companyId, revisedSubmission.Id,
                 unmappedBankTransactionId, "BANK-REF-002", null, true,
                 "Separately identified bank charge excluded from this budget line under the approved classification workpaper.",
