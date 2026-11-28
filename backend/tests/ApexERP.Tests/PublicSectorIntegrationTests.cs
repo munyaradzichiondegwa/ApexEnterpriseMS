@@ -224,6 +224,10 @@ namespace ApexERP.Tests
             Assert.Equal(nextVote.Id, nextProgram.ParentId);
             Assert.Equal(100m, nextProgram.CarriedForwardAmount);
 
+            var yearEndAudit = await ctx.AuditLogs.Where(x =>
+                x.Action == "PublicSectorYearEnd.Closed" && x.EntityId == vote.Id).ToListAsync();
+            Assert.Single(yearEndAudit);
+
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.CloseYearEndAsync(companyId, program.Id, carryForward: true));
         }
