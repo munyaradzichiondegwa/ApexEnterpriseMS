@@ -44,6 +44,17 @@ public sealed class BankStatementCsvParserTests
     }
 
     [Fact]
+    public void Parse_RejectsCharactersAfterClosingQuotedField()
+    {
+        var csv = Header + "\n" +
+            "txn-001,2026-12-15T10:00:00Z,\"Quoted\"x,REF-001,10,0,USD";
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            Parse(csv, debits: 10m, credits: 0m, opening: 100m, closing: 90m));
+        Assert.Contains("after closing quote", error.Message);
+    }
+
+    [Fact]
     public void Parse_RejectsDuplicateExternalTransactionIdentity()
     {
         var csv = Header + "\n" +
