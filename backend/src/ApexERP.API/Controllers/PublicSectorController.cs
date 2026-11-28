@@ -24,6 +24,7 @@ namespace ApexERP.API.Controllers
     public record CreateBudgetExecutionActualRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
         PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualSourceKind SourceKind,
         Guid SourceRecordId, DateTime EffectiveDate, CashFlowCategory CashFlowSection);
+    public record CreateCashPeriodAttestationRequest(Guid BudgetVersionId, string EvidenceReference);
 
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
@@ -500,6 +501,44 @@ namespace ApexERP.API.Controllers
                 },
                 ApprovedAdjustments = adjustments
             });
+        }
+
+        [HttpGet("cash-period-attestations")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetCashPeriodAttestations([FromQuery] int year, CancellationToken ct)
+        {
+            var items = await _db.PublicSectorCashPeriodAttestations
+                .Where(x => x.CompanyId == CompanyId && x.PeriodStart.Year == year)
+                .OrderBy(x => x.PeriodStart).ToListAsync(ct);
+            return Ok(items);
+        }
+
+        [HttpPost("cash-period-attestations")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateCashPeriodAttestation(CreateCashPeriodAttestationRequest req, CancellationToken ct)
+        {
+            try
+            {
+                return Ok(await _publicSector.CreateCashPeriodAttestationAsync(CompanyId,
+                    req.BudgetVersionId, req.EvidenceReference, UserId, ct));
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("cash-period-attestations/{id}/submit")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitCashPeriodAttestation(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.SubmitCashPeriodAttestationAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("cash-period-attestations/{id}/certify")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CertifyCashPeriodAttestation(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.CertifyCashPeriodAttestationAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
         [HttpPost("budget-execution-actuals")]
