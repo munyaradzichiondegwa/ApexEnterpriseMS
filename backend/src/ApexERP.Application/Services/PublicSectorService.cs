@@ -215,6 +215,9 @@ namespace ApexERP.Application.Services
                 .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber)
                 .FirstOrDefaultAsync(ct)
                 ?? throw new InvalidOperationException("An approved IPSAS 24 budget version is required before recording a reconciliation.");
+            if (approvedBudget.AccountingBasis != AccountingBasis.Accrual &&
+                approvedBudget.AccountingBasis != AccountingBasis.Cash)
+                throw new InvalidOperationException("This budget accounting basis does not yet have an approved IPSAS 24 reconciliation adapter.");
             if (approvedBudget.AccountingBasis == AccountingBasis.Cash &&
                 (revenueAmount != 0m || expenseAmount != 0m))
                 throw new InvalidOperationException("Cash-basis IPSAS 24 reconciliations must reconcile net cash flows by operating, investing and financing activities; revenue and expense reconciliation totals apply to accrual-basis budgets only.");
