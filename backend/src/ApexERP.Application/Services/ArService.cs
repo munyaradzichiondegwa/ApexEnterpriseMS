@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ApexERP.Application.Services
 {
-    public record ArInvoiceLineRequest(string Description, decimal Quantity, decimal UnitPrice, Guid? TaxCodeId, Guid GlAccountId);
+    public record ArInvoiceLineRequest(string Description, decimal Quantity, decimal UnitPrice, Guid? TaxCodeId, Guid GlAccountId, Guid? CostCentreId = null);
 
     /// <summary>PRD Module 3 (Accounts Receivable): invoicing, VAT calculation on standard/zero/exempt
     /// codes, receipting with multi-invoice allocation, ageing, and GL auto-posting.</summary>
@@ -38,6 +38,9 @@ namespace ApexERP.Application.Services
             decimal subtotal = 0, vatTotal = 0;
             foreach (var lr in lineRequests)
             {
+                if (lr.CostCentreId.HasValue && !await _db.CostCentres.AnyAsync(x =>
+                    x.Id == lr.CostCentreId.Value && x.CompanyId == companyId && x.IsActive, ct))
+                    throw new InvalidOperationException("Invoice line cost centre is not active in this company.");
                 var lineSubtotal = Math.Round(lr.Quantity * lr.UnitPrice, 6);
                 var rate = lr.TaxCodeId.HasValue && taxCodes.TryGetValue(lr.TaxCodeId.Value, out var tc) ? tc.Rate : 0m;
                 var lineVat = Math.Round(lineSubtotal * rate, 6);
@@ -53,7 +56,8 @@ namespace ApexERP.Application.Services
                     LineSubtotal = lineSubtotal,
                     LineVat = lineVat,
                     LineTotal = lineSubtotal + lineVat,
-                    GlAccountId = lr.GlAccountId
+                    GlAccountId = lr.GlAccountId,
+                    CostCentreId = lr.CostCentreId
                 });
             }
 
@@ -97,9 +101,9 @@ namespace ApexERP.Application.Services
             {
                 new(arControlAccountId, invoice.Total, 0, invoice.Currency, invoice.ExchangeRate, null, $"AR: {invoice.InvoiceNo}")
             };
-            foreach (var group in invoice.Lines.GroupBy(l => l.GlAccountId))
-                glLines.Add(new GlLineRequest(group.Key, 0, group.Sum(l => l.LineSubtotal), invoice.Currency, invoice.ExchangeRate, null,
-                    "Sales income", invoice.FundCentreId, invoice.GrantId));
+            foreach (var group in invoice.Lines.GroupBy(l => new { l.GlAccountId, l.CostCentreId }))
+                glLines.Add(new GlLineRequest(group.Key.GlAccountId, 0, group.Sum(l => l.LineSubtotal), invoice.Currency,
+                    invoice.ExchangeRate, group.Key.CostCentreId, "Sales income", invoice.FundCentreId, invoice.GrantId));
             if (invoice.VatAmount > 0)
                 glLines.Add(new GlLineRequest(vatOutputAccountId, 0, invoice.VatAmount, invoice.Currency, invoice.ExchangeRate, null, "VAT output"));
 
