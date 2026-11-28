@@ -56,10 +56,10 @@ public sealed class BankStatementImportController : ApiControllerBase
         if (req.PeriodStart.Kind != DateTimeKind.Utc || req.PeriodEnd.Kind != DateTimeKind.Utc ||
             req.PeriodStart >= req.PeriodEnd)
             return BadRequest(new { error = "Statement period boundaries must be valid UTC timestamps." });
-        if (string.IsNullOrWhiteSpace(req.SourceInstitution) ||
-            string.IsNullOrWhiteSpace(req.SourceAccountReference) ||
-            string.IsNullOrWhiteSpace(req.StatementReference))
-            return BadRequest(new { error = "Bank institution, account reference and statement reference are required." });
+        if (string.IsNullOrWhiteSpace(req.SourceInstitution) || req.SourceInstitution.Trim().Length > 160 ||
+            string.IsNullOrWhiteSpace(req.SourceAccountReference) || req.SourceAccountReference.Trim().Length > 160 ||
+            string.IsNullOrWhiteSpace(req.StatementReference) || req.StatementReference.Trim().Length > 160)
+            return BadRequest(new { error = "Bank institution, account reference and statement reference are required and must not exceed 160 characters." });
 
         try
         {
@@ -69,8 +69,10 @@ public sealed class BankStatementImportController : ApiControllerBase
             var sha = Convert.ToHexString(SHA256.HashData(originalBytes)).ToLowerInvariant();
             var mediaType = string.IsNullOrWhiteSpace(req.File.ContentType)
                 ? "text/csv" : req.File.ContentType.Trim();
-            var fileName = Path.GetFileName(req.File.FileName);
+            var fileName = Path.GetFileName(req.File.FileName.Replace('\\\\', '/'));
             if (string.IsNullOrWhiteSpace(fileName)) fileName = "bank-statement.csv";
+            if (fileName.Length > 255 || mediaType.Length > 128)
+                return BadRequest(new { error = "File name or media type exceeds the supported metadata length." });
 
             var batch = await _db.InTransactionAsync(async token =>
             {
@@ -173,8 +175,10 @@ public sealed class BankStatementImportController : ApiControllerBase
                 var batch = await _db.BankStatementImportBatches.SingleOrDefaultAsync(x =>
                     x.Id == id && x.CompanyId == CompanyId, token)
                     ?? throw new InvalidOperationException("Bank statement import batch not found.");
-                if (batch.Status != BankStatementImportStatus.PendingAuthentication || batch.UploadedBy != UserId)
-                    throw new InvalidOperationException("Only the uploader may submit an unauthenticated statement batch for independent bank confirmation.");
+                await _db.AcquireTransactionLockAsync($"bank-statement-batch:{CompanyId:N}:{id:N}", token);
+                if (batch.Status != BankStatementImportStatus.PendingAuthentication ||
+                    batch.UploadedBy != UserId || batch.AuthenticationWorkflowId.HasValue)
+                    throw new InvalidOperationException("Only the uploader may submit an unsubmitted, unauthenticated statement batch for independent bank confirmation.");
                 var workflow = await _approvals.SubmitForApprovalAsync(CompanyId,
                     "BankStatementImportBatch", batch.Id, nameof(BankStatementImportBatch),
                     UserId, batch.TotalDebits + batch.TotalCredits, null,
@@ -197,6 +201,7 @@ public sealed class BankStatementImportController : ApiControllerBase
         {
             var batch = await _db.InTransactionAsync(async token =>
             {
+                await _db.AcquireTransactionLockAsync($"bank-statement-batch:{CompanyId:N}:{id:N}", token);
                 var item = await _db.BankStatementImportBatches.SingleOrDefaultAsync(x =>
                     x.Id == id && x.CompanyId == CompanyId, token)
                     ?? throw new InvalidOperationException("Bank statement import batch not found.");
@@ -240,6 +245,8 @@ public sealed class BankStatementImportController : ApiControllerBase
         {
             var matched = await _db.InTransactionAsync(async token =>
             {
+                await _db.AcquireTransactionLockAsync($"bank-statement-batch:{CompanyId:N}:{id:N}", token);
+                await _db.AcquireTransactionLockAsync($"bank-transaction:{CompanyId:N}:{req.BankTransactionId:N}", token);
                 var batch = await _db.BankStatementImportBatches.SingleOrDefaultAsync(x =>
                     x.Id == id && x.CompanyId == CompanyId &&
                     x.Status == BankStatementImportStatus.Authenticated, token)
@@ -311,6 +318,7 @@ public sealed class BankStatementImportController : ApiControllerBase
         {
             var excluded = await _db.InTransactionAsync(async token =>
             {
+                await _db.AcquireTransactionLockAsync($"bank-statement-batch:{CompanyId:N}:{id:N}", token);
                 var batch = await _db.BankStatementImportBatches.SingleOrDefaultAsync(x =>
                     x.Id == id && x.CompanyId == CompanyId &&
                     x.Status == BankStatementImportStatus.Authenticated, token)
@@ -346,6 +354,7 @@ public sealed class BankStatementImportController : ApiControllerBase
         {
             var batch = await _db.InTransactionAsync(async token =>
             {
+                await _db.AcquireTransactionLockAsync($"bank-statement-batch:{CompanyId:N}:{id:N}", token);
                 var item = await _db.BankStatementImportBatches.SingleOrDefaultAsync(x =>
                     x.Id == id && x.CompanyId == CompanyId &&
                     x.Status == BankStatementImportStatus.Authenticated, token)
