@@ -108,7 +108,7 @@ Implemented on the feature branch:
 
 ### Still not implemented / not verified
 
-- Budget actuals are not yet included in the IPSAS 24 comparison statement; statement comparability remains blocked for cash budgets until a period-coverage certification and reconciliation bridge are implemented.
+- Certified cash actuals from supported bank, AR receipt and AP payment sources are included in the IPSAS 24 comparison statement. Comparability is blocked when source coverage is incomplete, evidence fails revalidation, or any actual remains unapproved. This period-level gate is not yet an approved zero-activity attestation workflow.
 - Added a Public Sector screen for selecting an approved cash budget line and a bank movement, AR receipt or AP payment source, capturing the event, listing actuals, submitting for certification and certifying as a separate user. The screen filters AP payments to those with recorded independent authorisation.
 - Modified-cash commitments, source snapshot hashing, compensating reversal workflow, foreign-currency source conversion and source completeness attestations remain disabled/outstanding.
 - The cash-basis actuals are now included in the IPSAS 24 comparison using certified source-linked events, rather than accrual GL journal totals. The comparison remains unavailable on a comparable basis if any in-period bank-statement movement is unreconciled, unlinked, unposted or uncaptured, if any actual is unapproved, or if certified source evidence no longer validates.
