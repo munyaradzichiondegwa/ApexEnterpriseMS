@@ -41,8 +41,13 @@ public sealed record ZimbabweDswtMonthlyReturnLine(
 public sealed class ZimbabweDswtWithholdingRegisterService
 {
     private readonly ApexErpDbContext _db;
+    private readonly AuditService _audit;
 
-    public ZimbabweDswtWithholdingRegisterService(ApexErpDbContext db) => _db = db;
+    public ZimbabweDswtWithholdingRegisterService(ApexErpDbContext db, AuditService audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     public async Task<ZimbabweDswtWithholdingRecord> RecordWithholdingAsync(
         Guid companyId, ZimbabweDswtRecordRequest request, CancellationToken ct = default)
@@ -106,6 +111,9 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             Status = ZimbabweDswtRecordStatus.Recorded
         };
         _db.ZimbabweDswtWithholdingRecords.Add(record);
+        _audit.Record(companyId, _db.CurrentUserId, "Dswt.WithholdingRecorded", "Tax",
+            nameof(ZimbabweDswtWithholdingRecord), record.Id, null,
+            new { record.PaymentReference, record.GrossPaymentAmount, record.WithheldAmount, record.Currency, record.EvidenceReference });
         await _db.SaveChangesAsync(ct);
         return record;
     }
@@ -141,6 +149,9 @@ public sealed class ZimbabweDswtWithholdingRegisterService
                 throw new InvalidOperationException("The AP payment is already linked to another DSWT record.");
 
             record.ApPaymentId = apPaymentId;
+            _audit.Record(companyId, _db.CurrentUserId, "Dswt.ApPaymentReconciled", "Tax",
+                nameof(ZimbabweDswtWithholdingRecord), record.Id, null,
+                new { record.ApPaymentId, record.GrossPaymentAmount, record.SupplierRemittanceAmount });
             await _db.SaveChangesAsync(token);
             return record;
         }, ct);
@@ -219,6 +230,12 @@ public sealed class ZimbabweDswtWithholdingRegisterService
                 x.MatchedStatementLineHash == statementLine.Id &&
                 x.JournalEntryId == payment.JournalEntryId, token)
                 ?? throw new InvalidOperationException("The matched bank-ledger transaction does not belong to the linked AP payment.");
+            var authenticatedBatch = await _db.BankStatementImportBatches.FirstOrDefaultAsync(x =>
+                x.CompanyId == companyId && x.Id == statementLine.ImportBatchId &&
+                x.AuthenticationMethod == BankStatementOriginAuthenticationMethod.IndependentBankConfirmation &&
+                x.AuthenticatedAt.HasValue &&
+                x.Status is BankStatementImportStatus.Authenticated or BankStatementImportStatus.Certified, token)
+                ?? throw new InvalidOperationException("The statement row must belong to an independently authenticated bank statement batch.");
             var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
                 x.CompanyId == companyId && x.Id == payment.BankAccountId.Value, token)
                 ?? throw new InvalidOperationException("The AP payment bank account does not exist in this company.");
@@ -236,6 +253,9 @@ public sealed class ZimbabweDswtWithholdingRegisterService
 
             record.BankStatementTransactionId = statementLine.Id;
             record.BankReconciledAt = DateTime.UtcNow;
+            _audit.Record(companyId, _db.CurrentUserId, "Dswt.BankStatementReconciled", "Tax",
+                nameof(ZimbabweDswtWithholdingRecord), record.Id, null,
+                new { record.BankStatementTransactionId, record.BankReconciledAt, Statement = authenticatedBatch.StatementReference });
             await _db.SaveChangesAsync(token);
             return record;
         }, ct);
@@ -263,6 +283,9 @@ public sealed class ZimbabweDswtWithholdingRegisterService
         record.CertificateNumber = certificate;
         record.CertificateIssuedAt = issuedAt;
         record.Status = ZimbabweDswtRecordStatus.CertificateIssued;
+        _audit.Record(companyId, _db.CurrentUserId, "Dswt.CertificateIssued", "Tax",
+            nameof(ZimbabweDswtWithholdingRecord), record.Id, null,
+            new { record.CertificateNumber, record.CertificateIssuedAt });
         await _db.SaveChangesAsync(ct);
         return record;
     }
@@ -285,6 +308,9 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             ? evidenceReference.Trim()
             : $"{record.EvidenceReference}; ZIMRA remittance: {evidenceReference.Trim()}";
         record.Status = ZimbabweDswtRecordStatus.RemittedToZimra;
+        _audit.Record(companyId, _db.CurrentUserId, "Dswt.RemittedToZimra", "Tax",
+            nameof(ZimbabweDswtWithholdingRecord), record.Id, null,
+            new { record.RemittedToZimraAt, EvidenceReference = evidenceReference.Trim() });
         await _db.SaveChangesAsync(ct);
         return record;
     }
