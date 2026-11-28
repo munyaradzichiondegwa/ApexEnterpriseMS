@@ -53,7 +53,7 @@ public sealed class StatutoryPackIntegrationTests
         {
             var band = zwgMonthly[i];
             Assert.Equal(expectedZwgMonthly[i].From, band.GetProperty("from").GetDecimal());
-            Assert.Equal(expectedZwgMonthly[i].To.HasValue ? expectedZwgMonthly[i].To.Value : (decimal?)null,
+            Assert.Equal(expectedZwgMonthly[i].To,
                 band.GetProperty("to").ValueKind == JsonValueKind.Null ? null : band.GetProperty("to").GetDecimal());
             Assert.Equal(expectedZwgMonthly[i].Rate, band.GetProperty("rate").GetDecimal());
             Assert.Equal(expectedZwgMonthly[i].Deduction, band.GetProperty("deduction").GetDecimal());
