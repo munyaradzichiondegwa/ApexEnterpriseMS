@@ -86,3 +86,27 @@ This follows IPSAS 24 paragraphs 47–49: for a non-accrual budget, the reconcil
 PostgreSQL integration tests must prove: duplicate source-event rejection within a company; the same source identifier may exist in a different company; cross-company source/evidence access is denied; cash receipt/payment sign conventions; commitment inclusion only for an explicitly configured modified-cash basis; no accrual-GL substitution; reversals preserve the original audit trail; reporting-period cut-off uses the effective/value date; foreign-currency events use retained rate provenance; untagged or unmapped source events block issue; all three cash-flow sections reconcile independently; a one-cent (or currency-minor-unit) bridge difference fails; pending/unapproved items are excluded; and preparer self-approval is rejected.
 
 No modified-cash rule should be enabled by default. Each entity must configure and approve the precise commitment/obligation elements included in its budget basis, with the governing authority and effective date recorded.
+
+
+## Phase 2 implementation status — cash actual capture foundation
+
+Implemented on the feature branch:
+
+- Added tenant-scoped `PublicSectorBudgetExecutionActual` persistence and migration `20261128040000_AddIpsas24BudgetExecutionActuals`.
+- Added source kinds for bank transactions, AR receipts and AP payments; event direction for cash receipts/payments; budget-line, Fund Centre, GL and cash-flow section mappings; source date/reference; effective date; currency; and certification metadata.
+- Capture is restricted to approved cash-basis budget versions. Modified-cash capture remains disabled until entity-specific rules are formally configured.
+- Bank transaction capture requires a reconciled transaction linked to a posted journal and an available company bank account. AR receipt capture requires a posted journal. AP payment capture requires independent payment authorisation and a posted journal.
+- Source amount, currency, date and reference are derived from the source record rather than trusted from the API request. Source currency must equal the budget currency; FX conversion is not silently approximated.
+- A company/source-kind/source-record unique index prevents duplicate capture. Company query filtering is applied to the new entity.
+- Added draft → pending certification → certified lifecycle. The certifier must differ from the creator. PostgreSQL trigger prevents deletion, evidence edits and mutation of certification metadata after certification.
+- Added API routes under `/api/v1/public-sector/budget-execution-actuals` for capture, listing, submission and certification.
+- Added a PostgreSQL integration test for reconciled posted bank evidence, independent certification, self-certification rejection and duplicate source rejection.
+
+### Still not implemented / not verified
+
+- Budget actuals are not yet included in the IPSAS 24 comparison statement; statement comparability remains blocked for cash budgets until a period-coverage certification and reconciliation bridge are implemented.
+- No frontend cash-actual capture/review screen yet.
+- Modified-cash commitments, source snapshot hashing, compensating reversal workflow, foreign-currency source conversion and source completeness attestations remain disabled/outstanding.
+- Automated reconciliation to the three Statement of Cash Flows sections is not yet implemented.
+- The new migration, EF snapshot and PostgreSQL tests have not yet been executed in CI or against a live PostgreSQL instance in this work session.
+- After applying the migration in an environment where RLS is enabled, rerun `backend/database/hardening/002_row_level_security.sql` so the newly created company-owned table receives the database policy. Confirm the runtime role remains non-owner and has no `BYPASSRLS`.
