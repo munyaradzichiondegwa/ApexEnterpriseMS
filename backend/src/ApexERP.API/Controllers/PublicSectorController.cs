@@ -107,8 +107,8 @@ namespace ApexERP.API.Controllers
                 if (!journalPosted) return BadRequest(new { error = "The bank transaction journal is not posted." });
                 var bankAccount = await _db.BankAccounts.FirstOrDefaultAsync(x =>
                     x.Id == bankTransaction.BankAccountId && x.CompanyId == CompanyId, token);
-                if (bankAccount == null || bankAccount.Currency != bankTransaction.Currency)
-                    return BadRequest(new { error = "The remittance bank account must belong to this company and use the transaction currency." });
+                if (bankAccount == null)
+                    return BadRequest(new { error = "The remittance bank account must belong to this company." });
                 var bankLeg = await _db.JournalLines.Where(x => x.JournalEntryId == bankTransaction.JournalEntryId.Value &&
                     x.GlAccountId == bankAccount.GlAccountId).SumAsync(x => x.Credit - x.Debit, token);
                 if (bankLeg != bankTransaction.Debit)
@@ -124,6 +124,8 @@ namespace ApexERP.API.Controllers
                 if (invoices.Count != invoiceIds.Length || req.Any(item =>
                     components.SingleOrDefault(x => x.Id == item.TaxComponentId)?.InvoiceId != item.InvoiceId))
                     return BadRequest(new { error = "Every WHT component must belong to its stated company AP invoice." });
+                if (invoices.Any(x => !string.Equals(x.Currency, bankAccount.Currency, StringComparison.OrdinalIgnoreCase)))
+                    return BadRequest(new { error = "WHT remittance and originating AP invoices must use the same currency; cross-currency tax remittance requires separately evidenced conversion." });
 
                 foreach (var component in components)
                 {
