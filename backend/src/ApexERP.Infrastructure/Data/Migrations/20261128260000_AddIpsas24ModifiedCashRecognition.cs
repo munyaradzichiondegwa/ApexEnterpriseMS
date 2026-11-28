@@ -129,7 +129,7 @@ public sealed class AddIpsas24ModifiedCashRecognition : Migration
             "ModifiedCashRecognitionLedgerEvents", new[] { "CompanyId", "SourceEventId", "EventKind" }, unique: true);
         migrationBuilder.CreateIndex("UX_ModifiedCashLedger_OneReversal",
             "ModifiedCashRecognitionLedgerEvents", "OriginalEventId", unique: true,
-            filter: "\"OriginalEventId\" IS NOT NULL");
+            filter: "\"OriginalEventId\" IS NOT NULL AND \"EventKind\" = 2");
         migrationBuilder.CreateIndex("IX_ModifiedCashLedger_CommitmentStatusDate",
             "ModifiedCashRecognitionLedgerEvents", new[] { "CompanyId", "CommitmentId", "Status", "EventDate" });
         migrationBuilder.CreateIndex("IX_ModifiedCashRecognitionLedgerEvents_PolicyId",
