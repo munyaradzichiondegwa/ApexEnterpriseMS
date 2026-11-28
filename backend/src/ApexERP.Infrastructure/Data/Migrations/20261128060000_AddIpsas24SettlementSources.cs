@@ -25,7 +25,7 @@ public sealed class AddIpsas24SettlementSources : Migration
             column: "FundCentreId");
 
         migrationBuilder.AddForeignKey(
-            name: "FK_ArInvoice_FundCentre",
+            name: "FK_ArInvoices_FundCentres_FundCentreId",
             table: "ArInvoices",
             column: "FundCentreId",
             principalTable: "FundCentres",
