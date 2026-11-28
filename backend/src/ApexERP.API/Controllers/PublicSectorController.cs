@@ -35,6 +35,7 @@ namespace ApexERP.API.Controllers
     public record CreateTaxAccountMappingRequest(TaxType TaxType, string Purpose, Guid? TaxCodeId, Guid GlAccountId, DateTime EffectiveFrom, DateTime? EffectiveTo);
     public record CreateTaxBudgetPolicyRequest(TaxType TaxType, Guid? TaxCodeId, TaxBudgetTreatment Treatment,
         Guid? BudgetGlAccountId, Guid? FundCentreId, Guid? CostCentreId, DateTime EffectiveFrom, DateTime? EffectiveTo);
+    public record TaxRemittanceComponentRequest(Guid InvoiceId, Guid TaxComponentId, decimal AmountApplied);
 
     public record CreateExpectedCashSourceRequest(Guid BudgetVersionId, string SourceKind, string SourceCode, string SourceName, string? SourceIdentifier, bool IsRequired, DateTime EffectiveFrom, DateTime EffectiveTo);
     public record CreateCashSourceSubmissionRequest(Guid ExpectedCashSourceId, int RecordCount,
@@ -79,6 +80,89 @@ namespace ApexERP.API.Controllers
         }
 
         // ---- IPSAS 24 tax mapping and budget-treatment controls ----
+
+        [HttpPost("bank-transactions/{id}/tax-remittance-allocations")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> AllocateWhtRemittance(Guid id,
+            IReadOnlyCollection<TaxRemittanceComponentRequest> req, CancellationToken ct)
+        {
+            if (req == null || req.Count == 0 || req.Any(x => x.AmountApplied <= 0m) ||
+                req.Select(x => x.TaxComponentId).Distinct().Count() != req.Count)
+                return BadRequest(new { error = "Provide unique positive WHT tax-component allocations." });
+            return await _db.InTransactionAsync<IActionResult>(async token =>
+            {
+                var bankTransaction = await _db.BankTransactions.FirstOrDefaultAsync(x =>
+                    x.Id == id && x.CompanyId == CompanyId, token);
+                if (bankTransaction == null) return NotFound(new { error = "Bank transaction not found." });
+                if (!bankTransaction.IsReconciled || !bankTransaction.JournalEntryId.HasValue ||
+                    bankTransaction.Debit <= 0m || bankTransaction.Credit != 0m)
+                    return BadRequest(new { error = "WHT remittance allocation requires a reconciled outgoing bank transaction with a posted journal." });
+                var journalPosted = await _db.JournalEntries.AnyAsync(x => x.Id == bankTransaction.JournalEntryId.Value &&
+                    x.CompanyId == CompanyId && x.Status == JournalStatus.Posted, token);
+                if (!journalPosted) return BadRequest(new { error = "The bank transaction journal is not posted." });
+
+                var componentIds = req.Select(x => x.TaxComponentId).ToArray();
+                var components = await _db.InvoiceTaxComponents.Where(x => x.CompanyId == CompanyId &&
+                    x.InvoiceKind == "AP" && componentIds.Contains(x.Id)).ToListAsync(token);
+                if (components.Count != componentIds.Length || components.Any(x => x.TaxType != TaxType.WHT || x.TaxCodeId.HasValue))
+                    return BadRequest(new { error = "Only code-less AP withholding-tax components can be remitted through this endpoint." });
+                var invoiceIds = req.Select(x => x.InvoiceId).Distinct().ToArray();
+                var invoices = await _db.ApInvoices.Where(x => x.CompanyId == CompanyId && invoiceIds.Contains(x.Id)).ToListAsync(token);
+                if (invoices.Count != invoiceIds.Length || components.Any(x => !invoiceIds.Contains(x.InvoiceId)))
+                    return BadRequest(new { error = "Every WHT component must belong to its stated company AP invoice." });
+
+                foreach (var component in components)
+                {
+                    var mapping = await _db.TaxAccountMappings.SingleOrDefaultAsync(x =>
+                        x.Id == component.TaxAccountMappingId && x.CompanyId == CompanyId &&
+                        x.Purpose == "AP-WHT-PAYABLE" && x.TaxType == TaxType.WHT && !x.TaxCodeId.HasValue &&
+                        x.Status == TaxConfigurationStatus.Approved && x.VersionNumber == component.MappingVersionNumber &&
+                        x.GlAccountId == component.GlAccountId && x.EffectiveFrom <= invoices.Single(i => i.Id == component.InvoiceId).InvoiceDate &&
+                        (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoices.Single(i => i.Id == component.InvoiceId).InvoiceDate), token);
+                    if (mapping == null)
+                        return BadRequest(new { error = "A remitted WHT component lacks its exact approved AP-WHT-PAYABLE account mapping version." });
+                    var policy = await _db.PublicSectorTaxBudgetPolicies.Where(x =>
+                        x.CompanyId == CompanyId && x.TaxType == TaxType.WHT && !x.TaxCodeId.HasValue &&
+                        x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= bankTransaction.TransactionDate &&
+                        (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > bankTransaction.TransactionDate))
+                        .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstOrDefaultAsync(token);
+                    if (policy == null)
+                        return BadRequest(new { error = "An approved, effective WHT budget-treatment policy is required before remittance allocation." });
+                    if (policy.Treatment == TaxBudgetTreatment.SeparateClassification &&
+                        (!policy.BudgetGlAccountId.HasValue || !policy.FundCentreId.HasValue ||
+                         !await _db.GlAccounts.AnyAsync(x => x.Id == policy.BudgetGlAccountId.Value && x.CompanyId == CompanyId && x.IsActive && x.IsPostable, token) ||
+                         !await _db.FundCentres.AnyAsync(x => x.Id == policy.FundCentreId.Value && x.CompanyId == CompanyId, token)))
+                        return BadRequest(new { error = "The approved WHT separate classification is no longer valid." });
+                    var prior = await _db.SettlementComponentAllocations.Where(x => x.CompanyId == CompanyId &&
+                        x.SettlementKind == "TX" && x.TaxComponentId == component.Id)
+                        .SumAsync(x => (decimal?)x.AmountApplied, token) ?? 0m;
+                    var requestedAmount = req.Where(x => x.TaxComponentId == component.Id).Sum(x => x.AmountApplied);
+                    if (prior + requestedAmount > component.Amount)
+                        return BadRequest(new { error = "The WHT remittance exceeds the unpaid tax-component balance." });
+                }
+
+                if (req.Sum(x => x.AmountApplied) != bankTransaction.Debit)
+                    return BadRequest(new { error = "WHT remittance allocations must reconcile exactly to the outgoing bank transaction amount." });
+                foreach (var group in components.GroupBy(x => x.GlAccountId))
+                {
+                    var journalLines = await _db.JournalLines.Where(x => x.JournalEntryId == bankTransaction.JournalEntryId.Value &&
+                        x.GlAccountId == group.Key && x.Debit > x.Credit).ToListAsync(token);
+                    var amount = req.Where(x => group.Any(c => c.Id == x.TaxComponentId)).Sum(x => x.AmountApplied);
+                    if (journalLines.Count != 1 || journalLines[0].Debit - journalLines[0].Credit != amount)
+                        return BadRequest(new { error = "Each WHT payable account allocation must match exactly one debit journal line in the remittance journal." });
+                }
+
+                foreach (var item in req)
+                    _db.SettlementComponentAllocations.Add(new SettlementComponentAllocation
+                    {
+                        CompanyId = CompanyId, SettlementKind = "TX", SettlementAllocationId = bankTransaction.Id,
+                        InvoiceId = item.InvoiceId, ComponentKind = SettlementComponentKind.TaxComponent,
+                        TaxComponentId = item.TaxComponentId, AmountApplied = item.AmountApplied
+                    });
+                await _db.SaveChangesAsync(token);
+                return Ok(new { bankTransactionId = id, allocatedAmount = req.Sum(x => x.AmountApplied), componentCount = req.Count });
+            }, ct);
+        }
 
         [HttpGet("tax-account-mappings")]
         [HasPermission(Permissions.ReportsFinancialRead)]
