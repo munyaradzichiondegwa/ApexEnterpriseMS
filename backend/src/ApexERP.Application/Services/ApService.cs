@@ -317,9 +317,19 @@ namespace ApexERP.Application.Services
             }, ct);
         }
 
-        public async Task<ApPayment> PayAndAllocateAsync(Guid companyId, Guid supplierId, DateTime paymentDate,
+        public Task<ApPayment> PayAndAllocateAsync(Guid companyId, Guid supplierId, DateTime paymentDate,
             string currency, decimal amount, PaymentMethod method, Guid bankGlAccountId, Guid apControlAccountId,
             Dictionary<Guid, decimal> allocations, CancellationToken ct = default,
+            IReadOnlyCollection<SettlementComponentInput>? componentAllocations = null)
+        {
+            return _db.InTransactionAsync(token => PayAndAllocateCoreAsync(
+                    companyId, supplierId, paymentDate, currency, amount, method, bankGlAccountId,
+                    apControlAccountId, allocations, token, componentAllocations), ct);
+        }
+
+        private async Task<ApPayment> PayAndAllocateCoreAsync(Guid companyId, Guid supplierId, DateTime paymentDate,
+            string currency, decimal amount, PaymentMethod method, Guid bankGlAccountId, Guid apControlAccountId,
+            Dictionary<Guid, decimal> allocations, CancellationToken ct,
             IReadOnlyCollection<SettlementComponentInput>? componentAllocations = null)
         {
             if (allocations.Values.Sum() > amount)
