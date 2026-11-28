@@ -169,6 +169,69 @@ public sealed class ZimbabweDswtWithholdingRegisterService
                 bank != null, bank?.Currency, journalPosted));
     }
 
+
+    /// <summary>
+    /// Reconciles the DSWT evidence to an authenticated and one-to-one matched bank statement row.
+    /// The statement row must already be matched to the exact posted AP bank-ledger movement.
+    /// </summary>
+    public Task<ZimbabweDswtWithholdingRecord> ReconcileToBankStatementAsync(
+        Guid companyId, Guid recordId, Guid statementTransactionId, CancellationToken ct = default)
+    {
+        if (companyId == Guid.Empty || recordId == Guid.Empty || statementTransactionId == Guid.Empty)
+            throw new ArgumentException("Company, DSWT record and bank statement transaction identifiers are required.");
+
+        return _db.InTransactionAsync(async token =>
+        {
+            await _db.AcquireTransactionLockAsync($"dswt-bank-statement:{companyId:N}:{statementTransactionId:N}", token);
+            var record = await _db.ZimbabweDswtWithholdingRecords.FirstOrDefaultAsync(
+                x => x.CompanyId == companyId && x.Id == recordId, token)
+                ?? throw new InvalidOperationException("DSWT record not found in this company.");
+            if (record.Status == ZimbabweDswtRecordStatus.Reversed)
+                throw new InvalidOperationException("A reversed DSWT record cannot be bank reconciled.");
+            if (!record.ApPaymentId.HasValue)
+                throw new InvalidOperationException("Reconcile the DSWT record to its gross AP payment before matching bank evidence.");
+            if (record.BankStatementTransactionId.HasValue)
+                throw new InvalidOperationException("This DSWT record is already linked to a bank statement transaction.");
+
+            var payment = await _db.ApPayments.FirstOrDefaultAsync(x =>
+                x.CompanyId == companyId && x.Id == record.ApPaymentId.Value, token)
+                ?? throw new InvalidOperationException("The linked AP payment no longer exists in this company.");
+            if (!payment.BankAccountId.HasValue || !payment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("The AP payment has no originating bank account or posted journal.");
+
+            var statementLine = await _db.BankStatementImportedTransactions.FirstOrDefaultAsync(x =>
+                x.CompanyId == companyId && x.Id == statementTransactionId &&
+                x.Status == BankStatementImportedTransactionStatus.Matched &&
+                x.MatchedBankTransactionId.HasValue, token)
+                ?? throw new InvalidOperationException("The bank statement row must be independently authenticated and matched to a posted ledger transaction first.");
+            var ledgerTransaction = await _db.BankTransactions.FirstOrDefaultAsync(x =>
+                x.CompanyId == companyId && x.Id == statementLine.MatchedBankTransactionId.Value &&
+                x.BankAccountId == payment.BankAccountId.Value && x.IsReconciled &&
+                x.MatchedStatementLineHash == statementLine.Id &&
+                x.JournalEntryId == payment.JournalEntryId, token)
+                ?? throw new InvalidOperationException("The matched bank-ledger transaction does not belong to the linked AP payment.");
+            var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
+                x.CompanyId == companyId && x.Id == payment.BankAccountId.Value, token)
+                ?? throw new InvalidOperationException("The AP payment bank account does not exist in this company.");
+
+            if (ledgerTransaction.Debit != record.GrossPaymentAmount || ledgerTransaction.Credit != 0m ||
+                statementLine.Debit != record.GrossPaymentAmount || statementLine.Credit != 0m ||
+                !string.Equals(statementLine.Currency, record.Currency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(bank.Currency, record.Currency, StringComparison.OrdinalIgnoreCase) ||
+                payment.Amount != record.GrossPaymentAmount)
+                throw new InvalidOperationException("The reconciled bank debit, AP payment and DSWT gross amount/currency do not agree.");
+
+            if (await _db.ZimbabweDswtWithholdingRecords.AnyAsync(x =>
+                x.CompanyId == companyId && x.BankStatementTransactionId == statementTransactionId, token))
+                throw new InvalidOperationException("This bank statement transaction is already linked to another DSWT record.");
+
+            record.BankStatementTransactionId = statementLine.Id;
+            record.BankReconciledAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(token);
+            return record;
+        }, ct);
+    }
+
     public async Task<ZimbabweDswtWithholdingRecord> IssueCertificateAsync(
         Guid companyId, Guid recordId, string certificateNumber, DateTime issuedAt, CancellationToken ct = default)
     {
