@@ -1310,10 +1310,13 @@ namespace ApexERP.Application.Services
                 foreach (var allocation in allocations)
                 {
                     var invoice = invoices.Single(x => x.Id == allocation.ArInvoiceId);
-                    if (invoice.CustomerId != receipt.CustomerId || invoice.Status != InvoiceStatus.Paid ||
+                    if (invoice.CustomerId != receipt.CustomerId ||
+                        (invoice.Status != InvoiceStatus.Paid && invoice.Status != InvoiceStatus.Partial) ||
                         !invoice.FundCentreId.HasValue || invoice.Currency != receipt.Currency ||
-                        invoice.Total != allocation.AmountApplied || invoice.VatAmount != 0m ||
-                        !invoice.JournalEntryId.HasValue ||
+                        invoice.Total < allocation.AmountApplied || invoice.Outstanding < 0m ||
+                        (invoice.Status == InvoiceStatus.Paid && invoice.Outstanding > 0.000001m) ||
+                        (invoice.Status == InvoiceStatus.Partial && invoice.Outstanding <= 0m) ||
+                        invoice.VatAmount != 0m || !invoice.JournalEntryId.HasValue ||
                         !await _db.JournalEntries.AnyAsync(x => x.Id == invoice.JournalEntryId.Value &&
                             x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
                         throw new InvalidOperationException("Split AR capture currently requires fully settled, tax-free invoices with an explicit Fund Centre and posted revenue journals.");
@@ -1321,8 +1324,12 @@ namespace ApexERP.Application.Services
                     if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
                         invoiceLines.Sum(x => x.LineTotal) != invoice.Total)
                         throw new InvalidOperationException("AR invoice lines must reconcile exactly to the fully settled tax-free invoice total.");
-                    var expectedByAccount = invoiceLines.Where(x => x.GlAccountId == line.GlAccountId)
-                        .Sum(x => x.LineTotal);
+                    var invoiceGlAccounts = invoiceLines.Select(x => x.GlAccountId).Distinct().ToArray();
+                    if (allocation.AmountApplied < invoice.Total && invoiceGlAccounts.Length > 1)
+                        throw new InvalidOperationException("A partial AR settlement across multiple GL classifications requires explicit invoice-line allocation. The automatic adapter supports partial settlement only when the invoice has one GL classification.");
+                    var expectedByAccount = allocation.AmountApplied < invoice.Total
+                        ? invoiceGlAccounts[0] == line.GlAccountId ? allocation.AmountApplied : 0m
+                        : invoiceLines.Where(x => x.GlAccountId == line.GlAccountId).Sum(x => x.LineTotal);
                     if (invoice.FundCentreId == line.FundCentreId && expectedByAccount > 0m)
                     {
                         var postedRevenue = await _db.JournalLines.Where(x =>
@@ -1380,10 +1387,13 @@ namespace ApexERP.Application.Services
                 foreach (var allocation in allocations)
                 {
                     var invoice = invoices.Single(x => x.Id == allocation.ApInvoiceId);
-                    if (invoice.SupplierId != payment.SupplierId || invoice.Status != InvoiceStatus.Paid ||
+                    if (invoice.SupplierId != payment.SupplierId ||
+                        (invoice.Status != InvoiceStatus.Paid && invoice.Status != InvoiceStatus.Partial) ||
                         !invoice.FundCentreId.HasValue || invoice.Currency != payment.Currency ||
-                        invoice.Total != allocation.AmountApplied || invoice.VatAmount != 0m ||
-                        invoice.WhtAmount != 0m || !invoice.JournalEntryId.HasValue ||
+                        invoice.Total < allocation.AmountApplied || invoice.Outstanding < 0m ||
+                        (invoice.Status == InvoiceStatus.Paid && invoice.Outstanding > 0.000001m) ||
+                        (invoice.Status == InvoiceStatus.Partial && invoice.Outstanding <= 0m) ||
+                        invoice.VatAmount != 0m || invoice.WhtAmount != 0m || !invoice.JournalEntryId.HasValue ||
                         !await _db.JournalEntries.AnyAsync(x => x.Id == invoice.JournalEntryId.Value &&
                             x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
                         throw new InvalidOperationException("Split AP capture currently requires fully settled, tax-free invoices with an explicit Fund Centre and posted expense journals.");
@@ -1391,8 +1401,12 @@ namespace ApexERP.Application.Services
                     if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
                         invoiceLines.Sum(x => x.LineTotal) != invoice.Total)
                         throw new InvalidOperationException("AP invoice lines must reconcile exactly to the fully settled tax-free invoice total.");
-                    var expectedByAccount = invoiceLines.Where(x => x.GlAccountId == line.GlAccountId)
-                        .Sum(x => x.LineTotal);
+                    var invoiceGlAccounts = invoiceLines.Select(x => x.GlAccountId).Distinct().ToArray();
+                    if (allocation.AmountApplied < invoice.Total && invoiceGlAccounts.Length > 1)
+                        throw new InvalidOperationException("A partial AP settlement across multiple GL classifications requires explicit invoice-line allocation. The automatic adapter supports partial settlement only when the invoice has one GL classification.");
+                    var expectedByAccount = allocation.AmountApplied < invoice.Total
+                        ? invoiceGlAccounts[0] == line.GlAccountId ? allocation.AmountApplied : 0m
+                        : invoiceLines.Where(x => x.GlAccountId == line.GlAccountId).Sum(x => x.LineTotal);
                     if (invoice.FundCentreId == line.FundCentreId && expectedByAccount > 0m)
                     {
                         var postedExpense = await _db.JournalLines.Where(x =>
