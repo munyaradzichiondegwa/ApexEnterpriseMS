@@ -966,6 +966,12 @@ namespace ApexERP.Infrastructure.Data
                     entry.Property(x => x.Status).OriginalValue == TaxConfigurationStatus.Approved)
                     throw new InvalidOperationException("Approved tax budget policies are immutable. Create a new effective-dated version.");
             }
+            foreach (var entry in ChangeTracker.Entries<PublicSectorBudgetReconciliation>())
+            {
+                if ((entry.State is EntityState.Modified or EntityState.Deleted) &&
+                    entry.Property(x => x.Status).OriginalValue == PublicSectorBudgetReconciliationStatus.Approved)
+                    throw new InvalidOperationException("Approved IPSAS 24 reconciliations are immutable. Reject and replace them using current source evidence.");
+            }
             foreach (var entry in ChangeTracker.Entries<JournalLine>())
             {
                 if (entry.State is EntityState.Modified or EntityState.Deleted)
