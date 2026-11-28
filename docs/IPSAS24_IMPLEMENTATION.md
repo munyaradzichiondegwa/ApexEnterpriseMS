@@ -56,6 +56,16 @@ The current `PublicSectorCashPeriodAttestation` workflow is deliberately narrow:
 
 This is not yet a complete period-close control for periods that contain transactions. The current counts are not a source-population reconciliation: they do not establish that every eligible bank movement, AR receipt and AP payment has either been captured to an approved budget line or independently classified as an evidenced exclusion. Nor do they establish that all expected source systems, bank accounts, cashbooks, funds or reporting units have submitted their period records. A period with some captured actuals must therefore not be treated as complete merely because at least one actual exists.
 
+### Implemented source-coverage hardening
+
+The comparison now checks more than the existence of at least one cash actual. For each posted AR receipt and AP payment in the approved reporting period, it requires either:
+- a cash actual linked directly to that AR/AP source record; or
+- a captured bank-transaction actual whose posted settlement journal is the same journal as the AR/AP source.
+
+This is in addition to the existing requirement that period bank movements be reconciled, posted and captured or represented by the same settlement journal. Pending or invalid certified actuals continue to block comparability.
+
+This closes a specific partial-capture gap in the existing source-backed workflow. It does **not** replace the expected-source register and independent source-close process described above: it cannot prove that every expected bank account/cashbook or external source system submitted a complete statement, nor can it support reason-coded exclusions for records outside the current adapters.
+
 ### Required completion design
 
 1. Maintain an expected-source register for each company, reporting entity and period. It must identify the bank accounts/cashbooks and AR/AP source populations in scope, with effective dates and accountable owners. The register must be independently approved before period close.
