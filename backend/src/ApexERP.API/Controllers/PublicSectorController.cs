@@ -18,6 +18,9 @@ namespace ApexERP.API.Controllers
         AccountingBasis AccountingBasis, string ClassificationBasis, string EntityScope, DateTime PeriodStart,
         DateTime PeriodEnd, string AuthorityReference, string? AmendmentReason,
         IReadOnlyCollection<CreateBudgetVersionLineRequest> Lines);
+    public record CreateBudgetVarianceExplanationRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
+        string Explanation, string EvidenceReference);
+    public record ReviewBudgetVarianceExplanationRequest(bool Accepted, string? ReviewNote);
     public record CreateBudgetReconciliationRequest(int FinancialYear, PublicSectorBudgetReconciliationType Type,
         string Description, string StatementSection, decimal OperatingAmount, decimal InvestingAmount,
         decimal FinancingAmount, string SupportingReference);
@@ -243,6 +246,38 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> GetBudgetComparison([FromQuery] int year, CancellationToken ct)
         {
             try { return Ok(await _publicSector.GetBudgetComparisonAsync(CompanyId, year, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        // IPSAS 24 paragraph 14: explain material differences between final budget and actual.
+        // This implementation requires an explanation for every non-zero variance (stricter than
+        // a configurable materiality threshold) until an approved entity materiality policy exists.
+        [HttpPost("budget-variance-explanations")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateBudgetVarianceExplanation(
+            CreateBudgetVarianceExplanationRequest req, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.CreateBudgetVarianceExplanationAsync(CompanyId,
+                req.BudgetVersionId, req.BudgetVersionLineId, req.Explanation,
+                req.EvidenceReference, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-variance-explanations/{id}/submit")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitBudgetVarianceExplanation(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.SubmitBudgetVarianceExplanationAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-variance-explanations/{id}/review")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> ReviewBudgetVarianceExplanation(Guid id,
+            ReviewBudgetVarianceExplanationRequest req, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.ReviewBudgetVarianceExplanationAsync(CompanyId, id,
+                UserId, req.Accepted, req.ReviewNote, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
