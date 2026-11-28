@@ -17,6 +17,8 @@ export default function PublicSectorPage() {
   const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);
   const [approvedBudgetVersions, setApprovedBudgetVersions] = useState<any[]>([]);
   const [budgetExecutionActuals, setBudgetExecutionActuals] = useState<any[]>([]);
+  const [cashPeriodAttestations, setCashPeriodAttestations] = useState<any[]>([]);
+  const [zeroActivityEvidence, setZeroActivityEvidence] = useState("");
   const [cashActualReconciliation, setCashActualReconciliation] = useState<any | null>(null);
   const [cashBankTransactions, setCashBankTransactions] = useState<any[]>([]);
   const [cashArReceipts, setCashArReceipts] = useState<any[]>([]);
@@ -110,15 +112,17 @@ export default function PublicSectorPage() {
 
   async function loadCashActuals() {
     try {
-      const [versions, actuals, accounts, receipts, payments] = await Promise.all([
+      const [versions, actuals, accounts, receipts, payments, attestations] = await Promise.all([
         api.get(`/public-sector/budget-versions/approved?year=${year}`),
         api.get(`/public-sector/budget-execution-actuals?year=${year}`),
         api.get("/cashbank/accounts"),
         api.get(`/ar/receipts?year=${year}`),
         api.get(`/ap/payments?year=${year}`),
+        api.get(`/public-sector/cash-period-attestations?year=${year}`),
       ]);
       setApprovedBudgetVersions(versions.data.filter((v: any) => v.accountingBasis === "Cash"));
       setBudgetExecutionActuals(actuals.data);
+      setCashPeriodAttestations(attestations.data);
       const reconciliation = await api.get(`/public-sector/budget-execution-actuals/reconciliation?year=${year}`);
       setCashActualReconciliation(reconciliation.data);
       const accountTransactions = await Promise.all(accounts.data.map((account: any) =>
@@ -134,6 +138,39 @@ export default function PublicSectorPage() {
     } catch (err) {
       setError(extractErrorMessage(err));
     }
+  }
+
+  async function createZeroActivityAttestation() {
+    const budgetVersionId = approvedBudgetVersions[0]?.id;
+    if (!budgetVersionId || !zeroActivityEvidence.trim()) {
+      setError("Select an approved cash budget and enter the nil-return evidence reference.");
+      return;
+    }
+    setError(null);
+    try {
+      await api.post("/public-sector/cash-period-attestations", { budgetVersionId, evidenceReference: zeroActivityEvidence.trim() });
+      setZeroActivityEvidence("");
+      setMsg("Zero-activity declaration created as a draft. Submit it for independent certification.");
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function submitZeroActivityAttestation(id: string) {
+    try {
+      await api.post(`/public-sector/cash-period-attestations/${id}/submit`);
+      setMsg("Zero-activity declaration submitted for independent certification.");
+      await loadCashActuals();
+      await loadBudgetComparison();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function certifyZeroActivityAttestation(id: string) {
+    try {
+      await api.post(`/public-sector/cash-period-attestations/${id}/certify`);
+      setMsg("Zero-activity declaration independently certified.");
+      await loadCashActuals();
+      await loadBudgetComparison();
+    } catch (err) { setError(extractErrorMessage(err)); }
   }
 
   async function createCashActual(e: React.FormEvent) {
@@ -361,6 +398,42 @@ export default function PublicSectorPage() {
               </div>
               <div className="md:col-span-3"><button className="btn-primary" disabled={!approvedBudgetVersions.length || !(cashActualDraft.sourceKind === "BankTransaction" ? cashBankTransactions.length : cashActualDraft.sourceKind === "ArReceipt" ? cashArReceipts.length : cashApPayments.length)}>Capture cash actual</button></div>
             </form>
+            <div className="border rounded-lg p-4 space-y-3 mb-4">
+              <div>
+                <h4 className="font-semibold">Period completeness — nil activity declaration</h4>
+                <p className="text-xs text-slate-500">Use only when there were no bank transactions, AR receipts or AP payments in the approved budget period. ApexERP recounts all three source populations at creation, submission and certification. Any source activity blocks a nil return.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <div className="md:col-span-2">
+                  <label className="label">Supporting nil-return evidence reference</label>
+                  <input className="input" value={zeroActivityEvidence} onChange={(e) => setZeroActivityEvidence(e.target.value)} placeholder="Cashbook/bank confirmation reference" />
+                </div>
+                <div className="flex items-end">
+                  <button className="btn-secondary w-full" type="button" disabled={!approvedBudgetVersions.length || !zeroActivityEvidence.trim()} onClick={createZeroActivityAttestation}>Create nil declaration</button>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="table-base">
+                  <thead><tr><th>Period</th><th>Observed bank / AR / AP</th><th>Evidence</th><th>Status</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {cashPeriodAttestations.map((item: any) => (
+                      <tr key={item.id}>
+                        <td>{new Date(item.periodStart).toLocaleDateString()} – {new Date(item.periodEnd).toLocaleDateString()}</td>
+                        <td>{item.observedBankTransactionCount} / {item.observedArReceiptCount} / {item.observedApPaymentCount}</td>
+                        <td>{item.evidenceReference}</td>
+                        <td>{item.status}</td>
+                        <td>{item.status === "Draft"
+                          ? <button className="btn-secondary" onClick={() => submitZeroActivityAttestation(item.id)}>Submit</button>
+                          : item.status === "PendingCertification"
+                            ? <button className="btn-secondary" onClick={() => certifyZeroActivityAttestation(item.id)}>Certify</button>
+                            : "—"}</td>
+                      </tr>
+                    ))}
+                    {cashPeriodAttestations.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500">No period nil declarations recorded.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
             <div className="overflow-x-auto">
               <table className="table-base">
                 <thead><tr><th>Source reference</th><th>Event</th><th>Effective date</th><th>Cash-flow section</th><th className="text-right">Amount</th><th>Status</th><th>Action</th></tr></thead>
