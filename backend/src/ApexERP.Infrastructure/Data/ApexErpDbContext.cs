@@ -180,6 +180,7 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<PublicSectorExpectedCashSource> PublicSectorExpectedCashSources => Set<PublicSectorExpectedCashSource>();
         public DbSet<PublicSectorCashSourceSubmission> PublicSectorCashSourceSubmissions => Set<PublicSectorCashSourceSubmission>();
         public DbSet<PublicSectorCashSourceReconciliationLine> PublicSectorCashSourceReconciliationLines => Set<PublicSectorCashSourceReconciliationLine>();
+        public DbSet<PublicSectorExpectedCashSourceRegisterAttestation> PublicSectorExpectedCashSourceRegisterAttestations => Set<PublicSectorExpectedCashSourceRegisterAttestation>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
@@ -382,6 +383,9 @@ namespace ApexERP.Infrastructure.Data
                 .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId })
                 .IsUnique().HasFilter("\"IsExcluded\" = TRUE")
                 .HasDatabaseName("UX_CashSourceReconciliationLine_Exclusion");
+            modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId }).IsUnique()
+                .HasDatabaseName("UX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
                 .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId, x.BudgetExecutionActualId })
                 .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
@@ -421,6 +425,15 @@ namespace ApexERP.Infrastructure.Data
                 .HasOne<PublicSectorBudgetExecutionActual>().WithMany()
                 .HasForeignKey(x => x.BudgetExecutionActualId).OnDelete(DeleteBehavior.Restrict)
                 .HasConstraintName("FK_CashSourceReconciliationLine_Actual");
+
+            modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_ExpectedCashSourceRegisterAttestation_Count", "\\"ExpectedSourceCount\\" > 0");
+            });
+            modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany()
+                .HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_ExpectedCashSourceRegisterAttestation_BudgetVersion");
 
             modelBuilder.Entity<JournalEntry>()
                 .HasMany(j => j.Lines)
@@ -539,6 +552,7 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<PublicSectorExpectedCashSource>(modelBuilder);
             ApplyTenantFilter<PublicSectorCashSourceSubmission>(modelBuilder);
             ApplyTenantFilter<PublicSectorCashSourceReconciliationLine>(modelBuilder);
+            ApplyTenantFilter<PublicSectorExpectedCashSourceRegisterAttestation>(modelBuilder);
             ApplyTenantFilter<Commitment>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
