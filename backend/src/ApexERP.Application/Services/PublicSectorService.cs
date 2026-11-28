@@ -14,6 +14,11 @@ namespace ApexERP.Application.Services
         decimal PostedActuals, decimal ActualVariance, decimal ActualVariancePercent,
         decimal AvailableBudget, decimal PercentUtilised, decimal LapsedAmount, bool IsClosed);
     public record YearEndCloseResult(Guid FundCentreId, decimal UnexpendedBalance, decimal CarriedForward, decimal Lapsed, Guid? NewFundCentreId);
+    public record PublicSectorBudgetVarianceLine(Guid FundCentreId, string FundCentreCode, string FundCentreName,
+        int FinancialYear, Guid GlAccountId, string AccountCode, string AccountName,
+        Guid? CostCentreId, string? CostCentreCode, string? CostCentreName,
+        decimal ApprovedBudget, decimal PostedActuals, decimal Variance, decimal VariancePercent);
+
 
     /// <summary>
     /// PRD Module 16 (Public Sector & Government): Vote/Program/Sub-Program fund hierarchy with
@@ -32,6 +37,134 @@ namespace ApexERP.Application.Services
         {
             _db = db;
             _audit = audit;
+        }
+
+
+        public async Task<PublicSectorBudgetAllocation> CreateBudgetAllocationAsync(Guid companyId, Guid fundCentreId,
+            Guid glAccountId, Guid? costCentreId, int financialYear, decimal amount, Guid actorId, CancellationToken ct = default)
+        {
+            if (amount <= 0 || financialYear < 2000 || financialYear > 2200)
+                throw new InvalidOperationException("A positive allocation amount and valid financial year are required.");
+
+            var fundCentre = await _db.FundCentres.FirstOrDefaultAsync(x =>
+                x.Id == fundCentreId && x.CompanyId == companyId && x.FinancialYear == financialYear, ct)
+                ?? throw new InvalidOperationException("Fund centre was not found for the selected company and financial year.");
+            if (fundCentre.IsClosed) throw new InvalidOperationException("A closed fund centre cannot receive budget allocations.");
+
+            var account = await _db.GlAccounts.FirstOrDefaultAsync(x =>
+                x.Id == glAccountId && x.CompanyId == companyId && x.IsActive && x.Type == GlAccountType.Expense, ct)
+                ?? throw new InvalidOperationException("Budget allocations must reference an active expense account in this company.");
+            if (costCentreId.HasValue && !await _db.CostCentres.AnyAsync(x =>
+                x.Id == costCentreId.Value && x.CompanyId == companyId && x.IsActive, ct))
+                throw new InvalidOperationException("Cost centre was not found or is inactive in this company.");
+
+            if (await _db.PublicSectorBudgetAllocations.AnyAsync(x =>
+                x.CompanyId == companyId && x.FundCentreId == fundCentreId && x.GlAccountId == glAccountId &&
+                x.CostCentreId == costCentreId && x.FinancialYear == financialYear, ct))
+                throw new InvalidOperationException("A budget allocation already exists for this fund centre, account, cost centre and financial year.");
+
+            var allocation = new PublicSectorBudgetAllocation
+            {
+                CompanyId = companyId, FundCentreId = fundCentreId, GlAccountId = account.Id,
+                CostCentreId = costCentreId, FinancialYear = financialYear, Amount = amount,
+                Status = PublicSectorBudgetAllocationStatus.Draft, CreatedBy = actorId
+            };
+            _db.PublicSectorBudgetAllocations.Add(allocation);
+            await _db.SaveChangesAsync(ct);
+            return allocation;
+        }
+
+        public async Task MarkBudgetAllocationPendingAsync(Guid companyId, Guid allocationId, Guid workflowId, CancellationToken ct = default)
+        {
+            var allocation = await _db.PublicSectorBudgetAllocations.FirstOrDefaultAsync(x =>
+                x.Id == allocationId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Budget allocation not found.");
+            if (allocation.Status != PublicSectorBudgetAllocationStatus.Draft)
+                throw new InvalidOperationException("Only a draft budget allocation can be submitted for approval.");
+            var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x =>
+                x.Id == workflowId && x.CompanyId == companyId && x.RequestType == "PublicSectorBudgetAllocation" &&
+                x.ReferenceId == allocation.Id && x.Amount == allocation.Amount &&
+                x.FundCentreId == allocation.FundCentreId && x.Status == WorkflowStatus.Pending, ct)
+                ?? throw new InvalidOperationException("A matching pending approval workflow is required.");
+            allocation.ApprovalWorkflowId = workflow.Id;
+            allocation.Status = PublicSectorBudgetAllocationStatus.PendingApproval;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        public async Task<PublicSectorBudgetAllocation> FinaliseBudgetAllocationApprovalAsync(Guid companyId,
+            Guid allocationId, Guid actorId, CancellationToken ct = default)
+        {
+            return await _db.InTransactionAsync(async token =>
+            {
+                var allocation = await _db.PublicSectorBudgetAllocations.FirstOrDefaultAsync(x =>
+                    x.Id == allocationId && x.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Budget allocation not found.");
+                if (allocation.Status != PublicSectorBudgetAllocationStatus.PendingApproval || !allocation.ApprovalWorkflowId.HasValue)
+                    throw new InvalidOperationException("Only a pending allocation with an approval workflow can be approved.");
+                var workflow = await _db.WorkflowRequests.Include(x => x.Approvals).FirstOrDefaultAsync(x =>
+                    x.Id == allocation.ApprovalWorkflowId.Value && x.CompanyId == companyId &&
+                    x.RequestType == "PublicSectorBudgetAllocation" && x.ReferenceId == allocation.Id &&
+                    x.Status == WorkflowStatus.Approved && x.Approvals.Any(a => a.Approved), token)
+                    ?? throw new InvalidOperationException("The independent approval workflow has not been approved.");
+                if (workflow.SubmittedBy == actorId)
+                    throw new InvalidOperationException("The allocation submitter cannot finalise their own approval.");
+                await _db.AcquireTransactionLockAsync($"public-sector-budget-allocation:{companyId:N}:{allocation.FundCentreId:N}", token);
+                var fundCentre = await _db.FundCentres.FirstOrDefaultAsync(x =>
+                    x.Id == allocation.FundCentreId && x.CompanyId == companyId && !x.IsClosed, token)
+                    ?? throw new InvalidOperationException("The allocation's fund centre is closed or unavailable.");
+                var approvedTotal = await _db.PublicSectorBudgetAllocations
+                    .Where(x => x.CompanyId == companyId && x.FundCentreId == allocation.FundCentreId &&
+                        x.FinancialYear == allocation.FinancialYear && x.Status == PublicSectorBudgetAllocationStatus.Approved &&
+                        x.Id != allocation.Id)
+                    .SumAsync(x => (decimal?)x.Amount, token) ?? 0m;
+                if (approvedTotal + allocation.Amount > fundCentre.AppropriationAmount + fundCentre.CarriedForwardAmount)
+                    throw new InvalidOperationException("Approved allocations cannot exceed the fund centre's appropriation plus carried-forward balance.");
+                allocation.Status = PublicSectorBudgetAllocationStatus.Approved;
+                allocation.ApprovedBy = actorId;
+                allocation.ApprovedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(token);
+                return allocation;
+            }, ct);
+        }
+
+        public async Task<List<PublicSectorBudgetVarianceLine>> GetBudgetVarianceReportAsync(Guid companyId,
+            int financialYear, Guid? fundCentreId = null, CancellationToken ct = default)
+        {
+            if (financialYear < 2000 || financialYear > 2200)
+                throw new InvalidOperationException("A valid financial year is required.");
+            var allocations = await _db.PublicSectorBudgetAllocations
+                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                    x.Status == PublicSectorBudgetAllocationStatus.Approved &&
+                    (!fundCentreId.HasValue || x.FundCentreId == fundCentreId.Value))
+                .Join(_db.FundCentres, a => a.FundCentreId, f => f.Id, (a, f) => new { Allocation = a, FundCentre = f })
+                .Join(_db.GlAccounts, x => x.Allocation.GlAccountId, g => g.Id, (x, g) => new { x.Allocation, x.FundCentre, Account = g })
+                .GroupJoin(_db.CostCentres, x => x.Allocation.CostCentreId, cc => (Guid?)cc.Id,
+                    (x, costCentres) => new { x.Allocation, x.FundCentre, x.Account, CostCentre = costCentres.FirstOrDefault() })
+                .ToListAsync(ct);
+
+            var fiscalStartMonth = await _db.Companies.Where(x => x.Id == companyId)
+                .Select(x => x.FiscalYearStartMonth).FirstOrDefaultAsync(ct);
+            var periodStart = FiscalCalendar.FiscalYearStart(new DateTime(financialYear, 12, 31), fiscalStartMonth);
+            var periodEnd = periodStart.AddYears(1);
+            var result = new List<PublicSectorBudgetVarianceLine>(allocations.Count);
+            foreach (var item in allocations)
+            {
+                var actuals = await _db.JournalLines
+                    .Where(l => l.GlAccountId == item.Allocation.GlAccountId &&
+                        l.FundCentreId == item.Allocation.FundCentreId &&
+                        l.CostCentreId == item.Allocation.CostCentreId &&
+                        l.JournalEntry!.CompanyId == companyId &&
+                        l.JournalEntry.EntryDate >= periodStart && l.JournalEntry.EntryDate < periodEnd &&
+                        (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
+                    .SumAsync(l => l.BaseDebit - l.BaseCredit, ct);
+                var variance = item.Allocation.Amount - actuals;
+                result.Add(new PublicSectorBudgetVarianceLine(item.FundCentre.Id, item.FundCentre.Code,
+                    item.FundCentre.Name, financialYear, item.Account.Id, item.Account.Code, item.Account.Name,
+                    item.Allocation.CostCentreId, item.CostCentre?.Code, item.CostCentre?.Name,
+                    item.Allocation.Amount, actuals, variance,
+                    item.Allocation.Amount == 0 ? 0m : Math.Round(variance / item.Allocation.Amount * 100m, 2)));
+            }
+            return result.OrderBy(x => x.FundCentreCode).ThenBy(x => x.AccountCode).ThenBy(x => x.CostCentreCode).ToList();
         }
 
         public async Task<FundCentre> CreateFundCentreAsync(Guid companyId, string code, string name, FundCentreLevel level,
