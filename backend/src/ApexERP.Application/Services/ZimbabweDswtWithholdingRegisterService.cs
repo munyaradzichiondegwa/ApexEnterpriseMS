@@ -412,3 +412,19 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             .ToListAsync(ct);
     }
 }
+
+
+/// <summary>
+/// Validates only safe storage constraints for a ZIMRA TIN. ZIMRA's published guidance
+/// reviewed for this implementation does not define a universal character pattern, so
+/// the application must not invent one or reject an identifier based on an assumed format.
+/// </summary>
+public static class ZimbabweTaxpayerTinValidator
+{
+    public static bool IsValid(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var tin = value.Trim();
+        return tin.Length <= 40 && !tin.Any(char.IsControl);
+    }
+}
