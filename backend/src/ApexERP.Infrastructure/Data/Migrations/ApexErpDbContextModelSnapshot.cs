@@ -4247,7 +4247,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
-                    b.HasIndex("CompanyId", "BudgetVersionId", "StatementPeriodStart", "StatementPeriodEnd", "Type", "Description")
+                    b.HasIndex("CompanyId", "BudgetVersionId", "StatementPeriodStart", "StatementPeriodEnd", "StatementEntityScope", "Type", "StatementSection", "Description")
                         .IsUnique().HasDatabaseName("UX_PublicSectorBudgetRecon_ScopeDescription");
                     b.ToTable("PublicSectorBudgetReconciliations", t =>
                         {
