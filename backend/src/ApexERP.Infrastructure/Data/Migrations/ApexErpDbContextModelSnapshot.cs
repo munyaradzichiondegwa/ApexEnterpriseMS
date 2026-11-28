@@ -3746,6 +3746,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("CompanyId").HasColumnType("uuid");
                     b.Property<Guid>("ExpectedCashSourceId").HasColumnType("uuid");
                     b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<int>("SubmissionRevision").HasColumnType("integer");
                     b.Property<DateTime>("PeriodStart").HasColumnType("timestamp with time zone");
                     b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
                     b.Property<int>("RecordCount").HasColumnType("integer");
@@ -3774,8 +3775,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("BudgetVersionId");
                     b.HasIndex("ExpectedCashSourceId")
                         .HasDatabaseName("IX_PublicSectorCashSourceSubmissions_ExpectedCashSourceId");
-                    b.HasIndex("CompanyId", "ExpectedCashSourceId")
-                        .IsUnique().HasDatabaseName("UX_PublicSectorCashSourceSubmission_Source");
+                    b.HasIndex("CompanyId", "ExpectedCashSourceId", "SubmissionRevision")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorCashSourceSubmission_Revision");
                     b.ToTable("PublicSectorCashSourceSubmissions", t =>
                         {
                             t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Period", "\"PeriodEnd\" > \"PeriodStart\"");
@@ -3802,7 +3803,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
                     b.HasIndex("CashSourceSubmissionId").HasDatabaseName("IX_CashSourceReconciliationLines_Submission");
-                    b.HasIndex("BudgetExecutionActualId").IsUnique()
+                    b.HasIndex("CompanyId", "CashSourceSubmissionId", "BudgetExecutionActualId").IsUnique()
                         .HasFilter("\"BudgetExecutionActualId\" IS NOT NULL")
                         .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
                     b.HasIndex("CompanyId", "CashSourceSubmissionId", "SourceRecordId", "BudgetExecutionActualId")
