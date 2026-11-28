@@ -890,6 +890,9 @@ namespace ApexERP.Application.Services
                 .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear &&
                     x.Kind == PublicSectorBudgetVersionKind.Revised && x.Status == PublicSectorBudgetVersionStatus.Approved)
                 .OrderByDescending(x => x.VersionNumber).FirstOrDefaultAsync(ct);
+            // Where no revised budget was approved, the final budget is the original budget.
+            // A draft/unapproved revision never displaces the last legally approved budget.
+            final ??= original;
 
             // Company is tenant-filtered by CurrentTenantId. Resolve the selected company explicitly
             // because this service already receives the authenticated CompanyId; PostgreSQL RLS remains active.
