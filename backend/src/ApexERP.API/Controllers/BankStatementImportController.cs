@@ -219,6 +219,18 @@ public sealed class BankStatementImportController : ApiControllerBase
                     ?? throw new InvalidOperationException("An approved independent bank-confirmation workflow is required.");
                 if (workflow.SubmittedBy == UserId || item.UploadedBy == UserId)
                     throw new InvalidOperationException("The uploader or workflow submitter cannot authenticate the statement.");
+                var bankAccount = await _db.BankAccounts.SingleAsync(x =>
+                    x.Id == item.BankAccountId && x.CompanyId == CompanyId, token);
+                var evidenceValidation = BankStatementEvidenceValidator.Validate(
+                    new BankStatementEvidenceEnvelope(
+                        CompanyId, item.Id, bankAccount.AccountNo, item.StatementReference,
+                        item.PeriodStart, item.PeriodEnd, item.OriginalBytes, item.ByteLength,
+                        item.MediaType, item.ParserVersion, item.Sha256,
+                        BankStatementAuthenticationMethod.IndependentBankConfirmation, true,
+                        req.ConfirmationReference.Trim()),
+                    new HashSet<Guid>(), new HashSet<string>());
+                if (!evidenceValidation.IsValid)
+                    throw new InvalidOperationException(evidenceValidation.Reason);
                 item.AuthenticationMethod = BankStatementOriginAuthenticationMethod.IndependentBankConfirmation;
                 item.AuthenticationEvidenceReference = req.ConfirmationReference.Trim();
                 item.AuthenticatedBy = UserId;
