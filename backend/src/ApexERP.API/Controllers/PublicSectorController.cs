@@ -422,6 +422,24 @@ namespace ApexERP.API.Controllers
             var uncapturedPostedMovements = await postedBankMovements.CountAsync(x =>
                 !x.IsReconciled || !capturedSourceIds.Contains(x.Id), ct);
             var pendingActuals = actuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
+            var invalidCertifiedActuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
+                    x.CompanyId == CompanyId && x.BudgetVersionId == version.Id &&
+                    x.Status == PublicSectorBudgetActualStatus.Certified)
+                .CountAsync(actual => !_db.BankTransactions.Any(bank => bank.Id == actual.SourceRecordId &&
+                    bank.CompanyId == CompanyId && bank.IsReconciled && bank.JournalEntryId.HasValue &&
+                    ((actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt &&
+                        bank.Credit == actual.Amount && bank.Debit == 0m) ||
+                     (actual.EventKind == PublicSectorBudgetActualEventKind.CashPayment &&
+                        bank.Debit == actual.Amount && bank.Credit == 0m)) &&
+                    _db.BankAccounts.Any(account => account.Id == bank.BankAccountId &&
+                        account.CompanyId == CompanyId && account.Currency == actual.Currency) &&
+                    _db.JournalEntries.Any(journal => journal.Id == bank.JournalEntryId.Value &&
+                        journal.CompanyId == CompanyId && journal.Status == JournalStatus.Posted) &&
+                    _db.JournalLines.Any(line => line.JournalEntryId == bank.JournalEntryId.Value &&
+                        line.GlAccountId == actual.GlAccountId && line.FundCentreId == actual.FundCentreId &&
+                        line.CostCentreId == actual.CostCentreId &&
+                        (actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt
+                            ? line.Credit - line.Debit : line.Debit - line.Credit) == actual.Amount)), ct);
             var certified = actuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
             decimal Actual(CashFlowCategory section) => certified.Where(x => x.CashFlowSection == section)
                 .Sum(x => x.EventKind == PublicSectorBudgetActualEventKind.CashReceipt ? x.Amount : -x.Amount);
@@ -444,7 +462,7 @@ namespace ApexERP.API.Controllers
             var operatingAdjustment = Adjustment(x => x.OperatingAmount);
             var investingAdjustment = Adjustment(x => x.InvestingAmount);
             var financingAdjustment = Adjustment(x => x.FinancingAmount);
-            var sourceCoverageComplete = uncapturedPostedMovements == 0 && pendingActuals == 0;
+            var sourceCoverageComplete = uncapturedPostedMovements == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0;
             var operatingBridgeDifference = operatingDifference - operatingAdjustment;
             var investingBridgeDifference = investingDifference - investingAdjustment;
             var financingBridgeDifference = financingDifference - financingAdjustment;
@@ -457,6 +475,7 @@ namespace ApexERP.API.Controllers
                 SourceCoverageComplete = sourceCoverageComplete,
                 UncapturedOrUnreconciledPostedBankMovements = uncapturedPostedMovements,
                 PendingOrDraftActuals = pendingActuals,
+                InvalidCertifiedActuals = invalidCertifiedActuals,
                 Reconciled = reconciled,
                 Sections = new[]
                 {
