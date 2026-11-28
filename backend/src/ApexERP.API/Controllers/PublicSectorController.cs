@@ -218,10 +218,12 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> GetApprovedBudgetVersions([FromQuery] int year, CancellationToken ct)
         {
             if (year < 2000 || year > 2200) return BadRequest(new { error = "A valid financial year is required." });
-            return Ok(await _db.PublicSectorBudgetVersions.Include(x => x.Lines)
+            var latest = await _db.PublicSectorBudgetVersions.Include(x => x.Lines)
                 .Where(x => x.CompanyId == CompanyId && x.FinancialYear == year &&
                     x.Status == PublicSectorBudgetVersionStatus.Approved)
-                .OrderBy(x => x.Kind).ThenBy(x => x.VersionNumber).ToListAsync(ct));
+                .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber)
+                .FirstOrDefaultAsync(ct);
+            return Ok(latest == null ? Array.Empty<PublicSectorBudgetVersion>() : new[] { latest });
         }
 
         /// <summary>IPSAS 24 statement: approved original and final budgets, comparable actuals and variance explanations.</summary>
