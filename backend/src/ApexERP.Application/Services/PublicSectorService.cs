@@ -1142,8 +1142,9 @@ namespace ApexERP.Application.Services
             if (!line.Variance.HasValue || line.Variance.Value == 0m)
                 throw new InvalidOperationException("A variance explanation is only required for a non-zero final-budget-to-actual variance.");
             if (await _db.PublicSectorBudgetVarianceExplanations.AnyAsync(x =>
-                x.CompanyId == companyId && x.BudgetVersionLineId == budgetVersionLineId, ct))
-                throw new InvalidOperationException("A variance explanation already exists for this approved budget line. Rejected explanations remain as audit history; create a new approved budget version if the variance basis changes.");
+                x.CompanyId == companyId && x.BudgetVersionLineId == budgetVersionLineId &&
+                x.VarianceAmount == line.Variance.Value && x.Status != "Rejected", ct))
+                throw new InvalidOperationException("An active explanation already exists for this exact variance. If the actual amount has changed, a new explanation may be prepared while the prior approved explanation remains immutable audit history.");
             var item = new PublicSectorBudgetVarianceExplanation
             {
                 CompanyId = companyId, BudgetVersionId = budgetVersionId,
