@@ -57,14 +57,14 @@ public sealed class AddPublicSectorBudgetAllocations : Migration
             });
 
         migrationBuilder.CreateIndex(
-            name: "IX_PublicSectorBudgetAllocations_CompanyId_FundCentreId_GlAccountId_CostCentreId_FinancialYear",
+            name: "UX_PublicSectorBudgetAllocation_Dimension",
             table: "PublicSectorBudgetAllocations",
             columns: new[] { "CompanyId", "FundCentreId", "GlAccountId", "CostCentreId", "FinancialYear" },
             unique: true,
             filter: "\"CostCentreId\" IS NOT NULL");
 
         migrationBuilder.CreateIndex(
-            name: "IX_PublicSectorBudgetAllocations_CompanyId_FundCentreId_GlAccountId_FinancialYear",
+            name: "UX_PublicSectorBudgetAllocation_Unassigned",
             table: "PublicSectorBudgetAllocations",
             columns: new[] { "CompanyId", "FundCentreId", "GlAccountId", "FinancialYear" },
             unique: true,
