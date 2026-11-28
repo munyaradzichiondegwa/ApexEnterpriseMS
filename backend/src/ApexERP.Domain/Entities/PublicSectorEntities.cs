@@ -79,6 +79,28 @@ namespace ApexERP.Domain.Entities
     }
 
     /// <summary>
+    /// Independent period-level declaration that no cash source activity occurred.
+    /// This is evidence of completeness, not a mechanism for assuming missing records are zero.
+    /// Certification is permitted only after re-counting all supported source populations.
+    /// </summary>
+    public class PublicSectorCashPeriodAttestation : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+        public int ObservedBankTransactionCount { get; set; }
+        public int ObservedArReceiptCount { get; set; }
+        public int ObservedApPaymentCount { get; set; }
+        public string EvidenceReference { get; set; } = string.Empty;
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? CertifiedBy { get; set; }
+        public DateTime? CertifiedAt { get; set; }
+        public string? RejectionReason { get; set; }
+    }
+
+    /// <summary>
     /// Approved appropriation distribution to an expense GL account and optional cost centre.
     /// Draft and pending allocations are excluded from budget-versus-actual reporting.
     /// </summary>
