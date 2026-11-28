@@ -119,3 +119,24 @@ Implemented on the feature branch:
 - Cash final budgets must retain zero-value dimensions where a classification was removed from the original budget; otherwise actual execution cannot be captured against that final budget line and the comparison is blocked.
 - Migration `20261128060000_AddIpsas24SettlementSources` adds the optional AR invoice Fund Centre dimension. EF snapshot drift, clean PostgreSQL installation and the expanded integration tests must pass in the latest GitHub Actions run before this slice is considered verified.
 - After applying the migration in an environment where RLS is enabled, rerun `backend/database/hardening/002_row_level_security.sql` so the newly created company-owned table receives the database policy. Confirm the runtime role remains non-owner and has no `BYPASSRLS`.
+
+
+## Phase 2A — period completeness and zero-activity certification
+
+Implemented on the feature branch:
+
+- Added tenant/company-scoped `PublicSectorCashPeriodAttestation` records tied to one approved cash budget version and its exact reporting period.
+- Added a Draft → PendingCertification → Certified/Rejected lifecycle with independent certification. The preparer/submitter cannot certify.
+- The source population is re-counted at creation, submission and certification across bank transactions, AR receipts and AP payments. A nil return is rejected if any source record exists; it is not inferred from an empty actuals table.
+- Certification stores the observed counts and evidence reference. Database constraints enforce valid periods/non-negative counts, and a database trigger prevents deletion, post-finalisation edits and invalid state transitions.
+- Added tenant-scoped API endpoints to list, create, submit and certify period attestations.
+- The IPSAS 24 comparison now permits zero cash actuals only when a matching independent zero-activity attestation is certified and a live re-count still confirms zero bank, AR and AP source records.
+- Added a PostgreSQL integration test for the blocked-without-attestation path, independent approval, zero-count evidence and the comparable zero-actual path.
+- Added migration `20261128070000_AddIpsas24CashPeriodAttestations`; the shared RLS hardening script discovers company-owned tables by `CompanyId`, so the new table is included by the same policy installation process.
+
+Not yet verified / remaining in this slice:
+
+- Latest CI must confirm model snapshot parity, clean migration, PostgreSQL acceptance test and runtime RLS policy.
+- The Public Sector UI has not yet been extended with the attestation workflow controls.
+- The first completeness rule is intentionally strict: any in-period bank transaction, AR receipt or AP payment means the period is not zero-activity. Non-zero source population reconciliation still needs a general source-to-actual completeness ledger, including duplicate bank/settlement journal matching.
+- A zero-activity attestation is not, by itself, a completed Statement of Cash Flows reconciliation or statutory statement-issuance approval.
