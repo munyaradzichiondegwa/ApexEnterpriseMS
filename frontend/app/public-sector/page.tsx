@@ -642,7 +642,7 @@ export default function PublicSectorPage() {
                 </select>
                 <input className="input" required placeholder="Source code" value={expectedSourceDraft.sourceCode} onChange={(e) => setExpectedSourceDraft({ ...expectedSourceDraft, sourceCode: e.target.value })} />
                 <input className="input" required placeholder="Source name" value={expectedSourceDraft.sourceName} onChange={(e) => setExpectedSourceDraft({ ...expectedSourceDraft, sourceName: e.target.value })} />
-                <input className="input" placeholder="Bank account ID (optional)" value={expectedSourceDraft.sourceIdentifier} onChange={(e) => setExpectedSourceDraft({ ...expectedSourceDraft, sourceIdentifier: e.target.value })} />
+                <input className="input" required placeholder={expectedSourceDraft.sourceKind === "BankAccount" ? "Bank account ID" : "AR/AP control GL account ID"} value={expectedSourceDraft.sourceIdentifier} onChange={(e) => setExpectedSourceDraft({ ...expectedSourceDraft, sourceIdentifier: e.target.value })} />
                 <button className="btn-secondary md:col-span-4" disabled={!approvedBudgetVersions.length}>Add expected source</button>
               </form>
               <div className="overflow-x-auto">
