@@ -178,7 +178,7 @@ namespace ApexERP.Application.Services
                             CompanyId = companyId, InvoiceKind = "AR", InvoiceId = invoice.Id,
                             InvoiceLineId = invoiceLine.Id, TaxCodeId = taxCodeId, TaxType = TaxType.VAT,
                             TaxableBase = invoiceLine.LineSubtotal,
-                            Rate = invoiceLine.LineSubtotal == 0m ? 0m : invoiceLine.LineVat / invoiceLine.LineSubtotal,
+                            Rate = await _db.TaxCodes.Where(x => x.Id == taxCodeId && x.CompanyId == companyId).Select(x => x.Rate).SingleAsync(ct),
                             Amount = invoiceLine.LineVat, GlAccountId = mapping.GlAccountId,
                             TaxAccountMappingId = mapping.Id, MappingVersionNumber = mapping.VersionNumber,
                             JournalEntryId = je.Id, JournalLineId = journalLine.Id
