@@ -659,9 +659,12 @@ namespace ApexERP.Application.Services
             var source = await _db.PublicSectorExpectedCashSources.FirstOrDefaultAsync(x =>
                 x.Id == expectedSourceId && x.CompanyId == companyId && x.Status == "Approved", ct)
                 ?? throw new InvalidOperationException("An approved expected cash source is required before submitting source controls.");
-            if (await _db.PublicSectorCashSourceSubmissions.AnyAsync(x =>
-                x.CompanyId == companyId && x.ExpectedCashSourceId == source.Id, ct))
-                throw new InvalidOperationException("A period submission already exists for this expected source.");
+            var previousSubmission = await _db.PublicSectorCashSourceSubmissions
+                .Where(x => x.CompanyId == companyId && x.ExpectedCashSourceId == source.Id)
+                .OrderByDescending(x => x.SubmissionRevision).FirstOrDefaultAsync(ct);
+            if (previousSubmission != null && previousSubmission.Status != "Rejected" &&
+                previousSubmission.RecordLevelStatus != "Rejected")
+                throw new InvalidOperationException("An active source submission already exists. A new revision is allowed only after the prior source-control or record-level reconciliation was rejected.");
 
             if (controlTotal < 0m)
                 throw new InvalidOperationException("A source activity control total cannot be negative.");
@@ -676,6 +679,7 @@ namespace ApexERP.Application.Services
             var item = new PublicSectorCashSourceSubmission
             {
                 CompanyId = companyId, ExpectedCashSourceId = source.Id, BudgetVersionId = source.BudgetVersionId,
+                SubmissionRevision = (previousSubmission?.SubmissionRevision ?? 0) + 1,
                 PeriodStart = source.EffectiveFrom, PeriodEnd = source.EffectiveTo, RecordCount = recordCount,
                 ControlTotal = controlTotal, OpeningBalance = openingBalance, ClosingBalance = closingBalance,
                 Currency = normalisedCurrency, EvidenceReference = evidenceReference.Trim(),
@@ -684,7 +688,7 @@ namespace ApexERP.Application.Services
             _db.PublicSectorCashSourceSubmissions.Add(item);
             _audit.Record(companyId, actorId, "PublicSectorCashSourceSubmission.Created", "PublicSector",
                 nameof(PublicSectorCashSourceSubmission), item.Id, null,
-                new { item.ExpectedCashSourceId, item.BudgetVersionId, item.PeriodStart, item.PeriodEnd,
+                new { item.ExpectedCashSourceId, item.BudgetVersionId, item.SubmissionRevision, item.PeriodStart, item.PeriodEnd,
                     item.RecordCount, item.ControlTotal, item.OpeningBalance, item.ClosingBalance,
                     item.Currency, item.EvidenceReference });
             await _db.SaveChangesAsync(ct);
@@ -859,9 +863,12 @@ namespace ApexERP.Application.Services
                     actual.Currency != submission.Currency || actual.Amount <= 0m ||
                     !string.Equals(actual.SourceReference, sourceReference.Trim(), StringComparison.Ordinal))
                     throw new InvalidOperationException("The actual must be certified, belong to this budget version and source record, and match the source period and currency.");
-                if (await _db.PublicSectorCashSourceReconciliationLines.AnyAsync(x =>
-                    x.CompanyId == companyId && x.BudgetExecutionActualId == actual.Id, ct))
-                    throw new InvalidOperationException("A certified budget actual cannot be reconciled more than once.");
+                if (await _db.PublicSectorCashSourceReconciliationLines.AnyAsync(line =>
+                    line.CompanyId == companyId && line.BudgetExecutionActualId == actual.Id &&
+                    _db.PublicSectorCashSourceSubmissions.Any(submission =>
+                        submission.Id == line.CashSourceSubmissionId && submission.CompanyId == companyId &&
+                        submission.Status != "Rejected" && submission.RecordLevelStatus != "Rejected"), ct))
+                    throw new InvalidOperationException("A certified budget actual cannot be reconciled more than once in an active source submission.");
                 var existing = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
                     x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId &&
                     x.SourceRecordId == sourceRecordId).ToListAsync(ct);
@@ -2247,7 +2254,8 @@ namespace ApexERP.Application.Services
                 line.CompanyId == companyId && line.SourceRecordId == sourceRecordId &&
                 _db.PublicSectorCashSourceSubmissions.Any(submission =>
                     submission.Id == line.CashSourceSubmissionId && submission.CompanyId == companyId &&
-                    submission.BudgetVersionId == version.Id), ct))
+                    submission.BudgetVersionId == version.Id && submission.Status != "Rejected" &&
+                    submission.RecordLevelStatus != "Rejected"), ct))
                 throw new InvalidOperationException("This source record has already been reconciled or excluded. A reviewed source mapping cannot be bypassed by creating a later budget actual.");
             if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction && existingSourceAllocations.Count > 0)
                 throw new InvalidOperationException("A bank transaction is captured once against its exact posted journal classification; only AR/AP invoice settlements support split source allocation.");
