@@ -56,6 +56,9 @@ namespace ApexERP.Application.Services
             decimal? ComparableRevenueActual, decimal RevenueAdjustment, decimal? FinancialStatementRevenueActual,
             bool RevenueCovered, decimal? ComparableExpenseActual, decimal ExpenseAdjustment,
             decimal? FinancialStatementExpenseActual, bool ExpenseCovered);
+        public sealed record BudgetAutomaticReconciliationCandidate(PublicSectorBudgetReconciliationType Type,
+            string StatementSection, decimal ExpectedAdjustment, string Explanation,
+            string SourceFingerprint, DateTime CalculatedAt);
         public sealed record BudgetComparisonReport(Guid OriginalBudgetVersionId, Guid? FinalBudgetVersionId,
             int FinancialYear, string Currency, string AccountingBasis, string ClassificationBasis,
             string EntityScope, string FinancialStatementEntityScope, DateTime PeriodStart, DateTime PeriodEnd,
@@ -63,6 +66,7 @@ namespace ApexERP.Application.Services
             bool ComparableActualsAvailable, string ComparabilityMessage,
             IReadOnlyList<BudgetComparisonLine> Lines,
             IReadOnlyList<PublicSectorBudgetReconciliation> Reconciliations,
+            IReadOnlyList<BudgetAutomaticReconciliationCandidate> AutomaticReconciliationCandidates,
             IReadOnlyList<PublicSectorBudgetVarianceExplanation> VarianceExplanations,
             bool VarianceExplanationsComplete, bool OriginalToFinalExplanationsComplete,
             BudgetFinancialStatementReconciliation FinancialStatementReconciliation);
