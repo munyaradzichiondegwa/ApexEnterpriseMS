@@ -32,6 +32,10 @@ namespace ApexERP.API.Controllers
         PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualSourceKind SourceKind,
         Guid SourceRecordId, DateTime EffectiveDate, CashFlowCategory CashFlowSection);
     public record CreateCashPeriodAttestationRequest(Guid BudgetVersionId, string EvidenceReference);
+    public record CreateTaxAccountMappingRequest(TaxType TaxType, string Purpose, Guid? TaxCodeId, Guid GlAccountId, DateTime EffectiveFrom, DateTime? EffectiveTo);
+    public record CreateTaxBudgetPolicyRequest(TaxType TaxType, Guid? TaxCodeId, TaxBudgetTreatment Treatment,
+        Guid? BudgetGlAccountId, Guid? FundCentreId, Guid? CostCentreId, DateTime EffectiveFrom, DateTime? EffectiveTo);
+
     public record CreateExpectedCashSourceRequest(Guid BudgetVersionId, string SourceKind, string SourceCode, string SourceName, string? SourceIdentifier, bool IsRequired, DateTime EffectiveFrom, DateTime EffectiveTo);
     public record CreateCashSourceSubmissionRequest(Guid ExpectedCashSourceId, int RecordCount,
         decimal ControlTotal, decimal OpeningBalance, decimal ClosingBalance, string Currency,
@@ -72,6 +76,177 @@ namespace ApexERP.API.Controllers
             _assetVerification = assetVerification;
             _approvalChains = approvalChains;
             _cashFlow = cashFlow;
+        }
+
+        // ---- IPSAS 24 tax mapping and budget-treatment controls ----
+
+        [HttpGet("tax-account-mappings")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetTaxAccountMappings(CancellationToken ct) =>
+            Ok(await _db.TaxAccountMappings.Where(x => x.CompanyId == CompanyId).OrderBy(x => x.Purpose)
+                .ThenByDescending(x => x.VersionNumber).ToListAsync(ct));
+
+        [HttpPost("tax-account-mappings")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateTaxAccountMapping(CreateTaxAccountMappingRequest req, CancellationToken ct)
+        {
+            if (req.EffectiveTo.HasValue && req.EffectiveTo.Value <= req.EffectiveFrom)
+                return BadRequest(new { error = "The mapping end date must be later than its start date." });
+            var expectedType = req.Purpose switch
+            {
+                "AR-VAT-OUTPUT" => GlAccountType.Liability,
+                "AP-VAT-INPUT" => GlAccountType.Asset,
+                "AP-WHT-PAYABLE" => GlAccountType.Liability,
+                _ => (GlAccountType?)null
+            };
+            if (!expectedType.HasValue || (req.Purpose == "AP-WHT-PAYABLE" && (req.TaxType != TaxType.WHT || req.TaxCodeId.HasValue)) ||
+                (req.Purpose != "AP-WHT-PAYABLE" && (req.TaxType != TaxType.VAT || !req.TaxCodeId.HasValue)))
+                return BadRequest(new { error = "Use AR-VAT-OUTPUT/AP-VAT-INPUT with a VAT tax code, or AP-WHT-PAYABLE with WHT and no tax-code ID." });
+            var account = await _db.GlAccounts.SingleOrDefaultAsync(x => x.Id == req.GlAccountId &&
+                x.CompanyId == CompanyId && x.IsActive && x.IsPostable, ct);
+            if (account == null || account.Type != expectedType.Value)
+                return BadRequest(new { error = "The selected tax account must be active, postable and of the required GL type." });
+            if (req.TaxCodeId.HasValue && !await _db.TaxCodes.AnyAsync(x => x.Id == req.TaxCodeId.Value &&
+                x.CompanyId == CompanyId && x.Type == req.TaxType && x.IsActive, ct))
+                return BadRequest(new { error = "The tax code must be active, company-owned and match the tax type." });
+            var version = (await _db.TaxAccountMappings.Where(x => x.CompanyId == CompanyId &&
+                x.Purpose == req.Purpose && x.TaxCodeId == req.TaxCodeId).Select(x => (int?)x.VersionNumber).MaxAsync(ct) ?? 0) + 1;
+            var mapping = new TaxAccountMapping
+            {
+                CompanyId = CompanyId, TaxType = req.TaxType, Purpose = req.Purpose, TaxCodeId = req.TaxCodeId,
+                GlAccountId = req.GlAccountId, VersionNumber = version, EffectiveFrom = req.EffectiveFrom,
+                EffectiveTo = req.EffectiveTo, Status = TaxConfigurationStatus.Draft, CreatedBy = UserId
+            };
+            _db.TaxAccountMappings.Add(mapping);
+            await _db.SaveChangesAsync(ct);
+            return Ok(mapping);
+        }
+
+        [HttpPost("tax-account-mappings/{id}/submit")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitTaxAccountMapping(Guid id, CancellationToken ct)
+        {
+            var mapping = await _db.TaxAccountMappings.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == CompanyId, ct);
+            if (mapping == null) return NotFound(new { error = "Tax account mapping not found." });
+            if (mapping.Status != TaxConfigurationStatus.Draft) return BadRequest(new { error = "Only draft mappings can be submitted." });
+            var workflow = await _approvalChains.SubmitForApprovalAsync(CompanyId, "Ipsas24TaxAccountMapping",
+                mapping.Id, "TaxAccountMappings", UserId, 0m, null,
+                $"Approve {mapping.Purpose} tax-account mapping version {mapping.VersionNumber}.", ct);
+            mapping.Status = TaxConfigurationStatus.PendingApproval;
+            mapping.ApprovalWorkflowId = workflow.Id;
+            mapping.SubmittedBy = UserId;
+            mapping.SubmittedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return Ok(mapping);
+        }
+
+        [HttpPost("tax-account-mappings/{id}/finalise-approval")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> FinaliseTaxAccountMapping(Guid id, CancellationToken ct)
+        {
+            var mapping = await _db.TaxAccountMappings.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == CompanyId, ct);
+            if (mapping == null) return NotFound(new { error = "Tax account mapping not found." });
+            if (mapping.Status != TaxConfigurationStatus.PendingApproval || !mapping.ApprovalWorkflowId.HasValue ||
+                mapping.SubmittedBy == UserId)
+                return BadRequest(new { error = "An independent approver must finalise a submitted mapping." });
+            var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x => x.Id == mapping.ApprovalWorkflowId &&
+                x.CompanyId == CompanyId, ct);
+            if (workflow?.Status != WorkflowStatus.Approved)
+                return BadRequest(new { error = "The linked approval workflow is not approved." });
+            var overlap = await _db.TaxAccountMappings.AnyAsync(x => x.CompanyId == CompanyId && x.Id != id &&
+                x.Purpose == mapping.Purpose && x.TaxCodeId == mapping.TaxCodeId &&
+                x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom < (mapping.EffectiveTo ?? DateTime.MaxValue) &&
+                (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > mapping.EffectiveFrom), ct);
+            if (overlap) return BadRequest(new { error = "An approved mapping already covers part of this effective period. Close the prior mapping before approval." });
+            mapping.Status = TaxConfigurationStatus.Approved;
+            mapping.ApprovedBy = UserId;
+            mapping.ApprovedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return Ok(mapping);
+        }
+
+        [HttpGet("tax-budget-policies")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetTaxBudgetPolicies(CancellationToken ct) =>
+            Ok(await _db.PublicSectorTaxBudgetPolicies.Where(x => x.CompanyId == CompanyId)
+                .OrderBy(x => x.TaxType).ThenByDescending(x => x.VersionNumber).ToListAsync(ct));
+
+        [HttpPost("tax-budget-policies")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateTaxBudgetPolicy(CreateTaxBudgetPolicyRequest req, CancellationToken ct)
+        {
+            if (req.EffectiveTo.HasValue && req.EffectiveTo.Value <= req.EffectiveFrom)
+                return BadRequest(new { error = "The policy end date must be later than its start date." });
+            if (req.TaxCodeId.HasValue && !await _db.TaxCodes.AnyAsync(x => x.Id == req.TaxCodeId &&
+                x.CompanyId == CompanyId && x.Type == req.TaxType, ct))
+                return BadRequest(new { error = "The policy tax code must belong to this company and match the tax type." });
+            if (req.TaxType == TaxType.VAT && !req.TaxCodeId.HasValue)
+                return BadRequest(new { error = "VAT policy must identify the tax code, so recoverable and irrecoverable treatments can differ." });
+            if (req.Treatment == TaxBudgetTreatment.SeparateClassification)
+            {
+                if (!req.BudgetGlAccountId.HasValue || !req.FundCentreId.HasValue)
+                    return BadRequest(new { error = "Separate classification requires an explicit budget GL account and Fund Centre." });
+                if (!await _db.GlAccounts.AnyAsync(x => x.Id == req.BudgetGlAccountId && x.CompanyId == CompanyId &&
+                    x.IsActive && x.IsPostable, ct) ||
+                    !await _db.FundCentres.AnyAsync(x => x.Id == req.FundCentreId && x.CompanyId == CompanyId, ct))
+                    return BadRequest(new { error = "The separate budget GL account and Fund Centre must belong to this company and be active/valid." });
+            }
+            var version = (await _db.PublicSectorTaxBudgetPolicies.Where(x => x.CompanyId == CompanyId &&
+                x.TaxType == req.TaxType && x.TaxCodeId == req.TaxCodeId).Select(x => (int?)x.VersionNumber).MaxAsync(ct) ?? 0) + 1;
+            var policy = new PublicSectorTaxBudgetPolicy
+            {
+                CompanyId = CompanyId, TaxType = req.TaxType, TaxCodeId = req.TaxCodeId,
+                Treatment = req.Treatment, BudgetGlAccountId = req.BudgetGlAccountId,
+                FundCentreId = req.FundCentreId, CostCentreId = req.CostCentreId,
+                VersionNumber = version, EffectiveFrom = req.EffectiveFrom, EffectiveTo = req.EffectiveTo,
+                Status = TaxConfigurationStatus.Draft, CreatedBy = UserId
+            };
+            _db.PublicSectorTaxBudgetPolicies.Add(policy);
+            await _db.SaveChangesAsync(ct);
+            return Ok(policy);
+        }
+
+        [HttpPost("tax-budget-policies/{id}/submit")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitTaxBudgetPolicy(Guid id, CancellationToken ct)
+        {
+            var policy = await _db.PublicSectorTaxBudgetPolicies.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == CompanyId, ct);
+            if (policy == null) return NotFound(new { error = "Tax budget policy not found." });
+            if (policy.Status != TaxConfigurationStatus.Draft) return BadRequest(new { error = "Only draft policies can be submitted." });
+            var workflow = await _approvalChains.SubmitForApprovalAsync(CompanyId, "Ipsas24TaxBudgetPolicy",
+                policy.Id, "PublicSectorTaxBudgetPolicies", UserId, 0m, policy.FundCentreId,
+                $"Approve IPSAS 24 tax budget treatment {policy.TaxType}/{policy.TaxCodeId} version {policy.VersionNumber}.", ct);
+            policy.Status = TaxConfigurationStatus.PendingApproval;
+            policy.ApprovalWorkflowId = workflow.Id;
+            policy.SubmittedBy = UserId;
+            policy.SubmittedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return Ok(policy);
+        }
+
+        [HttpPost("tax-budget-policies/{id}/finalise-approval")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> FinaliseTaxBudgetPolicy(Guid id, CancellationToken ct)
+        {
+            var policy = await _db.PublicSectorTaxBudgetPolicies.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == CompanyId, ct);
+            if (policy == null) return NotFound(new { error = "Tax budget policy not found." });
+            if (policy.Status != TaxConfigurationStatus.PendingApproval || !policy.ApprovalWorkflowId.HasValue ||
+                policy.SubmittedBy == UserId)
+                return BadRequest(new { error = "An independent approver must finalise a submitted policy." });
+            var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x => x.Id == policy.ApprovalWorkflowId &&
+                x.CompanyId == CompanyId, ct);
+            if (workflow?.Status != WorkflowStatus.Approved)
+                return BadRequest(new { error = "The linked approval workflow is not approved." });
+            var overlap = await _db.PublicSectorTaxBudgetPolicies.AnyAsync(x => x.CompanyId == CompanyId && x.Id != id &&
+                x.TaxType == policy.TaxType && x.TaxCodeId == policy.TaxCodeId &&
+                x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom < (policy.EffectiveTo ?? DateTime.MaxValue) &&
+                (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > policy.EffectiveFrom), ct);
+            if (overlap) return BadRequest(new { error = "An approved tax budget policy already covers part of this effective period." });
+            policy.Status = TaxConfigurationStatus.Approved;
+            policy.ApprovedBy = UserId;
+            policy.ApprovedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return Ok(policy);
         }
 
         // ---- Fund Centres & Commitments ----
