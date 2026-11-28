@@ -629,7 +629,7 @@ namespace ApexERP.Tests
 
             var revised = await service.CreateBudgetVersionAsync(companyId, 2026,
                 PublicSectorBudgetVersionKind.Revised, "USD", AccountingBasis.Accrual,
-                "Tenant approved programme/economic classification", "Whole MDA",
+                "Tenant approved programme/economic classification", "IPSAS 24 MDA",
                 periodStart, periodEnd, "Supplementary Appropriation 2026",
                 "Supplementary funding and reprioritisation approved.",
                 new[]
