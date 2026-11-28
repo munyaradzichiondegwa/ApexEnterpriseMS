@@ -66,6 +66,7 @@ public sealed class ZimbabweElectronicCommerceTaxEvaluatorTests
     {
         var result = ZimbabweElectronicCommerceTaxEvaluator.Evaluate(Eligible(), new DateTime(2025, 12, 31));
         Assert.False(result.Taxable);
+        Assert.Contains("prior-year", result.Reason);
     }
 
     [Fact]
