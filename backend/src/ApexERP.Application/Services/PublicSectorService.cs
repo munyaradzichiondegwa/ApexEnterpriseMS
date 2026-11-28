@@ -394,6 +394,19 @@ namespace ApexERP.Application.Services
 
                 var utilisation = await GetBudgetUtilizationAsync(companyId, fundCentreId, token);
                 var unexpended = utilisation.Available;
+                var beforeClose = new
+                {
+                    fundCentre.Code,
+                    fundCentre.Name,
+                    fundCentre.Level,
+                    fundCentre.FinancialYear,
+                    fundCentre.AppropriationAmount,
+                    fundCentre.CarriedForwardAmount,
+                    utilisation.Commitments,
+                    utilisation.Actuals,
+                    utilisation.Available,
+                    RequestedCarryForward = carryForward
+                };
 
                 Guid? nextParentId = null;
                 if (carryForward && unexpended > 0 && fc.ParentId.HasValue)
@@ -440,6 +453,19 @@ namespace ApexERP.Application.Services
                 }
 
                 fc.IsClosed = true;
+                _audit.Record(companyId, _db.CurrentUserId, "PublicSectorYearEnd.Closed", "PublicSector",
+                    nameof(FundCentre), fc.Id,
+                    beforeClose,
+                    new
+                    {
+                        fc.IsClosed,
+                        fc.CarriedForwardAmount,
+                        fc.LapsedAmount,
+                        UnexpendedBalance = unexpended,
+                        CarriedForward = carryForward ? unexpended : 0m,
+                        Lapsed = carryForward ? 0m : Math.Max(unexpended, 0m),
+                        NewFundCentreId = newFundCentreId
+                    });
                 await _db.SaveChangesAsync(token);
 
                 return new YearEndCloseResult(fundCentreId, unexpended,
