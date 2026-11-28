@@ -772,7 +772,7 @@ namespace ApexERP.Tests
             var report = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.False(report.ComparableActualsAvailable);
             Assert.All(report.Lines, line => Assert.Null(line.ActualOnComparableBasis));
-            Assert.Contains("Load and approve actuals on the budget basis", report.ComparabilityMessage);
+            Assert.Contains("zero-activity attestation", report.ComparabilityMessage, StringComparison.OrdinalIgnoreCase);
         }
 
         [PostgresFact]
