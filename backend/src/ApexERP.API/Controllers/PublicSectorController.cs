@@ -17,7 +17,8 @@ namespace ApexERP.API.Controllers
     public record CreateBudgetVersionRequest(int FinancialYear, PublicSectorBudgetVersionKind Kind, string Currency,
         AccountingBasis AccountingBasis, string ClassificationBasis, string EntityScope, DateTime PeriodStart,
         DateTime PeriodEnd, string AuthorityReference, string? AmendmentReason,
-        IReadOnlyCollection<CreateBudgetVersionLineRequest> Lines);
+        IReadOnlyCollection<CreateBudgetVersionLineRequest> Lines,
+        PublicSectorBudgetAmendmentNature? AmendmentNature = null);
     public record CreateBudgetVarianceExplanationRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
         string Explanation, string EvidenceReference);
     public record ReviewBudgetVarianceExplanationRequest(bool Accepted, string? ReviewNote);
@@ -188,7 +189,7 @@ namespace ApexERP.API.Controllers
                     req.PeriodStart, req.PeriodEnd, req.AuthorityReference, req.AmendmentReason,
                     req.Lines.Select(x => new PublicSectorService.BudgetVersionLineInput(x.FundCentreId,
                         x.GlAccountId, x.CostCentreId, x.Description, x.ClassificationCode, x.Amount)).ToArray(),
-                    UserId, ct);
+                    UserId, ct, req.AmendmentNature);
                 return Ok(version);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
