@@ -279,6 +279,27 @@ namespace ApexERP.Application.Services
             return (bank, ar, ap);
         }
 
+        public async Task<bool> HasValidCertifiedZeroActivityAttestationAsync(
+            Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
+        {
+            var version = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
+                x.Id == budgetVersionId && x.CompanyId == companyId &&
+                x.Status == PublicSectorBudgetVersionStatus.Approved &&
+                x.AccountingBasis == AccountingBasis.Cash, ct);
+            if (version == null) return false;
+
+            var attestation = await _db.PublicSectorCashPeriodAttestations.FirstOrDefaultAsync(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == version.Id &&
+                x.PeriodStart == version.PeriodStart && x.PeriodEnd == version.PeriodEnd &&
+                x.Status == "Certified" && x.CertifiedBy != null && x.CertifiedAt != null, ct);
+            if (attestation == null || attestation.ObservedBankTransactionCount != 0 ||
+                attestation.ObservedArReceiptCount != 0 || attestation.ObservedApPaymentCount != 0)
+                return false;
+
+            var counts = await GetCashPeriodSourceCountsAsync(companyId, version.PeriodStart, version.PeriodEnd, ct);
+            return counts.Bank == 0 && counts.Ar == 0 && counts.Ap == 0;
+        }
+
         public async Task<PublicSectorCashPeriodAttestation> CreateCashPeriodAttestationAsync(
             Guid companyId, Guid budgetVersionId, string evidenceReference, Guid actorId,
             CancellationToken ct = default)
