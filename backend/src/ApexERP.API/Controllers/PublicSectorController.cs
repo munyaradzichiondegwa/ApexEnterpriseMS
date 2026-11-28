@@ -690,7 +690,8 @@ namespace ApexERP.API.Controllers
                 expectedSourceRegisterApproved && requiredSourceSubmissionsReviewed &&
                 allExpectedSourceSubmissionsReviewed && noUnreviewedSourceSubmissions;
             var registerAttestation = await _db.PublicSectorExpectedCashSourceRegisterAttestations
-                .FirstOrDefaultAsync(x => x.CompanyId == CompanyId && x.BudgetVersionId == version.Id, ct);
+                .Where(x => x.CompanyId == CompanyId && x.BudgetVersionId == version.Id)
+                .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
             var expectedSourceRegisterCompletenessCertified = registerAttestation != null &&
                 registerAttestation.Status == "Certified" && registerAttestation.CertifiedBy.HasValue &&
                 registerAttestation.CertifiedAt.HasValue &&
