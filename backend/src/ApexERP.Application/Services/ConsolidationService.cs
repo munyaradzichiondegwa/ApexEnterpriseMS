@@ -130,6 +130,21 @@ namespace ApexERP.Application.Services
                 return evidence with { Status = status, IsGroupPeriodAligned = alignedToParent };
             }).ToList();
 
+            // Group reporting policy is strict period alignment: every entity must have exactly
+            // one accounting period covering the report date, and its start/end dates must match
+            // the parent's period with the report date at period end. Consolidation never silently
+            // shifts dates or manufactures adjusting entries; entity adjustments must be posted
+            // and approved in the relevant ledgers before the group worksheet is produced.
+            var misalignedPeriods = periodEvidence.Where(x => !x.IsGroupPeriodAligned).ToList();
+            if (misalignedPeriods.Count > 0)
+            {
+                var details = string.Join("; ", misalignedPeriods.Select(x =>
+                    $"{x.CompanyName}: {x.Status}"));
+                throw new InvalidOperationException(
+                    $"Consolidation is blocked by the group reporting-period policy. " +
+                    $"All entities must have one matching period ending on {asOfDate:yyyy-MM-dd}. {details}");
+            }
+
             // Financial rows are read across legal companies only after the tenant-scoped group
             // allow-list has been established. Every query below retains an explicit CompanyId predicate.
 
