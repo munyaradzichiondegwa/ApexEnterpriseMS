@@ -219,3 +219,24 @@ The PostgreSQL integration suite now includes a non-zero-period regression case 
 Verification: GitHub Actions run [#694](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46120594919) completed successfully for commit `d55aa2cf90a0816863d95224eb43a59af707f960` (backend build and PostgreSQL integration tests, frontend checks, migration drift, clean install, database hardening, least-privilege runtime, backup/restore and RLS rollback).
 
 This test verifies the currently implemented posted AR/AP settlement coverage gate. It does **not** verify the not-yet-implemented expected-source register, source submission/control-total workflow, or independent source-period close. Those remain separate acceptance requirements.
+
+
+## 2026-11-28 implementation and verification update
+
+The cash-flow bridge now applies the same source-completeness controls as budget comparability:
+
+- An empty execution-actual ledger is accepted only when the approved cash budget version has a certified zero-activity attestation, certification metadata and zero recorded counts, and a fresh count of bank transactions, AR receipts and AP payments remains zero.
+- For periods with activity, every posted AR receipt and AP payment in the period must be represented either by a direct certified budget actual or by a captured bank actual linked to the same settlement journal. Missing AR and AP settlement coverage is reported separately and blocks the bridge.
+- The bridge response exposes whether the certified zero-activity attestation is valid and the missing posted AR/AP settlement coverage counts.
+
+Verification on PR head `1291dd73f9798b7231109b29227828570f7150a4`:
+- Backend build and PostgreSQL integration tests: passed.
+- Migration drift, clean-install, hardening-script and boot checks: passed.
+- Frontend typecheck, tests and build: passed.
+- GitHub Actions run: [46121539342](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46121539342).
+
+### Remaining completeness control
+
+A certified nil-return is not, by itself, proof that the expected source population is complete. Before the period can be closed or a statutory comparison issued, the entity needs an approved register of expected source systems/accounts for the reporting entity and period. Each expected source must then have a period submission with independently reviewable record counts, control totals, currency, opening/closing balances and evidence. A source absent from the register or lacking a reviewed submission must remain *unknown/incomplete*, never be inferred as zero.
+
+The expected-source register and source-submission/reconciliation workflow remain outstanding. They require tenant-scoped entities, independent approval/review, immutable final states, database constraints and migration coverage; the existing cash-period attestation is not a substitute for those controls.
