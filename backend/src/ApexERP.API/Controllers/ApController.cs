@@ -17,7 +17,8 @@ namespace ApexERP.API.Controllers
         int PaymentTermsDays, bool WhtApplicable, decimal WhtRate, string? BankName = null, string? BankAccountNo = null, string? BankBranch = null);
     public record PostApInvoiceRequest(Guid ApControlAccountId, Guid VatInputAccountId, Guid WhtPayableAccountId);
     public record ApPaymentRequest(Guid SupplierId, DateTime PaymentDate, string Currency, decimal Amount,
-        PaymentMethod Method, Guid BankGlAccountId, Guid ApControlAccountId, Dictionary<Guid, decimal> Allocations);
+        PaymentMethod Method, Guid BankGlAccountId, Guid ApControlAccountId, Dictionary<Guid, decimal> Allocations,
+        IReadOnlyCollection<SettlementComponentRequest>? ComponentAllocations = null);
 
     [Route("api/v1/ap")]
     public class ApController : ApiControllerBase
@@ -124,7 +125,9 @@ namespace ApexERP.API.Controllers
                     return BadRequest(new { error = $"Payments above {limit:N2} must be made through a payment run, authorised by a second person." });
 
                 var payment = await _ap.PayAndAllocateAsync(CompanyId, req.SupplierId, req.PaymentDate, req.Currency,
-                    req.Amount, req.Method, req.BankGlAccountId, req.ApControlAccountId, req.Allocations);
+                    req.Amount, req.Method, req.BankGlAccountId, req.ApControlAccountId, req.Allocations,
+                    componentAllocations: req.ComponentAllocations?.Select(x => new SettlementComponentInput(
+                        x.InvoiceId, x.InvoiceLineId, x.TaxComponentId, x.AmountApplied)).ToArray());
                 payment.PreparedBy = UserId;
                 await _db.SaveChangesAsync();
                 return Ok(payment);
