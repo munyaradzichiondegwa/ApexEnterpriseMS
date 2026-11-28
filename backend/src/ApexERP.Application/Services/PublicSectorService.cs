@@ -819,7 +819,9 @@ namespace ApexERP.Application.Services
                 x.Id == submission.ExpectedCashSourceId && x.CompanyId == companyId, ct);
             var livePopulation = await GetExpectedCashSourcePopulationAsync(companyId, expected,
                 submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
-            if (!livePopulation.CurrencyMatches || !livePopulation.RecordIds.SetEquals(groups.Select(x => x.Key)))
+            if (!livePopulation.CurrencyMatches || livePopulation.RecordIds.Count != submission.RecordCount ||
+                livePopulation.ControlTotal != submission.ControlTotal ||
+                !livePopulation.RecordIds.SetEquals(groups.Select(x => x.Key)))
                 throw new InvalidOperationException("The record-level mapping does not match the current source-system record population and currency.");
             if (groups.Count != submission.RecordCount)
                 throw new InvalidOperationException($"Record-level reconciliation has {groups.Count} distinct source records; the submitted control count is {submission.RecordCount}.");
@@ -863,7 +865,8 @@ namespace ApexERP.Application.Services
                     submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
                 var lines = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
                     x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId).ToListAsync(ct);
-                if (!population.CurrencyMatches ||
+                if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
+                    population.ControlTotal != submission.ControlTotal ||
                     !population.RecordIds.SetEquals(lines.Select(x => x.SourceRecordId).Distinct()))
                     throw new InvalidOperationException("The live source population changed after submission; record-level reconciliation cannot be approved.");
             }
@@ -972,9 +975,25 @@ namespace ApexERP.Application.Services
                 var everySourceReconciled = sources.All(source => submissions.Any(submission =>
                     submission.ExpectedCashSourceId == source.Id && submission.Status == "Reviewed" &&
                     submission.RecordLevelStatus == "Reviewed"));
-                if (accepted && (!everySourceReconciled || submissions.Any(x =>
-                    x.Status != "Reviewed" || x.RecordLevelStatus != "Reviewed")))
+                if (accepted && (!everySourceReconciled || submissions.Count != sources.Count ||
+                    submissions.Any(x => x.Status != "Reviewed" || x.RecordLevelStatus != "Reviewed")))
                     throw new InvalidOperationException("Every expected source, including zero-activity sources, must have an independently reviewed source submission and record-level reconciliation before register completeness can be certified.");
+                if (accepted)
+                {
+                    foreach (var submission in submissions)
+                    {
+                        var expected = sources.Single(x => x.Id == submission.ExpectedCashSourceId);
+                        var population = await GetExpectedCashSourcePopulationAsync(companyId, expected,
+                            submission.PeriodStart, submission.PeriodEnd, submission.Currency, token);
+                        var lines = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
+                            x.CompanyId == companyId && x.CashSourceSubmissionId == submission.Id)
+                            .Select(x => x.SourceRecordId).Distinct().ToListAsync(token);
+                        if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
+                            population.ControlTotal != submission.ControlTotal ||
+                            !population.RecordIds.SetEquals(lines))
+                            throw new InvalidOperationException($"The live source population for {expected.SourceCode} changed or does not match its reviewed control totals and record-level reconciliation.");
+                    }
+                }
                 item.Status = accepted ? "Certified" : "Rejected";
                 item.CertifiedBy = certifierId;
                 item.CertifiedAt = DateTime.UtcNow;
@@ -1130,6 +1149,26 @@ namespace ApexERP.Application.Services
                     sourceSubmissions.All(submission => submission.Status == "Reviewed" &&
                         submission.RecordLevelStatus == "Reviewed" &&
                         expectedSources.Any(source => source.Id == submission.ExpectedCashSourceId));
+                var liveSourcePopulationsComplete = sourceRegisterApproved && noOrphanOrUnreviewedSubmissions;
+                if (liveSourcePopulationsComplete)
+                {
+                    foreach (var expected in expectedSources)
+                    {
+                        var submission = sourceSubmissions.Single(x => x.ExpectedCashSourceId == expected.Id);
+                        var population = await GetExpectedCashSourcePopulationAsync(companyId, expected,
+                            submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
+                        var mappedIds = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
+                            x.CompanyId == companyId && x.CashSourceSubmissionId == submission.Id)
+                            .Select(x => x.SourceRecordId).Distinct().ToListAsync(ct);
+                        if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
+                            population.ControlTotal != submission.ControlTotal ||
+                            !population.RecordIds.SetEquals(mappedIds))
+                        {
+                            liveSourcePopulationsComplete = false;
+                            break;
+                        }
+                    }
+                }
                 var registerAttestation = await _db.PublicSectorExpectedCashSourceRegisterAttestations
                     .Where(x => x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id)
                     .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
@@ -1147,7 +1186,10 @@ namespace ApexERP.Application.Services
                     comparabilityIssues.Add("Independent expected-source register completeness certification is missing, stale or inconsistent with the approved budget scope.");
 
                 var cashSourceControlsComplete = sourceRegisterApproved && everyExpectedSourceReviewed &&
-                    noOrphanOrUnreviewedSubmissions && registerCompletenessCertified;
+                    noOrphanOrUnreviewedSubmissions && liveSourcePopulationsComplete &&
+                    registerCompletenessCertified;
+                if (!liveSourcePopulationsComplete)
+                    comparabilityIssues.Add("The live source record population, control total or currency no longer agrees with the independently reviewed record-level reconciliation.");
                 if (uncapturedMovements == 0 && missingArSettlementCoverage == 0 &&
                     missingApSettlementCoverage == 0 && pendingCashActuals == 0 &&
                     invalidCertifiedCashActuals == 0 && cashSourceControlsComplete)
