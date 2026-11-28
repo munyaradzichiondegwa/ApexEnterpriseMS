@@ -100,6 +100,14 @@ namespace ApexERP.API.Controllers
                 var journalPosted = await _db.JournalEntries.AnyAsync(x => x.Id == bankTransaction.JournalEntryId.Value &&
                     x.CompanyId == CompanyId && x.Status == JournalStatus.Posted, token);
                 if (!journalPosted) return BadRequest(new { error = "The bank transaction journal is not posted." });
+                var bankAccount = await _db.BankAccounts.FirstOrDefaultAsync(x =>
+                    x.Id == bankTransaction.BankAccountId && x.CompanyId == CompanyId, token);
+                if (bankAccount == null || bankAccount.Currency != bankTransaction.Currency)
+                    return BadRequest(new { error = "The remittance bank account must belong to this company and use the transaction currency." });
+                var bankLeg = await _db.JournalLines.Where(x => x.JournalEntryId == bankTransaction.JournalEntryId.Value &&
+                    x.GlAccountId == bankAccount.GlAccountId).SumAsync(x => x.Credit - x.Debit, token);
+                if (bankLeg != bankTransaction.Debit)
+                    return BadRequest(new { error = "The posted bank-account credit does not reconcile to the outgoing remittance amount." });
 
                 var componentIds = req.Select(x => x.TaxComponentId).ToArray();
                 var components = await _db.InvoiceTaxComponents.Where(x => x.CompanyId == CompanyId &&
@@ -132,7 +140,9 @@ namespace ApexERP.API.Controllers
                     if (policy.Treatment == TaxBudgetTreatment.SeparateClassification &&
                         (!policy.BudgetGlAccountId.HasValue || !policy.FundCentreId.HasValue ||
                          !await _db.GlAccounts.AnyAsync(x => x.Id == policy.BudgetGlAccountId.Value && x.CompanyId == CompanyId && x.IsActive && x.IsPostable, token) ||
-                         !await _db.FundCentres.AnyAsync(x => x.Id == policy.FundCentreId.Value && x.CompanyId == CompanyId, token)))
+                         !await _db.FundCentres.AnyAsync(x => x.Id == policy.FundCentreId.Value && x.CompanyId == CompanyId, token) ||
+                         (policy.CostCentreId.HasValue && !await _db.CostCentres.AnyAsync(x =>
+                             x.Id == policy.CostCentreId.Value && x.CompanyId == CompanyId && x.IsActive, token))))
                         return BadRequest(new { error = "The approved WHT separate classification is no longer valid." });
                     var prior = await _db.SettlementComponentAllocations.Where(x => x.CompanyId == CompanyId &&
                         x.SettlementKind == "TX" && x.TaxComponentId == component.Id)
