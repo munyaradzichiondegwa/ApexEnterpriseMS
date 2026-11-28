@@ -772,8 +772,9 @@ namespace ApexERP.Application.Services
         public async Task<PublicSectorExpectedCashSourceRegisterAttestation?> GetExpectedCashSourceRegisterAttestationAsync(
             Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
         {
-            return await _db.PublicSectorExpectedCashSourceRegisterAttestations.FirstOrDefaultAsync(x =>
-                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId, ct);
+            return await _db.PublicSectorExpectedCashSourceRegisterAttestations
+                .Where(x => x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId)
+                .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
         }
 
         public async Task<PublicSectorExpectedCashSourceRegisterAttestation> CreateExpectedCashSourceRegisterAttestationAsync(
@@ -791,8 +792,8 @@ namespace ApexERP.Application.Services
             if (!string.Equals(entityScope.Trim(), version.EntityScope, StringComparison.Ordinal))
                 throw new InvalidOperationException("The attested reporting entity scope must exactly match the approved budget version.");
             if (await _db.PublicSectorExpectedCashSourceRegisterAttestations.AnyAsync(x =>
-                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId, ct))
-                throw new InvalidOperationException("A source-register completeness attestation already exists for this budget version.");
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId && x.Status != "Rejected", ct))
+                throw new InvalidOperationException("A draft, pending or certified source-register completeness attestation already exists for this budget version. A rejected attestation may be replaced with a new submission.");
             var sources = await _db.PublicSectorExpectedCashSources.Where(x =>
                 x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId).ToListAsync(ct);
             if (sources.Count != expectedSourceCount || sources.Count == 0 ||
