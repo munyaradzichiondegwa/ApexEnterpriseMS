@@ -27,6 +27,9 @@ public sealed record ZimbabweDswtMonthlyReturnLine(
     string Currency,
     DateTime WithheldAt,
     string? CertificateNumber,
+    Guid? ApPaymentId,
+    Guid? BankStatementTransactionId,
+    DateTime? BankReconciledAt,
     ZimbabweDswtRecordStatus Status);
 
 /// <summary>
@@ -298,7 +301,8 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             .Select(x => new ZimbabweDswtMonthlyReturnLine(
                 x.Id, x.PaymentReference, x.IntermediaryName, x.SupplierName, x.SupplierCountryCode,
                 x.GrossPaymentAmount, x.WithholdingRate, x.WithheldAmount, x.Currency,
-                x.WithheldAt, x.CertificateNumber, x.Status))
+                x.WithheldAt, x.CertificateNumber, x.ApPaymentId,
+                x.BankStatementTransactionId, x.BankReconciledAt, x.Status))
             .ToListAsync(ct);
     }
 }
