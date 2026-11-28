@@ -72,6 +72,8 @@ namespace ApexERP.Domain.Entities
         public decimal InvestingAmount { get; set; }
         public decimal FinancingAmount { get; set; }
         public string SupportingReference { get; set; } = string.Empty;
+        public PublicSectorBudgetReconciliationStatus Status { get; set; } = PublicSectorBudgetReconciliationStatus.Draft;
+        public Guid? ApprovalWorkflowId { get; set; }
         public Guid? ApprovedBy { get; set; }
         public DateTime? ApprovedAt { get; set; }
     }
