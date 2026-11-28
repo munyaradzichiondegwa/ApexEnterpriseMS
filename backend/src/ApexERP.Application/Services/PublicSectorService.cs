@@ -2939,19 +2939,23 @@ namespace ApexERP.Application.Services
                 }
                 actual.Status = PublicSectorBudgetActualStatus.Certified;
                 actual.CertifiedBy = certifierId;
+                actual.CertifiedAt = DateTime.UtcNow;
+                _audit.Record(companyId, certifierId, "PublicSectorBudgetExecutionActual.Certified", "PublicSector",
+                    nameof(PublicSectorBudgetExecutionActual), actual.Id,
+                    new { Status = PublicSectorBudgetActualStatus.PendingCertification },
+                    new { actual.Status, actual.CertifiedBy, actual.CertifiedAt, actual.SourceKind, actual.SourceRecordId });
+
+                // Persist the certified compensating event first. The database guard only
+                // permits the original to transition to Reversed once that certified link exists.
                 if (reversalOriginal != null)
                 {
+                    await _db.SaveChangesAsync(token);
                     reversalOriginal.Status = PublicSectorBudgetActualStatus.Reversed;
                     _audit.Record(companyId, certifierId, "PublicSectorBudgetExecutionActual.ReversalCertified", "PublicSector",
                         nameof(PublicSectorBudgetExecutionActual), reversalOriginal.Id,
                         new { Status = PublicSectorBudgetActualStatus.Certified },
                         new { Status = PublicSectorBudgetActualStatus.Reversed, ReversalActualId = actual.Id });
                 }
-                actual.CertifiedAt = DateTime.UtcNow;
-                _audit.Record(companyId, certifierId, "PublicSectorBudgetExecutionActual.Certified", "PublicSector",
-                    nameof(PublicSectorBudgetExecutionActual), actual.Id,
-                    new { Status = PublicSectorBudgetActualStatus.PendingCertification },
-                    new { actual.Status, actual.CertifiedBy, actual.CertifiedAt, actual.SourceKind, actual.SourceRecordId });
                 await _db.SaveChangesAsync(token);
                 return actual;
             }, ct);
