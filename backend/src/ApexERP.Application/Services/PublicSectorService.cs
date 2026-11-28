@@ -3312,7 +3312,7 @@ namespace ApexERP.Application.Services
                     if (expense != postedLineAmount) return false;
                     expectedAllocation += lineAmount;
                 }
-                if (expectedAllocation != actual.SourceAmount || actual.CostCentreId.HasValue) return false;
+                if (expectedAllocation != actual.SourceAmount) return false;
                 var paymentBankCandidates = await _db.BankAccounts.Where(x =>
                     x.CompanyId == companyId && x.Currency == actual.Currency &&
                     _db.JournalLines.Any(j => j.JournalEntryId == payment.JournalEntryId.Value &&
