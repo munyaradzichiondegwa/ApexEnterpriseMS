@@ -88,11 +88,10 @@ namespace ApexERP.Application.Services
         {
             var integrity = ValidateIntegrity(envelope, existingImportBatchIds, existingStatementKeys);
             if (!integrity.IsValid) return integrity;
-            if (envelope.AuthenticationMethod == BankStatementAuthenticationMethod.UnverifiedUpload ||
-                !Enum.IsDefined(envelope.AuthenticationMethod) ||
+            if (envelope.AuthenticationMethod != BankStatementAuthenticationMethod.IndependentBankConfirmation ||
                 !envelope.AuthenticationVerified ||
                 string.IsNullOrWhiteSpace(envelope.AuthenticationEvidenceReference))
-                return Reject("Verified bank-origin authentication is required; a file hash alone is insufficient.");
+                return Reject("Only independently evidenced bank confirmation is enabled. Trusted API and digital-signature authentication remain disabled until server-side verifiers are configured.");
             return integrity with
             {
                 Reason = "Statement bytes and verified source-authentication metadata passed validation."
