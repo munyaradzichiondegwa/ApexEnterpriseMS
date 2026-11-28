@@ -1238,6 +1238,11 @@ namespace ApexERP.Tests
 
             await using var ctx = db.NewContext(companyId);
             var service = new PublicSectorService(ctx, new AuditService(ctx));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CreateBudgetReconciliationAsync(companyId, 2026,
+                    PublicSectorBudgetReconciliationType.Basis, "Invalid accrual totals on cash budget",
+                    "Revenue", 0m, 0m, 0m, "WP-IPSAS24-CASH-01", preparerId,
+                    default, 5m, 0m));
             var actual = await service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
                 budgetLineId, PublicSectorBudgetActualEventKind.CashPayment,
                 PublicSectorBudgetActualSourceKind.BankTransaction, bankTransactionId,
