@@ -631,8 +631,6 @@ namespace ApexERP.Infrastructure.Data
                 .HasCheckConstraint("CK_PublicSectorBudgetVersion_Period", "\"PeriodEnd\" > \"PeriodStart\"");
             modelBuilder.Entity<PublicSectorBudgetVersion>()
                 .HasCheckConstraint("CK_PublicSectorBudgetVersion_Sequence", "\"VersionNumber\" > 0");
-            modelBuilder.Entity<PublicSectorBudgetVersion>()
-                .HasOne<Company>().WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetVersionLine>()
                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.LineNumber }).IsUnique()
                 .HasDatabaseName("UX_PublicSectorBudgetVersionLine_Number");
