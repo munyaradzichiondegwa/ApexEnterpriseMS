@@ -705,6 +705,9 @@ namespace ApexERP.Infrastructure.Data
                 .HasCheckConstraint("CK_PublicSectorBudgetVersion_Period", "\"PeriodEnd\" > \"PeriodStart\"");
             modelBuilder.Entity<PublicSectorBudgetVersion>()
                 .HasCheckConstraint("CK_PublicSectorBudgetVersion_Sequence", "\"VersionNumber\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetVersion>()
+                .HasCheckConstraint("CK_PublicSectorBudgetVersion_AmendmentNature",
+                    "\"AmendmentNature\" IS NULL OR \"AmendmentNature\" IN (0, 1, 2)");
             modelBuilder.Entity<PublicSectorBudgetVersionLine>()
                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.LineNumber }).IsUnique()
                 .HasDatabaseName("UX_PublicSectorBudgetVersionLine_Number");
