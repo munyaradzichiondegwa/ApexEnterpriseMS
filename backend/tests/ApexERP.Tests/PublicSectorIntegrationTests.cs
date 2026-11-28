@@ -1054,7 +1054,7 @@ namespace ApexERP.Tests
                     Id = unmappedBankTransactionId, CompanyId = companyId, BankAccountId = bankAccountId,
                     TransactionDate = effectiveDate, Description = "Unmapped bank movement",
                     Debit = 25m, Credit = 0m, Reference = "BANK-REF-002",
-                    IsReconciled = true, JournalEntryId = journalId
+                    IsReconciled = true, JournalEntryId = null
                 });
                 seed.JournalLines.Add(new JournalLine
                 {
@@ -1105,6 +1105,15 @@ namespace ApexERP.Tests
             Assert.Equal(PublicSectorBudgetActualStatus.Certified, certified.Status);
             Assert.Equal(certifierId, certified.CertifiedBy);
             Assert.NotNull(certified.CertifiedAt);
+
+            // Cash-basis IPSAS 24 comparison must use certified source actuals, never
+            // accrual GL totals. An unlinked bank movement is not treated as a posted
+            // cash event and remains ineligible for capture.
+            var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
+            var comparisonLine = Assert.Single(comparison.Lines);
+            Assert.Equal(75m, comparisonLine.ActualOnComparableBasis);
+
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId, budgetLineId,
                     PublicSectorBudgetActualEventKind.CashPayment,
