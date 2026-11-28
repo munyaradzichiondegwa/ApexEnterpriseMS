@@ -671,6 +671,9 @@ namespace ApexERP.Infrastructure.Data
                 .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_FundCentre");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_GlAccount");
+            modelBuilder.Entity<ArInvoice>()
+                .HasOne<FundCentre>().WithMany().HasForeignKey(a => a.FundCentreId).OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_ArInvoice_FundCentre");
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
                 .HasOne<FundCentre>().WithMany().HasForeignKey(a => a.FundCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<PublicSectorBudgetAllocation>()
