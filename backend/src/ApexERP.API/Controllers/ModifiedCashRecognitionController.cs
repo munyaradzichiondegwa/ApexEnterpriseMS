@@ -13,7 +13,7 @@ public sealed record ModifiedCashMappingInput(string SourceEventKind, Guid Budge
 public sealed record CreateModifiedCashPolicyRequest(
     Guid BudgetVersionId, string PolicyReference, DateTime EffectiveFrom, DateTime? EffectiveTo,
     DateTime ReportingPeriodStart, DateTime ReportingPeriodEnd, int PostPeriodRecognitionWindowDays,
-    ModifiedCashRecognitionTreatment Treatment, IReadOnlyCollection<ModifiedCashMappingInput> Mappings);
+    ModifiedCashBudgetTreatment Treatment, IReadOnlyCollection<ModifiedCashMappingInput> Mappings);
 public sealed record CreateModifiedCashRecognitionRequest(Guid CommitmentId, Guid GoodsReceiptLineId, string EvidenceReference);
 
 [Route("api/v1/public-sector/modified-cash")]
@@ -175,7 +175,7 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                 var policy = await _db.ModifiedCashRecognitionPolicies.SingleOrDefaultAsync(x =>
                     x.Id == id && x.CompanyId == CompanyId && x.Status == ModifiedCashPolicyStatus.Approved, token)
                     ?? throw new InvalidOperationException("An approved modified-cash policy is required.");
-                if (policy.Treatment == ModifiedCashRecognitionTreatment.DiscloseSeparately &&
+                if (policy.Treatment == ModifiedCashBudgetTreatment.DiscloseSeparately &&
                     !await _db.ModifiedCashRecognitionMappings.AnyAsync(x => x.CompanyId == CompanyId && x.PolicyId == policy.Id, token))
                     throw new InvalidOperationException("A disclosure policy requires an approved event classification mapping.");
                 if (string.IsNullOrWhiteSpace(req.EvidenceReference) || req.EvidenceReference.Trim().Length > 1000)
