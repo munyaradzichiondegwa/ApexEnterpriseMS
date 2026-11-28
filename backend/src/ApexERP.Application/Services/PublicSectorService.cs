@@ -14,6 +14,8 @@ namespace ApexERP.Application.Services
         decimal PostedActuals, decimal ActualVariance, decimal ActualVariancePercent,
         decimal AvailableBudget, decimal PercentUtilised, decimal LapsedAmount, bool IsClosed);
     public record YearEndCloseResult(Guid FundCentreId, decimal UnexpendedBalance, decimal CarriedForward, decimal Lapsed, Guid? NewFundCentreId);
+    public record CreateBudgetExecutionActualResult(Guid Id, string SourceReference, decimal Amount, string Currency,
+        PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualStatus Status);
     public record PublicSectorBudgetVarianceLine(Guid FundCentreId, string FundCentreCode, string FundCentreName,
         int FinancialYear, Guid GlAccountId, string AccountCode, string AccountName,
         Guid? CostCentreId, string? CostCentreCode, string? CostCentreName,
@@ -988,6 +990,159 @@ namespace ApexERP.Application.Services
                 return new YearEndCloseResult(fundCentreId, unexpended,
                     carryForward ? unexpended : 0, carryForward ? 0 : Math.Max(unexpended, 0), newFundCentreId);
             }, ct);
+        }
+
+        /// <summary>
+        /// Captures a cash-basis actual only from an independently reconciled bank movement or
+        /// a posted and authorised AR/AP cash transaction. Accrual invoices and payment instructions
+        /// are not accepted as cash evidence.
+        /// </summary>
+        public async Task<PublicSectorBudgetExecutionActual> CreateBudgetExecutionActualAsync(
+            Guid companyId, Guid budgetVersionId, Guid budgetVersionLineId,
+            PublicSectorBudgetActualEventKind eventKind, PublicSectorBudgetActualSourceKind sourceKind,
+            Guid sourceRecordId, DateTime effectiveDate, CashFlowCategory cashFlowSection,
+            Guid actorId, CancellationToken ct = default)
+        {
+            var version = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
+                x.Id == budgetVersionId && x.CompanyId == companyId &&
+                x.Status == PublicSectorBudgetVersionStatus.Approved, ct)
+                ?? throw new InvalidOperationException("An approved budget version is required.");
+            if (version.AccountingBasis != AccountingBasis.Cash)
+                throw new InvalidOperationException("This capture endpoint is restricted to approved cash-basis budgets. Modified-cash treatment must be explicitly configured before it can be enabled.");
+            var line = await _db.PublicSectorBudgetVersionLines.FirstOrDefaultAsync(x =>
+                x.Id == budgetVersionLineId && x.BudgetVersionId == version.Id &&
+                x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("The budget line does not belong to the selected approved budget version.");
+            if (effectiveDate < version.PeriodStart || effectiveDate >= version.PeriodEnd)
+                throw new InvalidOperationException("The effective date falls outside the approved budget reporting period.");
+            if (cashFlowSection is not (CashFlowCategory.Operating or CashFlowCategory.Investing or CashFlowCategory.Financing))
+                throw new InvalidOperationException("A valid operating, investing or financing cash-flow classification is required.");
+            var account = await _db.GlAccounts.FirstOrDefaultAsync(x =>
+                x.Id == line.GlAccountId && x.CompanyId == companyId && x.IsActive, ct)
+                ?? throw new InvalidOperationException("The budget line GL account is unavailable.");
+            if (account.CashFlowCategory != cashFlowSection)
+                throw new InvalidOperationException("The selected cash-flow section does not match the budget line GL account's configured cash-flow classification.");
+
+            if (await _db.PublicSectorBudgetExecutionActuals.AnyAsync(x =>
+                x.CompanyId == companyId && x.SourceKind == sourceKind && x.SourceRecordId == sourceRecordId &&
+                x.Status != PublicSectorBudgetActualStatus.Rejected, ct))
+                throw new InvalidOperationException("This source transaction has already been captured for this company.");
+
+            decimal amount;
+            string currency;
+            DateTime sourceDate;
+            string sourceReference;
+            if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
+            {
+                var source = await _db.BankTransactions.FirstOrDefaultAsync(x =>
+                    x.Id == sourceRecordId && x.CompanyId == companyId && x.IsReconciled, ct)
+                    ?? throw new InvalidOperationException("A reconciled bank transaction is required as cash evidence.");
+                if (!source.JournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(x =>
+                    x.Id == source.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                    throw new InvalidOperationException("The reconciled bank transaction must be linked to a posted journal entry.");
+                var isReceipt = eventKind == PublicSectorBudgetActualEventKind.CashReceipt;
+                amount = isReceipt ? source.Credit : source.Debit;
+                if (amount <= 0m || (isReceipt ? source.Debit != 0m : source.Credit != 0m))
+                    throw new InvalidOperationException("The bank transaction direction and amount do not match the selected cash event type.");
+                var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
+                    x.Id == source.BankAccountId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("The source bank account is not available to this company.");
+                currency = bank.Currency;
+                sourceDate = source.TransactionDate;
+                sourceReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
+            }
+            else if (sourceKind == PublicSectorBudgetActualSourceKind.ArReceipt &&
+                eventKind == PublicSectorBudgetActualEventKind.CashReceipt)
+            {
+                var source = await _db.ArReceipts.FirstOrDefaultAsync(x => x.Id == sourceRecordId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("AR receipt source was not found for this company.");
+                if (!source.JournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(x =>
+                    x.Id == source.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                    throw new InvalidOperationException("The AR receipt must be posted to the general ledger before it can be captured.");
+                amount = source.Amount; currency = source.Currency; sourceDate = source.ReceiptDate; sourceReference = source.ReceiptNo;
+            }
+            else if (sourceKind == PublicSectorBudgetActualSourceKind.ApPayment &&
+                eventKind == PublicSectorBudgetActualEventKind.CashPayment)
+            {
+                var source = await _db.ApPayments.FirstOrDefaultAsync(x => x.Id == sourceRecordId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException("AP payment source was not found for this company.");
+                if (!source.AuthorisedBy.HasValue || !source.AuthorisedAt.HasValue || !source.JournalEntryId.HasValue ||
+                    !await _db.JournalEntries.AnyAsync(x => x.Id == source.JournalEntryId.Value &&
+                        x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                    throw new InvalidOperationException("The AP payment must be independently authorised and posted before it can be captured.");
+                amount = source.Amount; currency = source.Currency; sourceDate = source.PaymentDate; sourceReference = source.PaymentNo;
+            }
+            else
+            {
+                throw new InvalidOperationException("The source type is not valid for the selected cash receipt/payment event.");
+            }
+
+            if (amount <= 0m || !string.Equals(currency, version.Currency, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The source amount must be positive and its currency must match the approved budget currency. Foreign-currency conversion requires approved rate provenance and is not enabled in this phase.");
+            var actual = new PublicSectorBudgetExecutionActual
+            {
+                CompanyId = companyId, FinancialYear = version.FinancialYear,
+                BudgetVersionId = version.Id, BudgetVersionLineId = line.Id,
+                FundCentreId = line.FundCentreId, GlAccountId = line.GlAccountId, CostCentreId = line.CostCentreId,
+                EventKind = eventKind, SourceKind = sourceKind, SourceRecordId = sourceRecordId,
+                SourceReference = sourceReference, SourceDate = sourceDate, EffectiveDate = effectiveDate,
+                Currency = currency.ToUpperInvariant(), Amount = amount, ExchangeRateToBudgetCurrency = 1m,
+                CashFlowSection = cashFlowSection, Status = PublicSectorBudgetActualStatus.Draft,
+                CreatedBy = actorId
+            };
+            _db.PublicSectorBudgetExecutionActuals.Add(actual);
+            _audit.Record(companyId, actorId, "PublicSectorBudgetExecutionActual.Created", "PublicSector",
+                nameof(PublicSectorBudgetExecutionActual), actual.Id, null,
+                new { actual.FinancialYear, actual.BudgetVersionId, actual.BudgetVersionLineId,
+                    actual.EventKind, actual.SourceKind, actual.SourceRecordId, actual.SourceReference,
+                    actual.SourceDate, actual.EffectiveDate, actual.Currency, actual.Amount, actual.CashFlowSection });
+            await _db.SaveChangesAsync(ct);
+            return actual;
+        }
+
+        public async Task<PublicSectorBudgetExecutionActual> SubmitBudgetExecutionActualAsync(
+            Guid companyId, Guid actualId, CancellationToken ct = default)
+        {
+            var actual = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
+                x.Id == actualId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Budget execution actual not found.");
+            if (actual.Status != PublicSectorBudgetActualStatus.Draft)
+                throw new InvalidOperationException("Only a draft budget actual can be submitted for certification.");
+            actual.Status = PublicSectorBudgetActualStatus.PendingCertification;
+            await _db.SaveChangesAsync(ct);
+            return actual;
+        }
+
+        public async Task<PublicSectorBudgetExecutionActual> CertifyBudgetExecutionActualAsync(
+            Guid companyId, Guid actualId, Guid certifierId, CancellationToken ct = default)
+        {
+            return await _db.InTransactionAsync(async token =>
+            {
+                var actual = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
+                    x.Id == actualId && x.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Budget execution actual not found.");
+                if (actual.Status != PublicSectorBudgetActualStatus.PendingCertification)
+                    throw new InvalidOperationException("Only a pending budget actual can be certified.");
+                if (actual.CreatedBy == certifierId)
+                    throw new InvalidOperationException("The person who captured the budget actual cannot certify it.");
+                actual.Status = PublicSectorBudgetActualStatus.Certified;
+                actual.CertifiedBy = certifierId;
+                actual.CertifiedAt = DateTime.UtcNow;
+                _audit.Record(companyId, certifierId, "PublicSectorBudgetExecutionActual.Certified", "PublicSector",
+                    nameof(PublicSectorBudgetExecutionActual), actual.Id,
+                    new { Status = PublicSectorBudgetActualStatus.PendingCertification },
+                    new { actual.Status, actual.CertifiedBy, actual.CertifiedAt, actual.SourceKind, actual.SourceRecordId });
+                await _db.SaveChangesAsync(token);
+                return actual;
+            }, ct);
+        }
+
+        public async Task<IReadOnlyList<PublicSectorBudgetExecutionActual>> GetBudgetExecutionActualsAsync(
+            Guid companyId, int financialYear, CancellationToken ct = default)
+        {
+            return await _db.PublicSectorBudgetExecutionActuals.Where(x =>
+                x.CompanyId == companyId && x.FinancialYear == financialYear)
+                .OrderBy(x => x.EffectiveDate).ThenBy(x => x.SourceReference).ToListAsync(ct);
         }
     }
 }
