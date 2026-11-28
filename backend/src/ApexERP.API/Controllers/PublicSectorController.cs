@@ -32,6 +32,8 @@ namespace ApexERP.API.Controllers
         PublicSectorBudgetReconciliationType Type, string StatementSection, string Description,
         string SupportingReference, DateTime StatementPeriodStart, DateTime StatementPeriodEnd,
         string StatementEntityScope);
+    public record CreateAutomaticCashFlowBudgetReconciliationRequest(int FinancialYear, Guid BudgetVersionId,
+        string StatementSection, string SupportingReference);
     public record CreateBudgetExecutionActualReversalRequest(string Reason);
     public record CreateBudgetExecutionActualRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
         PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualSourceKind SourceKind,
@@ -445,6 +447,8 @@ namespace ApexERP.API.Controllers
         [HasPermission(Permissions.PublicSectorBudgetOverride)]
         public async Task<IActionResult> CreateBudgetReconciliation(CreateBudgetReconciliationRequest req, CancellationToken ct)
         {
+            if (req.StatementSection is "Operating" or "Investing" or "Financing")
+                return BadRequest(new { error = "Cash-flow bridge adjustments must be generated from the current system-calculated candidate, not entered manually." });
             try
             {
                 var item = await _publicSector.CreateBudgetReconciliationAsync(CompanyId, req.FinancialYear,
@@ -468,6 +472,21 @@ namespace ApexERP.API.Controllers
                     req.FinancialYear, req.BudgetVersionId, req.Type, req.StatementSection,
                     req.Description, req.SupportingReference, req.StatementPeriodStart,
                     req.StatementPeriodEnd, req.StatementEntityScope, UserId, ct);
+                return Ok(item);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-reconciliations/cash-flow/automatic")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateAutomaticCashFlowBudgetReconciliation(
+            CreateAutomaticCashFlowBudgetReconciliationRequest req, CancellationToken ct)
+        {
+            try
+            {
+                var item = await _publicSector.CreateAutomaticCashFlowBudgetReconciliationAsync(CompanyId,
+                    req.FinancialYear, req.BudgetVersionId, req.StatementSection,
+                    req.SupportingReference, UserId, ct);
                 return Ok(item);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
@@ -1031,7 +1050,7 @@ namespace ApexERP.API.Controllers
             // Only adjustments approved for this exact budget version, reporting period
             // and reporting entity may enter this bridge. A year-wide aggregate can otherwise
             // import approvals from another budget revision or reporting window.
-            var adjustments = await _db.PublicSectorBudgetReconciliations.Where(x =>
+            var approvedAdjustments = await _db.PublicSectorBudgetReconciliations.Where(x =>
                 x.CompanyId == CompanyId && x.FinancialYear == year &&
                 x.BudgetVersionId == version.Id &&
                 x.StatementPeriodStart == version.PeriodStart &&
@@ -1040,6 +1059,37 @@ namespace ApexERP.API.Controllers
                 (x.StatementSection == "Operating" || x.StatementSection == "Investing" ||
                  x.StatementSection == "Financing") &&
                 x.Status == PublicSectorBudgetReconciliationStatus.Approved).ToListAsync(ct);
+            var adjustments = new List<PublicSectorBudgetReconciliation>();
+            var invalidApprovedAdjustments = 0;
+            foreach (var adjustment in approvedAdjustments)
+            {
+                try
+                {
+                    var candidate = await _publicSector.GetAutomaticCashFlowBudgetReconciliationCandidateAsync(
+                        CompanyId, year, version.Id, adjustment.StatementSection, ct);
+                    var amountMatches = adjustment.StatementSection switch
+                    {
+                        "Operating" => adjustment.OperatingAmount == candidate.ExpectedAdjustment &&
+                            adjustment.InvestingAmount == 0m && adjustment.FinancingAmount == 0m,
+                        "Investing" => adjustment.InvestingAmount == candidate.ExpectedAdjustment &&
+                            adjustment.OperatingAmount == 0m && adjustment.FinancingAmount == 0m,
+                        "Financing" => adjustment.FinancingAmount == candidate.ExpectedAdjustment &&
+                            adjustment.OperatingAmount == 0m && adjustment.InvestingAmount == 0m,
+                        _ => false
+                    };
+                    if (adjustment.Type != candidate.Type ||
+                        adjustment.SourceFingerprint != candidate.SourceFingerprint ||
+                        (adjustment.IsNoDifferenceAttestation
+                            ? candidate.ExpectedAdjustment != 0m
+                            : !amountMatches))
+                    {
+                        invalidApprovedAdjustments++;
+                        continue;
+                    }
+                    adjustments.Add(adjustment);
+                }
+                catch (InvalidOperationException) { invalidApprovedAdjustments++; }
+            }
             decimal Adjustment(string section, Func<PublicSectorBudgetReconciliation, decimal> selector) =>
                 adjustments.Where(x => x.StatementSection == section).Sum(selector);
             var budgetOperating = Actual(CashFlowCategory.Operating);
@@ -1125,6 +1175,7 @@ namespace ApexERP.API.Controllers
             // Keep this independent from the three section bridges: both controls must pass.
             var cashFlowStatementReconciled = cashFlow.ReconciliationDifference == 0m;
             var reconciled = sourceCoverageComplete && cashFlowStatementReconciled &&
+                invalidApprovedAdjustments == 0 &&
                 operatingBridgeDifference == 0m && investingBridgeDifference == 0m &&
                 financingBridgeDifference == 0m;
 
@@ -1156,6 +1207,7 @@ namespace ApexERP.API.Controllers
                 InvalidCertifiedActuals = invalidCertifiedActuals,
                 CashFlowStatementReconciled = cashFlowStatementReconciled,
                 CashFlowStatementReconciliationDifference = cashFlow.ReconciliationDifference,
+                InvalidApprovedAdjustments = invalidApprovedAdjustments,
                 Reconciled = reconciled,
                 Sections = new[]
                 {
