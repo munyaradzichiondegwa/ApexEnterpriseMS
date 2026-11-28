@@ -214,7 +214,7 @@ The following is the starting position from the live repository review. It is de
 | Platform control plane | Separate PlatformBearer scheme and platform controller exist | Verify every route, issuer/key configuration, audit and support-grant enforcement |
 | Branches/departments/cost centres | Branch entity and assignments exist | Verify complete hierarchy, company scope and CRUD/UI coverage |
 | Multicurrency/consolidation | Effective direct/inverse rate resolution, rate source/reference capture, revaluation evidence and consolidation rate evidence are implemented | Resolver, PostgreSQL cross-currency provenance/CTA balancing and same-day override timestamp scenarios pass in #46050356711 (293 backend tests); period alignment and elimination acceptance remain open |
-| Public sector | Existing budget/fund functionality and profiles are documented | Verify end-to-end commitment and reporting controls against MDA/SOE scenarios |
+| Public sector | Vote/Programme/Sub-Programme appropriations and commitments; approved expense-account allocations by optional cost centre; posted-GL variance report; independent approval workflow and appropriation ceiling | PostgreSQL CI verifies dimensional actual matching, exclusion of pending allocations and clean migration. Broader government reporting schedules, statutory forms and additional economic/objective classifications remain open |
 | Operations/DR | Lifecycle metadata, SLA and worker-dispatch boundary are documented | Worker, monitoring and backup infrastructure require deployment evidence |
 | SMTP/billing/statutory integrations | Interfaces/configuration boundaries are documented | Not verified until provider and approvals are configured |
 
