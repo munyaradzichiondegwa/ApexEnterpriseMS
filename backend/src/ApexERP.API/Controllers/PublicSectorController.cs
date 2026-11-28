@@ -10,6 +10,8 @@ using Microsoft.EntityFrameworkCore;
 namespace ApexERP.API.Controllers
 {
     public record CreateFundCentreRequest(string Code, string Name, FundCentreLevel Level, Guid? ParentId, int FinancialYear, decimal AppropriationAmount, decimal CarriedForward);
+    public record CreateBudgetAllocationRequest(Guid FundCentreId, Guid GlAccountId, Guid? CostCentreId, int FinancialYear, decimal Amount);
+
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
     public record CreateTenderRequest(string Title, string? Specifications, DateTime SubmissionDeadline);
@@ -75,6 +77,55 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> GetExpenditureReport([FromQuery] int year)
         {
             try { return Ok(await _publicSector.GetExpenditureReportAsync(CompanyId, year)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpGet("budget-allocations/variance-report")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetBudgetVarianceReport([FromQuery] int year, [FromQuery] Guid? fundCentreId)
+        {
+            try { return Ok(await _publicSector.GetBudgetVarianceReportAsync(CompanyId, year, fundCentreId)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-allocations")]
+        public async Task<IActionResult> CreateBudgetAllocation(CreateBudgetAllocationRequest req)
+        {
+            try
+            {
+                var allocation = await _publicSector.CreateBudgetAllocationAsync(CompanyId, req.FundCentreId,
+                    req.GlAccountId, req.CostCentreId, req.FinancialYear, req.Amount, UserId);
+                return Ok(allocation);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-allocations/{id}/submit-for-approval")]
+        public async Task<IActionResult> SubmitBudgetAllocationForApproval(Guid id)
+        {
+            try
+            {
+                var allocation = await _db.PublicSectorBudgetAllocations.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == CompanyId);
+                if (allocation == null) return NotFound(new { error = "Budget allocation not found." });
+                if (allocation.Status != PublicSectorBudgetAllocationStatus.Draft)
+                    return BadRequest(new { error = "Only a draft allocation can be submitted." });
+                var workflow = await _db.InTransactionAsync(async token =>
+                {
+                    var request = await _approvalChains.SubmitForApprovalAsync(CompanyId, "PublicSectorBudgetAllocation",
+                        allocation.Id, "PublicSectorBudgetAllocation", UserId, allocation.Amount, allocation.FundCentreId,
+                        $"Approve account {allocation.GlAccountId} / cost centre {allocation.CostCentreId?.ToString() ?? "Unallocated"} budget allocation.", token);
+                    await _publicSector.MarkBudgetAllocationPendingAsync(CompanyId, allocation.Id, request.Id, token);
+                    return request;
+                });
+                return Ok(workflow);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-allocations/{id}/finalise-approval")]
+        public async Task<IActionResult> FinaliseBudgetAllocationApproval(Guid id)
+        {
+            try { return Ok(await _publicSector.FinaliseBudgetAllocationApprovalAsync(CompanyId, id, UserId)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
