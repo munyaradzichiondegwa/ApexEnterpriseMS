@@ -39,6 +39,12 @@ Commit `9d2707643e1703638bac70f887ccde445f9d4469`, GitHub Actions run [#46138757
 
 The backend suite includes regression coverage for reviewed source-submission replacement revisions, certified actual reversal and replacement, independent reversal certification, source-population completeness treatment, approved FX-rate provenance and stale-rate invalidation, explicit AR/AP invoice-line GL/cost-centre allocation, and AR/AP opening/closing control-balance reconciliation, in addition to the earlier cash actual, variance, register-completeness and tenant-isolation controls. This is CI verification of the feature branch, not a production migration or statutory approval.
 
+### Cash-flow bridge hardening — 28 November 2026
+
+- The IPSAS 24 cash-flow bridge now has two independent reconciliation gates: each operating/investing/financing budget-to-financial-statement adjustment must reconcile to its corresponding section, and the underlying Statement of Cash Flows must itself reconcile opening cash plus net movement to closing cash.
+- The reconciliation API exposes the statement-level reconciliation status and difference. A zero difference in the three budget bridge sections can no longer mask an internally unreconciled Statement of Cash Flows.
+- This code change is awaiting the branch CI result. It does not establish that the cash-flow statement's underlying classification methodology is correct, nor does it replace independent certification of the financial-statement totals.
+
 ### Remaining boundaries — do not mark statutory IPSAS 24 release complete
 
 1. **Modified-cash budgets:** not enabled. There is no approved entity-specific recognition policy for commitments/obligations, no approved commitment-to-budget-line mapping, and no controlled liquidation/reversal treatment. A purchase order or encumbrance is not a cash flow.
