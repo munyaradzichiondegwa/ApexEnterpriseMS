@@ -31,7 +31,7 @@
 
 ### Latest branch verification — 28 November 2026
 
-<badge color="success">All CI jobs passed</badge>
+**All CI jobs passed.**
 
 Current PR head commit `d303a2b7b3ea5db99af76ceca645a96a62617df5`, GitHub Actions run [#46149077075](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46149077075), passed the complete CI matrix:
 
