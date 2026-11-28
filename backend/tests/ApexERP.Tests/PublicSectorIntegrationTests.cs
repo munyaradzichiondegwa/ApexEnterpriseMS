@@ -2102,6 +2102,14 @@ namespace ApexERP.Tests
             var pendingInvesting = await PrepareCashFlowAdjustmentAsync("Investing", "WP-CASHFLOW-INVESTING-NIL");
             Assert.Equal(PublicSectorBudgetReconciliationStatus.PendingApproval, pendingInvesting.Status);
 
+            // Even when population completeness remains true, changing the supporting
+            // register attestation after calculation invalidates the prepared fingerprint.
+            registerAttestation.EvidenceReference = "Changed after cash-flow reconciliation preparation";
+            await ctx.SaveChangesAsync();
+            var changedEvidence = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.FinaliseBudgetReconciliationApprovalAsync(companyId, pendingInvesting.Id, certifierId));
+            Assert.Contains("changed since preparation", changedEvidence.Message, StringComparison.OrdinalIgnoreCase);
+
             // Certification is not a permanent assertion that later source activity cannot occur.
             // The bridge and comparison must re-count source populations on every read.
             await using (var lateActivity = db.NewContext(companyId))
