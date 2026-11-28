@@ -736,8 +736,10 @@ namespace ApexERP.API.Controllers
             // itself is complete. That separate control remains a release blocker.
             var expectedSources = await _db.PublicSectorExpectedCashSources.Where(x =>
                 x.CompanyId == CompanyId && x.BudgetVersionId == version.Id).ToListAsync(ct);
-            var sourceSubmissions = await _db.PublicSectorCashSourceSubmissions.Where(x =>
-                x.CompanyId == CompanyId && x.BudgetVersionId == version.Id).ToListAsync(ct);
+            var sourceSubmissions = (await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                x.CompanyId == CompanyId && x.BudgetVersionId == version.Id).ToListAsync(ct))
+                .GroupBy(x => x.ExpectedCashSourceId)
+                .Select(group => group.OrderByDescending(x => x.SubmissionRevision).First()).ToList();
             var expectedSourceRegisterPresent = expectedSources.Count > 0;
             var expectedSourceRegisterApproved = expectedSourceRegisterPresent &&
                 expectedSources.All(x => x.Status == "Approved");
