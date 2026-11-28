@@ -109,7 +109,7 @@ This is not a blanket accounting conclusion for every contractual arrangement. I
 
 The software now has a separate, pure calculation component for the 5% operator-level tax:
 - `ZimbabweElectronicCommerceTaxEvaluator` calculates 5% of the qualifying gross revenue supplied to it, only for a foreign-domiciled electronic commerce operator or satellite broadcasting service, Zimbabwe-resident customer, and revenue dated on or after 1 January 2026.
-- It applies no minimum revenue threshold from 1 January 2026, rejects negative revenue and invalid currency identifiers, and returns the foreign operator as statutory taxpayer.
+- It applies no minimum revenue threshold from 1 January 2026, rejects negative revenue and invalid currency identifiers, and currently accepts USD only. Non-USD revenue is rejected until an approved, evidenced ZIMRA-compliant conversion policy and FX source are implemented. It returns the foreign operator as statutory taxpayer.
 - It does not add a customer invoice surcharge, withhold from supplier remittance, create a GL posting, or claim to file a ZIMRA return.
 - `ZimbabweElectronicCommerceTaxCalendar` separates the statutory section 12A quarterly revenue windows and tax-payment dates from the prescribed electronic-commerce return due dates.
 
