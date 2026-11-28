@@ -96,6 +96,14 @@ public sealed class BankStatementImportController : ApiControllerBase
                     originalBytes, bankAccount.Currency, req.PeriodStart, req.PeriodEnd,
                     req.TotalDebits, req.TotalCredits, req.OpeningBalance, req.ClosingBalance,
                     req.TransactionCount);
+                var externalIds = parsed.Transactions.Select(x => x.ExternalTransactionId).ToArray();
+                var fingerprints = parsed.Transactions.Select(x => x.TransactionFingerprint).ToArray();
+                if (await _db.BankStatementImportedTransactions.AnyAsync(x =>
+                    x.CompanyId == CompanyId && x.BankAccountId == bankAccount.Id &&
+                    (externalIds.Contains(x.ExternalTransactionId) ||
+                     fingerprints.Contains(x.TransactionFingerprint)), token))
+                    throw new InvalidOperationException("The statement contains a transaction identifier or fingerprint already imported for this bank account.");
+
                 var envelope = new BankStatementEvidenceEnvelope(
                     CompanyId, Guid.NewGuid(), bankAccount.AccountNo, req.StatementReference.Trim(),
                     req.PeriodStart, req.PeriodEnd, originalBytes, originalBytes.Length,
