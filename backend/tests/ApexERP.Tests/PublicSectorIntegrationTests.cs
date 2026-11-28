@@ -631,10 +631,9 @@ namespace ApexERP.Tests
             Assert.Equal(55m, line.Variance);
             Assert.Equal(68.75m, line.VariancePercent);
 
+            var pendingAllocation = await ctx.PublicSectorBudgetAllocations.SingleAsync(x => x.GlAccountId == secondExpenseAccountId);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                service.FinaliseBudgetAllocationApprovalAsync(companyId,
-                    (await ctx.PublicSectorBudgetAllocations.SingleAsync(x => x.GlAccountId == secondExpenseAccountId)).Id,
-                    Guid.NewGuid()));
+                service.FinaliseBudgetAllocationApprovalAsync(companyId, pendingAllocation.Id, Guid.NewGuid()));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.CreateBudgetAllocationAsync(companyId, fundCentreId, Guid.NewGuid(),
                     null, 2026, 10m, actorId));
