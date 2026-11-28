@@ -3678,6 +3678,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
                     b.Property<string>("AuthorityReference").IsRequired().HasColumnType("text");
                     b.Property<string>("AmendmentReason").HasColumnType("text");
+                    b.Property<int?>("AmendmentNature").HasColumnType("integer");
                     b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
                     b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
                     b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
@@ -3692,6 +3693,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_PublicSectorBudgetVersion_Period", "\"PeriodEnd\" > \"PeriodStart\"");
                             t.HasCheckConstraint("CK_PublicSectorBudgetVersion_Sequence", "\"VersionNumber\" > 0");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVersion_AmendmentNature",
+                                "\"AmendmentNature\" IS NULL OR \"AmendmentNature\" IN (0, 1, 2)");
                         });
                 });
 
