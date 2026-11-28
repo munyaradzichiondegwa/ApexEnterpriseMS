@@ -927,6 +927,27 @@ export default function PublicSectorPage() {
                         <td>{budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId && x.varianceAmount === line.variance && x.status === "Approved")?.explanation ?? (line.variance ? "Explanation required" : "—")}</td>
                       </tr>
                     ))}
+                    {(() => {
+                      const lines = budgetComparison.lines;
+                      const income = lines.filter((line: any) => line.accountType === "Income");
+                      const expense = lines.filter((line: any) => line.accountType === "Expense");
+                      if (!lines.length || income.length + expense.length !== lines.length) return null;
+                      const sum = (items: any[], field: string) => items.reduce((total, line) => total + Number(line[field] ?? 0), 0);
+                      const original = sum(income, "originalBudget") - sum(expense, "originalBudget");
+                      const finalAvailable = budgetComparison.finalBudgetAvailable && lines.every((line: any) => line.finalBudget != null);
+                      const finalAmount = finalAvailable ? sum(income, "finalBudget") - sum(expense, "finalBudget") : null;
+                      const actualAvailable = budgetComparison.comparableActualsAvailable && lines.every((line: any) => line.actualOnComparableBasis != null);
+                      const actual = actualAvailable ? sum(income, "actualOnComparableBasis") - sum(expense, "actualOnComparableBasis") : null;
+                      const difference = finalAmount == null || actual == null ? null : finalAmount - actual;
+                      return <tr className="font-semibold border-t-2">
+                        <td colSpan={6}>TOTAL SURPLUS / (DEFICIT) FOR THE YEAR</td>
+                        <td className="text-right">{fmt(original)}</td>
+                        <td className="text-right">{finalAmount == null ? "—" : fmt(finalAmount)}</td>
+                        <td className="text-right">{actual == null ? "—" : fmt(actual)}</td>
+                        <td className="text-right">{difference == null ? "—" : fmt(difference)}</td>
+                        <td colSpan={3}>—</td>
+                      </tr>;
+                    })()}
                     {budgetComparison.lines.length === 0 && <tr><td colSpan={13} className="text-center text-slate-500">No budget lines are available.</td></tr>}
                   </tbody>
                 </table>
