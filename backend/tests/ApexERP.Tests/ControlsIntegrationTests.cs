@@ -577,5 +577,24 @@ namespace ApexERP.Tests
             Assert.Empty(await verify.IntegrationMessages.ToListAsync());
         }
 
+        [PostgresFact]
+        public async Task Generic_settings_cannot_mutate_or_disclose_immutable_IPSAS24_statement_records()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var (company, _, _, _, _) = await SeedAsync(db);
+            await using var ctx = db.NewContext(company);
+            ctx.CompanySettings.AddRange(
+                new CompanySetting { CompanyId = company, Key = "controls.example", Value = "visible" },
+                new CompanySetting { CompanyId = company, Key = "ipsas24.statement.issue:11111111111111111111111111111111", Value = "{\"status\":\"Issued\"}" });
+            await ctx.SaveChangesAsync();
+
+            var settings = new SettingsService(ctx);
+            var listed = await settings.ListAsync(company);
+            Assert.Contains(listed, x => x.Key == "controls.example");
+            Assert.DoesNotContain(listed, x => x.Key.StartsWith("ipsas24.statement.issue:", StringComparison.OrdinalIgnoreCase));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => settings.SetAsync(company,
+                "IPSAS24.STATEMENT.ISSUE:11111111111111111111111111111111", "{\"status\":\"Draft\"}", Approver));
+        }
+
     }
 }
