@@ -1299,7 +1299,7 @@ namespace ApexERP.Application.Services
                     if (liveSourceCount == 0 && zeroAttestation == null)
                         comparabilityIssues.Add("No source-backed cash actuals or independently certified zero-activity attestation are available.");
                     else if (liveSourceCount > 0 && !allActivityExplicitlyExcluded)
-                        comparabilityIssues.Add("Cash source activity exists but no cash actuals were captured and the complete source population is not covered by independently reviewed exclusions.");
+                        comparabilityIssues.Add("Cash source activity exists, so a zero-activity attestation is no longer valid; no cash actuals were captured and the complete source population is not covered by independently reviewed exclusions.");
                     else if (zeroAttestation != null && liveSourceCount == 0 &&
                         (zeroAttestation.ObservedBankTransactionCount != 0 ||
                          zeroAttestation.ObservedArReceiptCount != 0 ||
