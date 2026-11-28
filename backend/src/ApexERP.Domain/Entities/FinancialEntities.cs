@@ -125,6 +125,8 @@ namespace ApexERP.Domain.Entities
         public bool IsManualOverride { get; set; }
         public string RateSource { get; set; } = "Unspecified";
         public string? SourceReference { get; set; }
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
     }
 
     public class TaxCode : TenantEntity
