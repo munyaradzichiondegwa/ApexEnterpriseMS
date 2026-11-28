@@ -203,6 +203,67 @@ namespace ApexERP.Application.Services
             var reportedExceptionKeys = new HashSet<(Guid CompanyA, Guid CompanyB, string AccountCode)>();
             decimal totalEliminations = 0;
 
+            // Load the transaction register before balance elimination so journal activity can be
+            // reconciled in both directions: recorded transactions -> journals, and posted
+            // intercompany journals -> transaction records.
+            var groupIntercompanyTransactions = await _db.IntercompanyTransactions.IgnoreQueryFilters()
+                .Where(t => groupIds.Contains(t.FromCompanyId) && groupIds.Contains(t.ToCompanyId))
+                .OrderBy(t => t.TransactionDate).ThenBy(t => t.Id)
+                .ToListAsync(ct);
+            var transactionJournalIds = new HashSet<Guid>(groupIntercompanyTransactions
+                .SelectMany(t => new[] { t.SourceJournalEntryId, t.MirrorJournalEntryId })
+                .Where(id => id.HasValue).Select(id => id!.Value));
+
+            // Discover posted intercompany-account journal activity that has no transaction
+            // register entry. Such activity is an exception and must not be silently eliminated.
+            var reportDateExclusive = ReportingDates.EndExclusive(asOfDate);
+            var orphanedIntercompanyLines = await (
+                from journalLine in _db.JournalLines.IgnoreQueryFilters()
+                join journal in _db.JournalEntries.IgnoreQueryFilters()
+                    on journalLine.JournalEntryId equals journal.Id
+                join account in _db.GlAccounts.IgnoreQueryFilters()
+                    on journalLine.GlAccountId equals account.Id
+                where groupIds.Contains(journal.CompanyId) &&
+                    account.CompanyId == journal.CompanyId &&
+                    account.IsIntercompanyAccount &&
+                    account.IntercompanyCounterpartyCompanyId.HasValue &&
+                    groupIds.Contains(account.IntercompanyCounterpartyCompanyId.Value) &&
+                    (journal.Status == JournalStatus.Posted || journal.Status == JournalStatus.Reversed) &&
+                    journal.EntryDate < reportDateExclusive
+                select new
+                {
+                    JournalEntryId = journal.Id,
+                    journal.EntryNo,
+                    journal.EntryDate,
+                    journal.CompanyId,
+                    CounterpartyCompanyId = account.IntercompanyCounterpartyCompanyId!.Value,
+                    AccountId = account.Id,
+                    AccountCode = account.Code,
+                    journalLine.BaseDebit,
+                    journalLine.BaseCredit
+                }).ToListAsync(ct);
+
+            var orphanedIntercompanyAccountIds = new HashSet<Guid>();
+            foreach (var orphan in orphanedIntercompanyLines
+                .GroupBy(x => new { x.JournalEntryId, x.EntryNo, x.EntryDate, x.CompanyId,
+                    x.CounterpartyCompanyId, x.AccountId, x.AccountCode })
+                .Where(g => !transactionJournalIds.Contains(g.Key.JournalEntryId)))
+            {
+                var signedAmount = orphan.Sum(x => x.BaseDebit - x.BaseCredit);
+                var companyAId = orphan.Key.CompanyId.CompareTo(orphan.Key.CounterpartyCompanyId) < 0
+                    ? orphan.Key.CompanyId : orphan.Key.CounterpartyCompanyId;
+                var companyBId = companyAId == orphan.Key.CompanyId
+                    ? orphan.Key.CounterpartyCompanyId : orphan.Key.CompanyId;
+                orphanedIntercompanyAccountIds.Add(orphan.Key.AccountId);
+                intercompanyExceptions.Add(new IntercompanyEliminationException(
+                    companyAId, companyBId,
+                    $"IC-ORPHAN-{orphan.Key.JournalEntryId:N}-{orphan.Key.AccountCode}",
+                    orphan.Key.CompanyId == companyAId ? signedAmount : 0m,
+                    orphan.Key.CompanyId == companyBId ? signedAmount : 0m,
+                    signedAmount,
+                    $"Posted intercompany-account journal {orphan.Key.EntryNo} dated {orphan.Key.EntryDate:yyyy-MM-dd} has no IntercompanyTransaction source/mirror link; affected account balances were not eliminated."));
+            }
+
             // Never eliminate a one-sided or unmatched intercompany balance. A valid elimination
             // requires reciprocal accounts and equal/opposite balances translated into the
             // parent's functional currency as at the reporting date. This prevents an unmatched
@@ -269,6 +330,13 @@ namespace ApexERP.Application.Services
                     continue;
                 }
 
+                // A reciprocal account pair can still be arithmetically matched while its
+                // underlying posted journal activity is absent from the transaction register.
+                // Keep the balances visible until that source-to-mirror control gap is resolved.
+                if (orphanedIntercompanyAccountIds.Contains(account.Id) ||
+                    orphanedIntercompanyAccountIds.Contains(reciprocal.Id))
+                    continue;
+
                 foreach (var matched in new[] { (Account: account, Balance: accountBalance), (Account: reciprocal, Balance: reciprocalBalance) })
                 {
                     if (aggregated.TryGetValue(matched.Account.Code, out var line))
@@ -291,14 +359,7 @@ namespace ApexERP.Application.Services
             // source and mirror journals. These accounts are not necessarily the same GL code
             // (revenue versus expense), so balance-sheet reciprocal-account matching above cannot
             // safely identify them. Translate each P&L line at its own posting-date rate first.
-            var groupIntercompanyTransactions = await _db.IntercompanyTransactions.IgnoreQueryFilters()
-                .Where(t => groupIds.Contains(t.FromCompanyId) && groupIds.Contains(t.ToCompanyId))
-                .OrderBy(t => t.TransactionDate).ThenBy(t => t.Id)
-                .ToListAsync(ct);
-
-            var journalIds = groupIntercompanyTransactions
-                .SelectMany(t => new[] { t.SourceJournalEntryId, t.MirrorJournalEntryId })
-                .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+            var journalIds = transactionJournalIds.ToList();
             var journalHeaders = await _db.JournalEntries.IgnoreQueryFilters()
                 .Where(j => journalIds.Contains(j.Id))
                 .Select(j => new { j.Id, j.CompanyId, j.Status })
