@@ -187,6 +187,9 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<PublicSectorTaxBudgetPolicy> PublicSectorTaxBudgetPolicies => Set<PublicSectorTaxBudgetPolicy>();
         public DbSet<SettlementComponentAllocation> SettlementComponentAllocations => Set<SettlementComponentAllocation>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
+        public DbSet<ModifiedCashRecognitionPolicy> ModifiedCashRecognitionPolicies => Set<ModifiedCashRecognitionPolicy>();
+        public DbSet<ModifiedCashRecognitionMapping> ModifiedCashRecognitionMappings => Set<ModifiedCashRecognitionMapping>();
+        public DbSet<ModifiedCashRecognitionLedgerEvent> ModifiedCashRecognitionLedgerEvents => Set<ModifiedCashRecognitionLedgerEvent>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
         public DbSet<AssetVerificationBatch> AssetVerificationBatches => Set<AssetVerificationBatch>();
@@ -630,6 +633,9 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<PublicSectorTaxBudgetPolicy>(modelBuilder);
             ApplyTenantFilter<SettlementComponentAllocation>(modelBuilder);
             ApplyTenantFilter<Commitment>(modelBuilder);
+            ApplyTenantFilter<ModifiedCashRecognitionPolicy>(modelBuilder);
+            ApplyTenantFilter<ModifiedCashRecognitionMapping>(modelBuilder);
+            ApplyTenantFilter<ModifiedCashRecognitionLedgerEvent>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
             ApplyTenantFilter<AssetRevaluation>(modelBuilder);
@@ -790,6 +796,48 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorBudgetReconciliation>()
                 .HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
                     "(\"IsNoDifferenceAttestation\" = TRUE AND \"RevenueAmount\" = 0 AND \"ExpenseAmount\" = 0 AND \"OperatingAmount\" = 0 AND \"InvestingAmount\" = 0 AND \"FinancingAmount\" = 0) OR (\"IsNoDifferenceAttestation\" = FALSE AND (\"RevenueAmount\" <> 0 OR \"ExpenseAmount\" <> 0 OR \"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0))");
+            modelBuilder.Entity<ModifiedCashRecognitionPolicy>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.VersionNumber }).IsUnique()
+                .HasDatabaseName("UX_ModifiedCashPolicy_Version");
+            modelBuilder.Entity<ModifiedCashRecognitionPolicy>()
+                .HasCheckConstraint("CK_ModifiedCashPolicy_Period",
+                    "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"")
+                .HasCheckConstraint("CK_ModifiedCashPolicy_ReportingPeriod",
+                    "\"ReportingPeriodEnd\" > \"ReportingPeriodStart\"")
+                .HasCheckConstraint("CK_ModifiedCashPolicy_Window", "\"PostPeriodRecognitionWindowDays\" >= 0")
+                .HasCheckConstraint("CK_ModifiedCashPolicy_Version", "\"VersionNumber\" > 0");
+            modelBuilder.Entity<ModifiedCashRecognitionPolicy>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashPolicy_BudgetVersion");
+            modelBuilder.Entity<ModifiedCashRecognitionMapping>()
+                .HasIndex(x => new { x.CompanyId, x.PolicyId, x.SourceEventKind }).IsUnique()
+                .HasDatabaseName("UX_ModifiedCashMapping_EventKind");
+            modelBuilder.Entity<ModifiedCashRecognitionMapping>()
+                .HasOne<ModifiedCashRecognitionPolicy>().WithMany().HasForeignKey(x => x.PolicyId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashMapping_Policy");
+            modelBuilder.Entity<ModifiedCashRecognitionMapping>()
+                .HasOne<PublicSectorBudgetVersionLine>().WithMany().HasForeignKey(x => x.BudgetVersionLineId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashMapping_BudgetLine");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasIndex(x => new { x.CompanyId, x.PolicyId, x.SourceEventId, x.EventKind }).IsUnique()
+                .HasDatabaseName("UX_ModifiedCashLedger_SourceEvent");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasIndex(x => x.OriginalEventId).IsUnique().HasFilter("\"OriginalEventId\" IS NOT NULL")
+                .HasDatabaseName("UX_ModifiedCashLedger_OneReversal");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasIndex(x => new { x.CompanyId, x.CommitmentId, x.Status, x.EventDate });
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasCheckConstraint("CK_ModifiedCashLedger_Amount", "\"Amount\" > 0");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasOne<ModifiedCashRecognitionPolicy>().WithMany().HasForeignKey(x => x.PolicyId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashLedger_Policy");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasOne<Commitment>().WithMany().HasForeignKey(x => x.CommitmentId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashLedger_Commitment");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasOne<ModifiedCashRecognitionLedgerEvent>().WithMany().HasForeignKey(x => x.OriginalEventId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashLedger_OriginalEvent");
+
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasIndex(x => new { x.CompanyId, x.SourceKind, x.SourceRecordId, x.BudgetVersionLineId })
                 .IsUnique().HasFilter("\"ReversalOfId\" IS NULL AND \"Status\" <> 4")
