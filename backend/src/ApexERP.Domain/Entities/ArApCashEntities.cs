@@ -187,6 +187,8 @@ namespace ApexERP.Domain.Entities
         public PaymentMethod PaymentMethod { get; set; }
         public Guid? JournalEntryId { get; set; }
         public Guid? BankAccountId { get; set; }
+        /// <summary>External bank transfer reference used to match the statement row; PaymentNo remains the internal identifier.</summary>
+        public string? BankReference { get; set; }
         /// <summary>Independent payment authorisation (spec 16): the authoriser must differ from the preparer and hold authority for the amount.</summary>
         public Guid? PreparedBy { get; set; }
         public Guid? AuthorisedBy { get; set; }
