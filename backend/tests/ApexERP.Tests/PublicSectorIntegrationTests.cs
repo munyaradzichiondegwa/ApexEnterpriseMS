@@ -999,6 +999,7 @@ namespace ApexERP.Tests
             var periodId = Guid.NewGuid();
             var journalId = Guid.NewGuid();
             var bankTransactionId = Guid.NewGuid();
+            var unmappedBankTransactionId = Guid.NewGuid();
             var budgetVersionId = Guid.NewGuid();
             var budgetLineId = Guid.NewGuid();
             var preparerId = Guid.NewGuid();
@@ -1046,6 +1047,13 @@ namespace ApexERP.Tests
                     Id = bankTransactionId, CompanyId = companyId, BankAccountId = bankAccountId,
                     TransactionDate = effectiveDate, Description = "Verified supplier payment",
                     Debit = 75m, Credit = 0m, Reference = "BANK-REF-001",
+                    IsReconciled = true, JournalEntryId = journalId
+                });
+                seed.BankTransactions.Add(new BankTransaction
+                {
+                    Id = unmappedBankTransactionId, CompanyId = companyId, BankAccountId = bankAccountId,
+                    TransactionDate = effectiveDate, Description = "Unmapped bank movement",
+                    Debit = 25m, Credit = 0m, Reference = "BANK-REF-002",
                     IsReconciled = true, JournalEntryId = journalId
                 });
                 seed.JournalLines.Add(new JournalLine
@@ -1101,6 +1109,11 @@ namespace ApexERP.Tests
                 service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId, budgetLineId,
                     PublicSectorBudgetActualEventKind.CashPayment,
                     PublicSectorBudgetActualSourceKind.BankTransaction, bankTransactionId,
+                    effectiveDate, CashFlowCategory.Operating, preparerId));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId, budgetLineId,
+                    PublicSectorBudgetActualEventKind.CashPayment,
+                    PublicSectorBudgetActualSourceKind.BankTransaction, unmappedBankTransactionId,
                     effectiveDate, CashFlowCategory.Operating, preparerId));
         }
     }
