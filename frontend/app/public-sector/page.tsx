@@ -82,7 +82,31 @@ export default function PublicSectorPage() {
 
   function exportBudgetComparison() {
     if (!budgetComparison) return;
-    downloadCsv(`apexerp-ipsas24-budget-comparison-${year}`, budgetComparison.lines, [
+    const lines = budgetComparison.lines ?? [];
+    const incomeLines = lines.filter((line: any) => line.accountType === "Income");
+    const expenseLines = lines.filter((line: any) => line.accountType === "Expense");
+    const sum = (items: any[], field: string) => items.reduce((total, line) => total + Number(line[field] ?? 0), 0);
+    const canCalculateSurplusDeficit = lines.length > 0 && incomeLines.length + expenseLines.length === lines.length;
+    const actualsComplete = lines.every((line: any) => line.actualOnComparableBasis != null);
+    const originalSurplusDeficit = canCalculateSurplusDeficit
+      ? sum(incomeLines, "originalBudget") - sum(expenseLines, "originalBudget") : null;
+    const finalSurplusDeficit = canCalculateSurplusDeficit
+      ? sum(incomeLines, "finalBudget") - sum(expenseLines, "finalBudget") : null;
+    const actualSurplusDeficit = canCalculateSurplusDeficit && actualsComplete
+      ? sum(incomeLines, "actualOnComparableBasis") - sum(expenseLines, "actualOnComparableBasis") : null;
+    const summaryRow = {
+      description: "TOTAL SURPLUS / (DEFICIT) FOR THE YEAR",
+      treasuryClassificationCode: "", classificationCode: "", noteReference: "",
+      accountType: "Summary", fundCentreCode: "", fundCentreName: "", fundCentreLevel: "",
+      costCentreCode: "", costCentreName: "", accountCode: "", accountName: "",
+      originalBudget: originalSurplusDeficit, finalBudget: finalSurplusDeficit,
+      actualOnComparableBasis: actualSurplusDeficit,
+      variance: actualSurplusDeficit == null || finalSurplusDeficit == null
+        ? null : finalSurplusDeficit - actualSurplusDeficit,
+      variancePercent: null, originalToFinalExplanation: "", budgetVersionLineId: null,
+    };
+    const exportRows = canCalculateSurplusDeficit ? [...lines, summaryRow] : lines;
+    downloadCsv(`apexerp-ipsas24-budget-comparison-${year}`, exportRows, [
       // Reporting metadata required to interpret the separate statement.
       { header: "Financial Year", value: () => budgetComparison.financialYear },
       { header: "Reporting Period Start", value: () => new Date(budgetComparison.periodStart).toISOString().slice(0, 10) },
