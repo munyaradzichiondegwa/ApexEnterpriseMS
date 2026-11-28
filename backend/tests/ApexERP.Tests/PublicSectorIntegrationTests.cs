@@ -1052,7 +1052,8 @@ namespace ApexERP.Tests
                 seed.BankTransactions.Add(new BankTransaction
                 {
                     Id = unmappedBankTransactionId, CompanyId = companyId, BankAccountId = bankAccountId,
-                    TransactionDate = effectiveDate, Description = "Unmapped bank movement",
+                    TransactionDate = new DateTime(2025, 6, 30, 0, 0, 0, DateTimeKind.Utc),
+                    Description = "Unmapped bank movement",
                     Debit = 25m, Credit = 0m, Reference = "BANK-REF-002",
                     IsReconciled = true, JournalEntryId = null
                 });
@@ -1113,6 +1114,15 @@ namespace ApexERP.Tests
             Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
             var comparisonLine = Assert.Single(comparison.Lines);
             Assert.Equal(75m, comparisonLine.ActualOnComparableBasis);
+
+            // An unlinked bank statement movement inside the budget period must block
+            // comparability rather than disappear from the source-coverage denominator.
+            var unlinkedMovement = await ctx.BankTransactions.SingleAsync(x => x.Id == unmappedBankTransactionId);
+            unlinkedMovement.TransactionDate = effectiveDate;
+            await ctx.SaveChangesAsync();
+            var incompleteComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.False(incompleteComparison.ComparableActualsAvailable);
+            Assert.Contains("source coverage is incomplete", incompleteComparison.ComparabilityMessage);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId, budgetLineId,
