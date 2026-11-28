@@ -1585,15 +1585,26 @@ namespace ApexERP.Application.Services
                 foreach (var allocation in allocations)
                 {
                     var invoice = invoices.Single(x => x.Id == allocation.ArInvoiceId);
-                    if (invoice.CustomerId != receipt.CustomerId || invoice.Status != InvoiceStatus.Paid ||
+                    if (invoice.CustomerId != receipt.CustomerId ||
+                        (invoice.Status != InvoiceStatus.Paid && invoice.Status != InvoiceStatus.Partial) ||
                         !invoice.FundCentreId.HasValue || invoice.Currency != receipt.Currency ||
-                        invoice.Total != allocation.AmountApplied || invoice.VatAmount != 0m || !invoice.JournalEntryId.HasValue)
+                        invoice.Total < allocation.AmountApplied || invoice.Outstanding < 0m ||
+                        (invoice.Status == InvoiceStatus.Paid && invoice.Outstanding > 0.000001m) ||
+                        (invoice.Status == InvoiceStatus.Partial && invoice.Outstanding <= 0m) ||
+                        invoice.VatAmount != 0m || !invoice.JournalEntryId.HasValue)
                         return false;
                     var invoiceLines = await _db.ArInvoiceLines.Where(x => x.ArInvoiceId == invoice.Id).ToListAsync(ct);
                     if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
                         invoiceLines.Sum(x => x.LineTotal) != invoice.Total) return false;
+                    var invoiceGlAccounts = invoiceLines.Select(x => x.GlAccountId).Distinct().ToArray();
+                    var partialSettlement = allocation.AmountApplied < invoice.Total;
+                    if (partialSettlement && invoiceGlAccounts.Length > 1) return false;
+                    var postedLineAmount = invoiceLines.Where(x => x.GlAccountId == actual.GlAccountId).Sum(x => x.LineTotal);
                     var lineAmount = invoice.FundCentreId == actual.FundCentreId
-                        ? invoiceLines.Where(x => x.GlAccountId == actual.GlAccountId).Sum(x => x.LineTotal) : 0m;
+                        ? partialSettlement
+                            ? invoiceGlAccounts[0] == actual.GlAccountId ? allocation.AmountApplied : 0m
+                            : postedLineAmount
+                        : 0m;
                     if (lineAmount <= 0m) continue;
                     var invoicePosted = await _db.JournalEntries.AnyAsync(x =>
                         x.Id == invoice.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct);
@@ -1602,7 +1613,7 @@ namespace ApexERP.Application.Services
                         x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId &&
                         x.FundCentreId == actual.FundCentreId && x.CostCentreId == null)
                         .SumAsync(x => x.Credit - x.Debit, ct);
-                    if (revenue != lineAmount) return false;
+                    if (revenue != postedLineAmount) return false;
                     expectedAllocation += lineAmount;
                 }
                 if (expectedAllocation != actual.Amount || actual.CostCentreId.HasValue) return false;
@@ -1643,15 +1654,25 @@ namespace ApexERP.Application.Services
                 foreach (var allocation in allocations)
                 {
                     var invoice = invoices.Single(x => x.Id == allocation.ApInvoiceId);
-                    if (invoice.SupplierId != payment.SupplierId || invoice.Status != InvoiceStatus.Paid ||
+                    if (invoice.SupplierId != payment.SupplierId ||
+                        (invoice.Status != InvoiceStatus.Paid && invoice.Status != InvoiceStatus.Partial) ||
                         !invoice.FundCentreId.HasValue || invoice.Currency != payment.Currency ||
-                        invoice.Total != allocation.AmountApplied || invoice.VatAmount != 0m ||
-                        invoice.WhtAmount != 0m || !invoice.JournalEntryId.HasValue) return false;
+                        invoice.Total < allocation.AmountApplied || invoice.Outstanding < 0m ||
+                        (invoice.Status == InvoiceStatus.Paid && invoice.Outstanding > 0.000001m) ||
+                        (invoice.Status == InvoiceStatus.Partial && invoice.Outstanding <= 0m) ||
+                        invoice.VatAmount != 0m || invoice.WhtAmount != 0m || !invoice.JournalEntryId.HasValue) return false;
                     var invoiceLines = await _db.ApInvoiceLines.Where(x => x.ApInvoiceId == invoice.Id).ToListAsync(ct);
                     if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
                         invoiceLines.Sum(x => x.LineTotal) != invoice.Total) return false;
+                    var invoiceGlAccounts = invoiceLines.Select(x => x.GlAccountId).Distinct().ToArray();
+                    var partialSettlement = allocation.AmountApplied < invoice.Total;
+                    if (partialSettlement && invoiceGlAccounts.Length > 1) return false;
+                    var postedLineAmount = invoiceLines.Where(x => x.GlAccountId == actual.GlAccountId).Sum(x => x.LineTotal);
                     var lineAmount = invoice.FundCentreId == actual.FundCentreId
-                        ? invoiceLines.Where(x => x.GlAccountId == actual.GlAccountId).Sum(x => x.LineTotal) : 0m;
+                        ? partialSettlement
+                            ? invoiceGlAccounts[0] == actual.GlAccountId ? allocation.AmountApplied : 0m
+                            : postedLineAmount
+                        : 0m;
                     if (lineAmount <= 0m) continue;
                     var invoicePosted = await _db.JournalEntries.AnyAsync(x =>
                         x.Id == invoice.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct);
@@ -1660,7 +1681,7 @@ namespace ApexERP.Application.Services
                         x.JournalEntryId == invoice.JournalEntryId.Value && x.GlAccountId == actual.GlAccountId &&
                         x.FundCentreId == actual.FundCentreId && x.CostCentreId == null)
                         .SumAsync(x => x.Debit - x.Credit, ct);
-                    if (expense != lineAmount) return false;
+                    if (expense != postedLineAmount) return false;
                     expectedAllocation += lineAmount;
                 }
                 if (expectedAllocation != actual.Amount || actual.CostCentreId.HasValue) return false;
