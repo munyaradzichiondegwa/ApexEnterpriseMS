@@ -106,9 +106,14 @@ namespace ApexERP.API.Controllers
                 x.CompanyId == CompanyId && x.IsActive && x.IsPostable, ct);
             if (account == null || account.Type != expectedType.Value)
                 return BadRequest(new { error = "The selected tax account must be active, postable and of the required GL type." });
-            if (req.TaxCodeId.HasValue && !await _db.TaxCodes.AnyAsync(x => x.Id == req.TaxCodeId.Value &&
-                x.CompanyId == CompanyId && x.Type == req.TaxType && x.IsActive, ct))
-                return BadRequest(new { error = "The tax code must be active, company-owned and match the tax type." });
+            if (req.TaxCodeId.HasValue)
+            {
+                var taxCode = await _db.TaxCodes.FirstOrDefaultAsync(x => x.Id == req.TaxCodeId.Value &&
+                    x.CompanyId == CompanyId && x.Type == req.TaxType && x.IsActive, ct);
+                if (taxCode == null || req.EffectiveFrom < taxCode.EffectiveFrom ||
+                    (taxCode.EffectiveTo.HasValue && (!req.EffectiveTo.HasValue || req.EffectiveTo.Value > taxCode.EffectiveTo.Value)))
+                    return BadRequest(new { error = "The mapping period must fall within the active, company-owned tax code's effective period." });
+            }
             var version = (await _db.TaxAccountMappings.Where(x => x.CompanyId == CompanyId &&
                 x.Purpose == req.Purpose && x.TaxCodeId == req.TaxCodeId).Select(x => (int?)x.VersionNumber).MaxAsync(ct) ?? 0) + 1;
             var mapping = new TaxAccountMapping
@@ -173,19 +178,25 @@ namespace ApexERP.API.Controllers
         {
             if (req.EffectiveTo.HasValue && req.EffectiveTo.Value <= req.EffectiveFrom)
                 return BadRequest(new { error = "The policy end date must be later than its start date." });
+            if (!Enum.IsDefined(req.TaxType) || !Enum.IsDefined(req.Treatment) ||
+                req.TaxType is not (TaxType.VAT or TaxType.WHT))
+                return BadRequest(new { error = "IPSAS 24 tax policy currently supports VAT and WHT only, with defined treatment values." });
+            if ((req.TaxType == TaxType.VAT && !req.TaxCodeId.HasValue) ||
+                (req.TaxType == TaxType.WHT && req.TaxCodeId.HasValue))
+                return BadRequest(new { error = "VAT policy must identify its tax code; WHT policy must use the code-less WHT component until a supplier WHT tax-code link is implemented." });
             if (req.TaxCodeId.HasValue && !await _db.TaxCodes.AnyAsync(x => x.Id == req.TaxCodeId &&
-                x.CompanyId == CompanyId && x.Type == req.TaxType, ct))
-                return BadRequest(new { error = "The policy tax code must belong to this company and match the tax type." });
-            if (req.TaxType == TaxType.VAT && !req.TaxCodeId.HasValue)
-                return BadRequest(new { error = "VAT policy must identify the tax code, so recoverable and irrecoverable treatments can differ." });
+                x.CompanyId == CompanyId && x.Type == req.TaxType && x.IsActive, ct))
+                return BadRequest(new { error = "The policy tax code must be active, company-owned and match the tax type." });
             if (req.Treatment == TaxBudgetTreatment.SeparateClassification)
             {
                 if (!req.BudgetGlAccountId.HasValue || !req.FundCentreId.HasValue)
                     return BadRequest(new { error = "Separate classification requires an explicit budget GL account and Fund Centre." });
                 if (!await _db.GlAccounts.AnyAsync(x => x.Id == req.BudgetGlAccountId && x.CompanyId == CompanyId &&
                     x.IsActive && x.IsPostable, ct) ||
-                    !await _db.FundCentres.AnyAsync(x => x.Id == req.FundCentreId && x.CompanyId == CompanyId, ct))
-                    return BadRequest(new { error = "The separate budget GL account and Fund Centre must belong to this company and be active/valid." });
+                    !await _db.FundCentres.AnyAsync(x => x.Id == req.FundCentreId && x.CompanyId == CompanyId, ct) ||
+                    (req.CostCentreId.HasValue && !await _db.CostCentres.AnyAsync(x =>
+                        x.Id == req.CostCentreId.Value && x.CompanyId == CompanyId && x.IsActive, ct)))
+                    return BadRequest(new { error = "The separate budget GL account, Fund Centre and optional cost centre must belong to this company and be active/valid." });
             }
             var version = (await _db.PublicSectorTaxBudgetPolicies.Where(x => x.CompanyId == CompanyId &&
                 x.TaxType == req.TaxType && x.TaxCodeId == req.TaxCodeId).Select(x => (int?)x.VersionNumber).MaxAsync(ct) ?? 0) + 1;
