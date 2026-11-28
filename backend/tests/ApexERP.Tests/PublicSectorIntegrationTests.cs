@@ -2271,6 +2271,7 @@ namespace ApexERP.Tests
             var fundCentreId = Guid.NewGuid();
             var accountId = Guid.NewGuid();
             var bankAccountId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
             var journalId = Guid.NewGuid();
             var transactionId = Guid.NewGuid();
             var budgetVersionId = Guid.NewGuid();
@@ -2304,11 +2305,18 @@ namespace ApexERP.Tests
                     AccountNo = "FX-TEST-001", BankName = "Test Bank",
                     Currency = "ZWG", GlAccountId = accountId
                 });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 6,
+                    StartDate = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+                    EndDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Status = PeriodStatus.Open
+                });
                 seed.JournalEntries.Add(new JournalEntry
                 {
                     Id = journalId, CompanyId = companyId, EntryNo = "JE-IPSAS24-FX",
                     Description = "Foreign currency cash execution", EntryDate = effectiveDate,
-                    Source = JournalSource.Bank, Status = JournalStatus.Posted
+                    PeriodId = periodId, Source = JournalSource.Bank, Status = JournalStatus.Posted
                 });
                 seed.BankTransactions.Add(new BankTransaction
                 {
