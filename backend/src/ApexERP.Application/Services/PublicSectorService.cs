@@ -1069,6 +1069,31 @@ namespace ApexERP.Application.Services
                 if (final.EntityScope != original.EntityScope)
                     comparabilityIssues.Add("Original and final budgets use different entity scopes.");
             }
+            if (original.AccountingBasis == AccountingBasis.Accrual)
+            {
+                // Do not silently omit posted actuals whose fund-centre/cost-centre dimensions
+                // cannot be matched to an approved budget line. Such rows would otherwise
+                // disappear from the IPSAS 24 comparison while the report appeared comparable.
+                var budgetScopeLines = final!.Lines;
+                var budgetAccountIds = budgetScopeLines.Select(x => x.GlAccountId).Distinct().ToArray();
+                var postedBudgetScopeActuals = await _db.JournalLines.Where(line =>
+                    budgetAccountIds.Contains(line.GlAccountId) &&
+                    line.JournalEntry!.CompanyId == companyId &&
+                    line.JournalEntry.EntryDate >= original.PeriodStart &&
+                    line.JournalEntry.EntryDate < original.PeriodEnd &&
+                    (line.JournalEntry.Status == JournalStatus.Posted ||
+                     line.JournalEntry.Status == JournalStatus.Reversed))
+                    .Select(line => new { line.GlAccountId, line.FundCentreId, line.CostCentreId })
+                    .ToListAsync(ct);
+                var unmappedBudgetScopeActuals = postedBudgetScopeActuals.Count(actual =>
+                    !actual.FundCentreId.HasValue ||
+                    !budgetScopeLines.Any(budgetLine =>
+                        budgetLine.GlAccountId == actual.GlAccountId &&
+                        budgetLine.FundCentreId == actual.FundCentreId.Value &&
+                        budgetLine.CostCentreId == actual.CostCentreId));
+                if (unmappedBudgetScopeActuals > 0)
+                    comparabilityIssues.Add($"Accrual actual coverage is incomplete: {unmappedBudgetScopeActuals} posted GL lines on budgeted accounts have missing or unmatched Fund Centre/cost-centre dimensions.");
+            }
             if (original.AccountingBasis == AccountingBasis.Cash && final != null)
             {
                 var omittedOriginalDimensions = original.Lines.Count(originalLine =>
