@@ -34,7 +34,7 @@ public sealed record ZimbabweDigitalServicesTaxRequest(
     ZimbabweDigitalPaymentRoute PaymentRoute,
     bool ConsumedInZimbabwe,
     bool ZeroRatedOrExempt,
-    bool VatAlreadyAccountedFor);
+    bool RecipientAlreadySelfAccountedVat);
 
 public sealed record ZimbabweDigitalServicesTaxResult(
     bool WithholdingRequired,
@@ -76,8 +76,8 @@ public static class ZimbabweDigitalServicesTaxEvaluator
         if (request.ZeroRatedOrExempt)
             return Excluded(request, "Zero-rated or exempt services retain their ordinary VAT treatment.");
 
-        if (request.VatAlreadyAccountedFor)
-            return Excluded(request, "VAT has already been correctly accounted for on this supply; withholding would risk double taxation.");
+        if (request.RecipientAlreadySelfAccountedVat)
+            return Excluded(request, "The Zimbabwe recipient has already self-accounted and remitted VAT on this same supply; avoid duplicate collection.");
 
         if (request.PaymentRoute == ZimbabweDigitalPaymentRoute.LocalPayment)
             return Excluded(request, "A local payment route does not constitute a remittance through a Zimbabwe intermediary to a non-resident supplier.");
