@@ -384,8 +384,8 @@ namespace ApexERP.Infrastructure.Data
                 .IsUnique().HasFilter("\"IsExcluded\" = TRUE")
                 .HasDatabaseName("UX_CashSourceReconciliationLine_Exclusion");
             modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
-                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId }).IsUnique()
-                .HasDatabaseName("UX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
+                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionId })
+                .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
                 .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId, x.BudgetExecutionActualId })
                 .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
