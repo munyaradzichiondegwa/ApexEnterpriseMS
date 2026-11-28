@@ -405,7 +405,7 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<SettlementComponentAllocation>().ToTable(t =>
             {
                 t.HasCheckConstraint("CK_SettlementComponentAllocations_Component",
-                    "((\\"ComponentKind\\" = 0 AND \\"InvoiceLineId\\" IS NOT NULL AND \\"TaxComponentId\\" IS NULL) OR (\\"ComponentKind\\" = 1 AND \\"InvoiceLineId\\" IS NULL AND \\"TaxComponentId\\" IS NOT NULL))");
+                    "((\"ComponentKind\\" = 0 AND \\"InvoiceLineId\\" IS NOT NULL AND \\"TaxComponentId\\" IS NULL) OR (\\"ComponentKind\\" = 1 AND \\"InvoiceLineId\\" IS NULL AND \\"TaxComponentId\\" IS NOT NULL))");
                 t.HasCheckConstraint("CK_SettlementComponentAllocations_Amount", "\\"AmountApplied\\" > 0");
             });
             modelBuilder.Entity<TaxAccountMapping>().ToTable(t =>
