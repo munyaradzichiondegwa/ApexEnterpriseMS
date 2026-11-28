@@ -142,7 +142,7 @@ public sealed class AddIpsas24TaxAllocationControls : Migration
         migrationBuilder.CreateIndex(name: "IX_TaxAccountMappings_Effective", table: "TaxAccountMappings",
             columns: new[] { "CompanyId", "Purpose", "TaxCodeId", "EffectiveFrom", "EffectiveTo" });
         migrationBuilder.CreateIndex(name: "IX_InvoiceTaxComponents_InvoiceJournalLine",
-            table: "InvoiceTaxComponents", columns: new[] { "CompanyId", "InvoiceKind", "InvoiceId", "JournalLineId" }, unique: true);
+            table: "InvoiceTaxComponents", columns: new[] { "CompanyId", "InvoiceKind", "InvoiceId", "JournalLineId", "InvoiceLineId" }, unique: true);
         migrationBuilder.CreateIndex(name: "IX_InvoiceTaxComponents_Mapping",
             table: "InvoiceTaxComponents", columns: new[] { "CompanyId", "TaxAccountMappingId", "InvoiceId" });
         migrationBuilder.CreateIndex(name: "IX_PublicSectorTaxBudgetPolicies_CompanyId_TaxType_TaxCodeId_VersionNumber",
