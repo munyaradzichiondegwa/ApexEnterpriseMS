@@ -267,6 +267,109 @@ namespace ApexERP.Application.Services
             }, ct);
         }
 
+        private async Task<(int Bank, int Ar, int Ap)> GetCashPeriodSourceCountsAsync(
+            Guid companyId, DateTime periodStart, DateTime periodEnd, CancellationToken ct)
+        {
+            var bank = await _db.BankTransactions.CountAsync(x => x.CompanyId == companyId &&
+                x.TransactionDate >= periodStart && x.TransactionDate < periodEnd, ct);
+            var ar = await _db.ArReceipts.CountAsync(x => x.CompanyId == companyId &&
+                x.ReceiptDate >= periodStart && x.ReceiptDate < periodEnd, ct);
+            var ap = await _db.ApPayments.CountAsync(x => x.CompanyId == companyId &&
+                x.PaymentDate >= periodStart && x.PaymentDate < periodEnd, ct);
+            return (bank, ar, ap);
+        }
+
+        public async Task<PublicSectorCashPeriodAttestation> CreateCashPeriodAttestationAsync(
+            Guid companyId, Guid budgetVersionId, string evidenceReference, Guid actorId,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(evidenceReference))
+                throw new InvalidOperationException("A supporting evidence reference is required for a zero-activity declaration.");
+            var version = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
+                x.Id == budgetVersionId && x.CompanyId == companyId &&
+                x.Status == PublicSectorBudgetVersionStatus.Approved &&
+                x.AccountingBasis == AccountingBasis.Cash, ct)
+                ?? throw new InvalidOperationException("An approved cash-basis budget version is required.");
+            var counts = await GetCashPeriodSourceCountsAsync(companyId, version.PeriodStart, version.PeriodEnd, ct);
+            if (counts.Bank + counts.Ar + counts.Ap != 0)
+                throw new InvalidOperationException($"Zero-activity attestation is not permitted: source records exist (bank {counts.Bank}, AR receipts {counts.Ar}, AP payments {counts.Ap}). Capture and certify the actual source events instead.");
+            if (await _db.PublicSectorCashPeriodAttestations.AnyAsync(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == version.Id &&
+                x.PeriodStart == version.PeriodStart && x.PeriodEnd == version.PeriodEnd, ct))
+                throw new InvalidOperationException("A period attestation already exists for this approved budget version.");
+            var item = new PublicSectorCashPeriodAttestation
+            {
+                CompanyId = companyId, BudgetVersionId = version.Id,
+                PeriodStart = version.PeriodStart, PeriodEnd = version.PeriodEnd,
+                ObservedBankTransactionCount = counts.Bank, ObservedArReceiptCount = counts.Ar,
+                ObservedApPaymentCount = counts.Ap, EvidenceReference = evidenceReference.Trim(),
+                Status = "Draft", CreatedBy = actorId
+            };
+            _db.PublicSectorCashPeriodAttestations.Add(item);
+            _audit.Record(companyId, actorId, "PublicSectorCashPeriodAttestation.Created", "PublicSector",
+                nameof(PublicSectorCashPeriodAttestation), item.Id, null,
+                new { item.BudgetVersionId, item.PeriodStart, item.PeriodEnd, counts.Bank, counts.Ar, counts.Ap, item.EvidenceReference });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorCashPeriodAttestation> SubmitCashPeriodAttestationAsync(
+            Guid companyId, Guid attestationId, Guid actorId, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorCashPeriodAttestations.FirstOrDefaultAsync(x =>
+                x.Id == attestationId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Cash period attestation not found.");
+            if (item.Status != "Draft" || item.CreatedBy != actorId)
+                throw new InvalidOperationException("Only the preparer may submit a draft cash period attestation.");
+            var counts = await GetCashPeriodSourceCountsAsync(companyId, item.PeriodStart, item.PeriodEnd, ct);
+            if (counts.Bank + counts.Ar + counts.Ap != 0)
+                throw new InvalidOperationException("Source activity has appeared since preparation; the zero-activity attestation cannot be submitted.");
+            item.ObservedBankTransactionCount = counts.Bank;
+            item.ObservedArReceiptCount = counts.Ar;
+            item.ObservedApPaymentCount = counts.Ap;
+            item.SubmittedBy = actorId;
+            item.SubmittedAt = DateTime.UtcNow;
+            item.Status = "PendingCertification";
+            _audit.Record(companyId, actorId, "PublicSectorCashPeriodAttestation.Submitted", "PublicSector",
+                nameof(PublicSectorCashPeriodAttestation), item.Id, new { Status = "Draft" },
+                new { item.Status, item.SubmittedBy, item.SubmittedAt });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorCashPeriodAttestation> CertifyCashPeriodAttestationAsync(
+            Guid companyId, Guid attestationId, Guid certifierId, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorCashPeriodAttestations.FirstOrDefaultAsync(x =>
+                x.Id == attestationId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Cash period attestation not found.");
+            if (item.Status != "PendingCertification")
+                throw new InvalidOperationException("Only a pending cash period attestation can be certified.");
+            if (item.CreatedBy == certifierId || item.SubmittedBy == certifierId)
+                throw new InvalidOperationException("The preparer or submitter cannot certify their own zero-activity attestation.");
+            var counts = await GetCashPeriodSourceCountsAsync(companyId, item.PeriodStart, item.PeriodEnd, ct);
+            if (counts.Bank + counts.Ar + counts.Ap != 0)
+            {
+                item.Status = "Rejected";
+                item.RejectionReason = $"Source activity detected before certification (bank {counts.Bank}, AR receipts {counts.Ar}, AP payments {counts.Ap}).";
+                await _db.SaveChangesAsync(ct);
+                throw new InvalidOperationException("Zero-activity certification rejected because source records now exist. Capture and certify the actual transactions.");
+            }
+            if (item.ObservedBankTransactionCount != 0 || item.ObservedArReceiptCount != 0 ||
+                item.ObservedApPaymentCount != 0)
+                throw new InvalidOperationException("The recorded source-count evidence is inconsistent with a zero-activity declaration.");
+            item.Status = "Certified";
+            item.CertifiedBy = certifierId;
+            item.CertifiedAt = DateTime.UtcNow;
+            _audit.Record(companyId, certifierId, "PublicSectorCashPeriodAttestation.Certified", "PublicSector",
+                nameof(PublicSectorCashPeriodAttestation), item.Id,
+                new { Status = "PendingCertification" },
+                new { item.Status, item.CertifiedBy, item.CertifiedAt, item.ObservedBankTransactionCount,
+                    item.ObservedArReceiptCount, item.ObservedApPaymentCount, item.EvidenceReference });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
         public async Task<BudgetComparisonReport> GetBudgetComparisonAsync(Guid companyId, int financialYear,
             CancellationToken ct = default)
         {
@@ -302,7 +405,21 @@ namespace ApexERP.Application.Services
                     x.EffectiveDate >= actualVersion.PeriodStart && x.EffectiveDate < actualVersion.PeriodEnd)
                     .ToListAsync(ct);
                 if (cashActuals.Count == 0)
-                    comparabilityIssues.Add("No source-backed cash actuals or explicit zero-activity certification are available. Load and approve actuals on the budget basis before presenting comparable amounts.");
+                {
+                    var zeroAttestation = await _db.PublicSectorCashPeriodAttestations.FirstOrDefaultAsync(x =>
+                        x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id &&
+                        x.PeriodStart == actualVersion.PeriodStart && x.PeriodEnd == actualVersion.PeriodEnd &&
+                        x.Status == "Certified", ct);
+                    var liveCounts = await GetCashPeriodSourceCountsAsync(companyId, actualVersion.PeriodStart,
+                        actualVersion.PeriodEnd, ct);
+                    if (zeroAttestation == null)
+                        comparabilityIssues.Add("No source-backed cash actuals or independently certified zero-activity attestation are available.");
+                    else if (liveCounts.Bank + liveCounts.Ar + liveCounts.Ap != 0 ||
+                        zeroAttestation.ObservedBankTransactionCount != 0 ||
+                        zeroAttestation.ObservedArReceiptCount != 0 ||
+                        zeroAttestation.ObservedApPaymentCount != 0)
+                        comparabilityIssues.Add("The zero-activity attestation is no longer valid: source activity exists or its recorded source counts are inconsistent.");
+                }
 
                 var capturedSourceIds = cashActuals
                     .Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
