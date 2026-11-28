@@ -24,6 +24,10 @@
 - Where the service is consumed in Zimbabwe but payment is made outside Zimbabwe, the non-resident supplier accounts directly to ZIMRA where registered.
 - Registered non-resident suppliers claim DSWT withheld as a credit in their VAT return.
 
+## Keep DSWT separate from other non-resident taxes
+
+ZIMRA Public Notice 24 of 2026 (9 April 2026) separately reminds local taxpayers that foreign payments for royalties, dividends, management fees, professional fees and imported services can trigger taxes under the Income Tax Act and VAT Act. These obligations must be classified and assessed independently; the DSWT register must not be used as a substitute for ordinary non-resident withholding tax or imported-services VAT accounting.
+
 ## Who bears it?
 
 The law's collection mechanics are explicit: the intermediary withholds from the amount being remitted to the foreign supplier and remits it to ZIMRA. The supplier receives a certificate and, if VAT-registered, claims the withholding as a credit against its VAT return. The Ministry describes this as a VAT collection mechanism rather than a new tax on all cardholders.
