@@ -1581,6 +1581,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("FdmsSubmissionId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("FundCentreId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("GrantId")
                         .HasColumnType("uuid");
 
@@ -1618,6 +1621,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerId");
+
+                    b.HasIndex("FundCentreId");
 
                     b.HasIndex("CompanyId", "InvoiceNo")
                         .IsUnique();
@@ -7160,6 +7165,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Customer");
                 });
