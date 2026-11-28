@@ -346,6 +346,10 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Budget reconciliation row not found.");
             if (item.Status != PublicSectorBudgetReconciliationStatus.Draft)
                 throw new InvalidOperationException("Only a draft reconciliation row can be submitted for approval.");
+            if (item.StatementSection is "Revenue" or "Expense" &&
+                (!item.BudgetVersionId.HasValue || !item.StatementPeriodStart.HasValue ||
+                 !item.StatementPeriodEnd.HasValue || string.IsNullOrWhiteSpace(item.SourceFingerprint)))
+                throw new InvalidOperationException("Revenue/expense reconciliations must be scoped and fingerprinted against an approved budget version and statement period.");
             var approvalAmount = Math.Abs(item.RevenueAmount) + Math.Abs(item.ExpenseAmount) +
                 Math.Abs(item.OperatingAmount) + Math.Abs(item.InvestingAmount) + Math.Abs(item.FinancingAmount);
             var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x =>
@@ -374,6 +378,24 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("The independent reconciliation approval workflow has not been approved.");
                 if (workflow.SubmittedBy == actorId)
                     throw new InvalidOperationException("The reconciliation preparer cannot approve their own reconciliation.");
+                if (item.StatementSection is "Revenue" or "Expense")
+                {
+                    if (!item.BudgetVersionId.HasValue || !item.StatementPeriodStart.HasValue ||
+                        !item.StatementPeriodEnd.HasValue || string.IsNullOrWhiteSpace(item.StatementEntityScope))
+                        throw new InvalidOperationException("The reconciliation lacks its budget/statement scope.");
+                    var comparison = await GetBudgetComparisonAsync(companyId, item.FinancialYear, token,
+                        item.StatementPeriodStart, item.StatementPeriodEnd, item.StatementEntityScope);
+                    var candidate = comparison.AutomaticReconciliationCandidates.SingleOrDefault(x =>
+                        x.Type == item.Type && x.StatementSection == item.StatementSection);
+                    if (!comparison.ComparableActualsAvailable || candidate == null ||
+                        candidate.SourceFingerprint != item.SourceFingerprint ||
+                        (item.IsNoDifferenceAttestation
+                            ? candidate.ExpectedAdjustment != 0m
+                            : item.StatementSection == "Revenue"
+                                ? item.RevenueAmount != candidate.ExpectedAdjustment || item.ExpenseAmount != 0m
+                                : item.ExpenseAmount != candidate.ExpectedAdjustment || item.RevenueAmount != 0m))
+                        throw new InvalidOperationException("The source data or calculated reconciliation has changed since preparation. Reject and recreate the reconciliation using the current candidate.");
+                }
                 item.Status = PublicSectorBudgetReconciliationStatus.Approved;
                 item.ApprovedBy = actorId;
                 item.ApprovedAt = DateTime.UtcNow;
