@@ -3731,6 +3731,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<decimal>("InvestingAmount").HasColumnType("numeric(20,6)");
                     b.Property<decimal>("FinancingAmount").HasColumnType("numeric(20,6)");
                     b.Property<string>("SupportingReference").IsRequired().HasColumnType("text");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
                     b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
                     b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
                     b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
