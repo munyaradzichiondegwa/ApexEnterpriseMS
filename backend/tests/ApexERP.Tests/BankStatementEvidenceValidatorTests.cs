@@ -33,6 +33,37 @@ public sealed class BankStatementEvidenceValidatorTests
             "bank-api-response:statement-2026-12");
 
     [Fact]
+    public void ValidateStoredBytes_AcceptsUnchangedRetainedStatement()
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Bytes)).ToLowerInvariant();
+        var result = BankStatementEvidenceValidator.ValidateStoredBytes(Bytes, digest, Bytes.Length);
+
+        Assert.True(result.IsValid);
+        Assert.Equal(digest, result.Sha256);
+    }
+
+    [Fact]
+    public void ValidateStoredBytes_RejectsTamperedRetainedStatement()
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Bytes)).ToLowerInvariant();
+        var tampered = Encoding.UTF8.GetBytes("altered-statement-payload");
+        var result = BankStatementEvidenceValidator.ValidateStoredBytes(tampered, digest, tampered.Length);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("no longer match", result.Reason);
+    }
+
+    [Fact]
+    public void ValidateStoredBytes_RejectsChangedByteLength()
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Bytes)).ToLowerInvariant();
+        var result = BankStatementEvidenceValidator.ValidateStoredBytes(Bytes, digest, Bytes.Length + 1);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("byte length", result.Reason);
+    }
+
+    [Fact]
     public void Validate_AcceptsMatchingBytesAndVerifiedBankOrigin()
     {
         var result = BankStatementEvidenceValidator.Validate(
