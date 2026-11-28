@@ -827,6 +827,16 @@ namespace ApexERP.Tests
                 var apInvoice = await verify.ApInvoices.SingleAsync(x => x.Id == apInvoiceId);
                 Assert.Equal(accounts["vatIn"].Id, apInvoice.VatInputAccountId);
                 Assert.Equal(accounts["wht"].Id, apInvoice.WhtPayableAccountId);
+                var arTaxComponent = await verify.InvoiceTaxComponents.SingleAsync(x => x.InvoiceKind == "AR" && x.InvoiceId == arInvoiceId);
+                var arTaxJournalLine = await verify.JournalLines.SingleAsync(x => x.Id == arTaxComponent.JournalLineId);
+                Assert.Equal(taxCodeId, arTaxJournalLine.TaxCodeId);
+                Assert.Equal(arTaxComponent.GlAccountId, arTaxJournalLine.GlAccountId);
+                Assert.Equal(1, arTaxComponent.MappingVersionNumber);
+                var apVatComponent = await verify.InvoiceTaxComponents.SingleAsync(x => x.InvoiceKind == "AP" && x.InvoiceId == apInvoiceId && x.TaxType == TaxType.VAT);
+                var apWhtComponent = await verify.InvoiceTaxComponents.SingleAsync(x => x.InvoiceKind == "AP" && x.InvoiceId == apInvoiceId && x.TaxType == TaxType.WHT);
+                Assert.Equal(taxCodeId, (await verify.JournalLines.SingleAsync(x => x.Id == apVatComponent.JournalLineId)).TaxCodeId);
+                Assert.Null((await verify.JournalLines.SingleAsync(x => x.Id == apWhtComponent.JournalLineId)).TaxCodeId);
+                Assert.Equal(accounts["wht"].Id, apWhtComponent.GlAccountId);
             }
         }
 
