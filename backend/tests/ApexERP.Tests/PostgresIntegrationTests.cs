@@ -1141,5 +1141,38 @@ namespace ApexERP.Tests
             }
         }
 
+
+        [PostgresFact]
+        public async Task Dswt_monthly_return_requires_company_tin_and_rejects_a_mismatched_tin()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var company = new Company
+            {
+                Name = "DSWT TIN test company",
+                BaseCurrency = "USD",
+                FunctionalCurrency = "USD"
+            };
+
+            await using var ctx = db.NewContext(company.Id);
+            ctx.Companies.Add(company);
+            await ctx.SaveChangesAsync();
+
+            var service = new ZimbabweDswtWithholdingRegisterService(ctx, new AuditService(ctx));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.GenerateMonthlyReturnSummaryAsync(company.Id, 2026, 11, "TIN-123456"));
+
+            company.ZimbabweTaxpayerTin = "TIN-123456";
+            await ctx.SaveChangesAsync();
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.GenerateMonthlyReturnSummaryAsync(company.Id, 2026, 11, "TIN-654321"));
+
+            var summary = await service.GenerateMonthlyReturnSummaryAsync(
+                company.Id, 2026, 11, " tin-123456 ");
+            Assert.Equal("TIN-123456", summary.TaxpayerTin);
+            Assert.Equal("DSWT TIN test company", summary.TaxpayerName);
+            Assert.Equal(0, summary.PaymentCount);
+        }
+
     }
 }
