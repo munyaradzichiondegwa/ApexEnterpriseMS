@@ -6,6 +6,7 @@ import { api, extractErrorMessage } from "@/lib/api";
 
 export default function PublicSectorPage() {
   const [tab, setTab] = useState<"funds" | "tenders" | "assets" | "ipsas24">("funds");
+  const [year] = useState(new Date().getFullYear());
   const [fundCentres, setFundCentres] = useState<any[]>([]);
   const [budgetAccounts, setBudgetAccounts] = useState<any[]>([]);
   const [utilization, setUtilization] = useState<any[]>([]);
@@ -18,7 +19,6 @@ export default function PublicSectorPage() {
   const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", amount: 0 }]);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [year] = useState(new Date().getFullYear());
   const [newFund, setNewFund] = useState({ code: "", name: "", level: "Vote", financialYear: year, appropriationAmount: 0, carriedForward: 0 });
   const [newTender, setNewTender] = useState({ title: "", specifications: "", submissionDeadline: "" });
 
