@@ -3737,6 +3737,39 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashPeriodAttestation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<DateTime>("PeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<int>("ObservedBankTransactionCount").HasColumnType("integer");
+                    b.Property<int>("ObservedArReceiptCount").HasColumnType("integer");
+                    b.Property<int>("ObservedApPaymentCount").HasColumnType("integer");
+                    b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("RejectionReason").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "PeriodStart", "PeriodEnd")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorCashPeriodAttestation_Period");
+                    b.ToTable("PublicSectorCashPeriodAttestations", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+                            t.HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Counts",
+                                "\"ObservedBankTransactionCount\" >= 0 AND \"ObservedArReceiptCount\" >= 0 AND \"ObservedApPaymentCount\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
