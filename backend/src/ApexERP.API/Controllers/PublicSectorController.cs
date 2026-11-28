@@ -468,7 +468,9 @@ namespace ApexERP.API.Controllers
             var operatingAdjustment = Adjustment(x => x.OperatingAmount);
             var investingAdjustment = Adjustment(x => x.InvestingAmount);
             var financingAdjustment = Adjustment(x => x.FinancingAmount);
-            var sourceCoverageComplete = uncapturedPostedMovements == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0;
+            var noSourceBackedCashActuals = actuals.Count == 0;
+            var sourceCoverageComplete = !noSourceBackedCashActuals && uncapturedPostedMovements == 0 &&
+                pendingActuals == 0 && invalidCertifiedActuals == 0;
             var operatingBridgeDifference = operatingDifference - operatingAdjustment;
             var investingBridgeDifference = investingDifference - investingAdjustment;
             var financingBridgeDifference = financingDifference - financingAdjustment;
@@ -479,6 +481,7 @@ namespace ApexERP.API.Controllers
             {
                 version.Id, version.FinancialYear, version.Currency,
                 SourceCoverageComplete = sourceCoverageComplete,
+                NoSourceBackedCashActuals = noSourceBackedCashActuals,
                 UncapturedOrUnreconciledPostedBankMovements = uncapturedPostedMovements,
                 PendingOrDraftActuals = pendingActuals,
                 InvalidCertifiedActuals = invalidCertifiedActuals,
