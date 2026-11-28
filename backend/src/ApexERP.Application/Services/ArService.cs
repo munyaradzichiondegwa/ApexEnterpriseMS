@@ -98,6 +98,7 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Invoice not found.");
             if (invoice.Status != InvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be posted.");
+            var approvedVatMappings = new List<TaxAccountMapping>();
 
             if (invoice.VatAmount > 0m)
             {
@@ -127,6 +128,7 @@ namespace ApexERP.Application.Services
                     .ToListAsync(ct);
                 var mappings = mappingCandidates.GroupBy(x => x.TaxCodeId)
                     .Select(g => g.OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).First()).ToList();
+                approvedVatMappings = mappings;
                 if (mappings.Count != taxCodeIds.Length ||
                     mappings.Select(x => x.TaxCodeId).Distinct().Count() != taxCodeIds.Length ||
                     mappings.Any(x => x.GlAccountId != vatOutputAccountId))
@@ -163,11 +165,7 @@ namespace ApexERP.Application.Services
                 var taxCodeIdsForComponents = invoice.Lines.Where(x => x.LineVat > 0m).Select(x => x.TaxCodeId!.Value).Distinct().ToArray();
                 foreach (var taxCodeId in taxCodeIdsForComponents)
                 {
-                    var mapping = await _db.TaxAccountMappings.Where(x =>
-                        x.CompanyId == companyId && x.Purpose == "AR-VAT-OUTPUT" && x.TaxCodeId == taxCodeId &&
-                        x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
-                        (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
-                        .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstAsync(ct);
+                    var mapping = approvedVatMappings.Single(x => x.TaxCodeId == taxCodeId);
                     var journalLine = je.Lines.Single(x => x.TaxCodeId == taxCodeId &&
                         x.GlAccountId == mapping.GlAccountId && x.Credit ==
                         invoice.Lines.Where(l => l.TaxCodeId == taxCodeId).Sum(l => l.LineVat));
