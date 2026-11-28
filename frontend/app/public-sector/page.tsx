@@ -319,13 +319,18 @@ export default function PublicSectorPage() {
     } catch (err) { setError(extractErrorMessage(err)); }
   }
 
-  async function varianceExplanationAction(id: string, action: "submit" | "review") {
+  async function varianceExplanationAction(id: string, action: "submit" | "review" | "reject") {
     try {
       if (action === "submit") await api.post(`/public-sector/budget-variance-explanations/${id}/submit`);
       else await api.post(`/public-sector/budget-variance-explanations/${id}/review`, {
-        accepted: true, reviewNote: "Variance explanation and supporting evidence independently reviewed.",
+        accepted: action === "review",
+        reviewNote: action === "review"
+          ? "Variance explanation and supporting evidence independently reviewed."
+          : "Rejected: explanation or supporting evidence requires correction before acceptance.",
       });
-      setMsg(action === "submit" ? "Variance explanation submitted for review." : "Variance explanation approved.");
+      setMsg(action === "submit" ? "Variance explanation submitted for review."
+        : action === "review" ? "Variance explanation approved."
+        : "Variance explanation rejected; the preparer may submit a corrected explanation.");
       await loadBudgetComparison();
     } catch (err) { setError(extractErrorMessage(err)); }
   }
@@ -928,7 +933,7 @@ export default function PublicSectorPage() {
                     <tbody>{budgetComparison.varianceExplanations?.map((item: any) => (
                       <tr key={item.id}>
                         <td>{fmt(item.varianceAmount)}</td><td>{item.explanation}</td><td>{item.commentReference || item.evidenceReference}</td><td>{item.evidenceReference}</td><td>{item.status}</td>
-                        <td>{item.status === "Draft" ? <button type="button" className="btn-secondary" onClick={() => varianceExplanationAction(item.id, "submit")}>Submit</button> : item.status === "PendingReview" ? <button type="button" className="btn-secondary" onClick={() => varianceExplanationAction(item.id, "review")}>Approve</button> : "—"}</td>
+                        <td>{item.status === "Draft" ? <button type="button" className="btn-secondary" onClick={() => varianceExplanationAction(item.id, "submit")}>Submit</button> : item.status === "PendingReview" ? <div className="flex gap-1"><button type="button" className="btn-secondary" onClick={() => varianceExplanationAction(item.id, "review")}>Approve</button><button type="button" className="btn-secondary" onClick={() => varianceExplanationAction(item.id, "reject")}>Reject</button></div> : "—"}</td>
                       </tr>
                     ))}
                     {!budgetComparison.varianceExplanations?.length && <tr><td colSpan={6} className="text-center text-slate-500">No variance explanations recorded.</td></tr>}</tbody>
