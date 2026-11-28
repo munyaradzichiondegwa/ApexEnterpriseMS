@@ -987,5 +987,116 @@ namespace ApexERP.Tests
                 x.EntityId == commitmentId && x.Action == "BudgetCommitment.ReleaseNoOp"));
         }
 
+
+        [PostgresFact]
+        public async Task Ipsas24_cash_actual_requires_reconciled_posted_source_and_independent_certification()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var accountId = Guid.NewGuid();
+            var bankAccountId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
+            var journalId = Guid.NewGuid();
+            var bankTransactionId = Guid.NewGuid();
+            var budgetVersionId = Guid.NewGuid();
+            var budgetLineId = Guid.NewGuid();
+            var preparerId = Guid.NewGuid();
+            var certifierId = Guid.NewGuid();
+            var effectiveDate = new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "IPSAS Cash Actual MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-CASH-ACT",
+                    Name = "Cash Actual Vote", Level = FundCentreLevel.Vote, FinancialYear = 2026
+                });
+                seed.GlAccounts.Add(new GlAccount
+                {
+                    Id = accountId, CompanyId = companyId, Code = "5101", Name = "Operating Cash Expenditure",
+                    Type = GlAccountType.Expense, SubType = "EC-CASH-ACT", Currency = "USD",
+                    CashFlowCategory = CashFlowCategory.Operating
+                });
+                seed.BankAccounts.Add(new BankAccount
+                {
+                    Id = bankAccountId, CompanyId = companyId, Name = "Operating Bank",
+                    AccountNo = "TEST-001", BankName = "Test Bank", Currency = "USD", GlAccountId = accountId
+                });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 6,
+                    StartDate = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+                    EndDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Status = PeriodStatus.Open
+                });
+                seed.JournalEntries.Add(new JournalEntry
+                {
+                    Id = journalId, CompanyId = companyId, EntryNo = "JE-CASH-ACT",
+                    Description = "Reconciled cash execution", EntryDate = effectiveDate,
+                    PeriodId = periodId, Source = JournalSource.Bank, Status = JournalStatus.Posted
+                });
+                seed.BankTransactions.Add(new BankTransaction
+                {
+                    Id = bankTransactionId, CompanyId = companyId, BankAccountId = bankAccountId,
+                    TransactionDate = effectiveDate, Description = "Verified supplier payment",
+                    Debit = 75m, Credit = 0m, Reference = "BANK-REF-001",
+                    IsReconciled = true, JournalEntryId = journalId
+                });
+                var version = new PublicSectorBudgetVersion
+                {
+                    Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
+                    VersionNumber = 1, Kind = PublicSectorBudgetVersionKind.Original,
+                    Status = PublicSectorBudgetVersionStatus.Approved, Currency = "USD",
+                    AccountingBasis = AccountingBasis.Cash, ClassificationBasis = "MDA cash classification",
+                    EntityScope = "IPSAS Cash Actual MDA",
+                    PeriodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    PeriodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    AuthorityReference = "Appropriation Act 2026", ApprovedBy = certifierId,
+                    ApprovedAt = DateTime.UtcNow, CreatedBy = preparerId
+                };
+                version.Lines.Add(new PublicSectorBudgetVersionLine
+                {
+                    Id = budgetLineId, CompanyId = companyId, BudgetVersionId = budgetVersionId,
+                    FundCentreId = fundCentreId, GlAccountId = accountId, LineNumber = 1,
+                    Description = "Operating cash expenditure", ClassificationCode = "EC-CASH-ACT",
+                    Amount = 100m, CreatedBy = preparerId
+                });
+                seed.PublicSectorBudgetVersions.Add(version);
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var actual = await service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
+                budgetLineId, PublicSectorBudgetActualEventKind.CashPayment,
+                PublicSectorBudgetActualSourceKind.BankTransaction, bankTransactionId,
+                effectiveDate, CashFlowCategory.Operating, preparerId);
+
+            Assert.Equal(75m, actual.Amount);
+            Assert.Equal("BANK-REF-001", actual.SourceReference);
+            Assert.Equal(PublicSectorBudgetActualStatus.Draft, actual.Status);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CertifyBudgetExecutionActualAsync(companyId, actual.Id, preparerId));
+
+            await service.SubmitBudgetExecutionActualAsync(companyId, actual.Id);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CertifyBudgetExecutionActualAsync(companyId, actual.Id, preparerId));
+            var certified = await service.CertifyBudgetExecutionActualAsync(companyId, actual.Id, certifierId);
+
+            Assert.Equal(PublicSectorBudgetActualStatus.Certified, certified.Status);
+            Assert.Equal(certifierId, certified.CertifiedBy);
+            Assert.NotNull(certified.CertifiedAt);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId, budgetLineId,
+                    PublicSectorBudgetActualEventKind.CashPayment,
+                    PublicSectorBudgetActualSourceKind.BankTransaction, bankTransactionId,
+                    effectiveDate, CashFlowCategory.Operating, preparerId));
+        }
     }
 }
