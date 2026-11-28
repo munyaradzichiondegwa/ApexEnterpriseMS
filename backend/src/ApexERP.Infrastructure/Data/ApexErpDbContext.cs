@@ -381,6 +381,9 @@ namespace ApexERP.Infrastructure.Data
                 .HasIndex(x => x.CashSourceSubmissionId)
                 .HasDatabaseName("IX_CashSourceReconciliationLines_Submission");
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => x.BudgetExecutionActualId)
+                .HasDatabaseName("IX_CashSourceReconciliationLines_ActualId");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
                 .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId })
                 .IsUnique().HasFilter("\"IsExcluded\" = TRUE")
                 .HasDatabaseName("UX_CashSourceReconciliationLine_Exclusion");
