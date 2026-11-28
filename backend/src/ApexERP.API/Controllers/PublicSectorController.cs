@@ -451,7 +451,7 @@ namespace ApexERP.API.Controllers
 
             return Ok(new
             {
-                budgetVersion.Id, budgetVersion.FinancialYear, budgetVersion.Currency,
+                version.Id, version.FinancialYear, version.Currency,
                 SourceCoverageComplete = sourceCoverageComplete,
                 UncapturedOrUnreconciledPostedBankMovements = uncapturedPostedMovements,
                 PendingOrDraftActuals = pendingActuals,
