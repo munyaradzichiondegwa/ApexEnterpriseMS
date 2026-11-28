@@ -269,11 +269,6 @@ namespace ApexERP.Application.Services
                 {
                     foreach (var taxCodeId in invoice.Lines.Where(x => x.LineVat > 0m).Select(x => x.TaxCodeId!.Value).Distinct())
                     {
-                        var mapping = await _db.TaxAccountMappings.Where(x =>
-                            x.CompanyId == companyId && x.Purpose == "AP-VAT-INPUT" && x.TaxCodeId == taxCodeId &&
-                            x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= invoice.InvoiceDate &&
-                            (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > invoice.InvoiceDate))
-                            .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).FirstAsync(token);
                         var mapping = approvedVatMappings.Single(x => x.TaxCodeId == taxCodeId);
                         var journalLine = journal.Lines.Single(x => x.TaxCodeId == taxCodeId &&
                             x.GlAccountId == mapping.GlAccountId && x.Debit ==
