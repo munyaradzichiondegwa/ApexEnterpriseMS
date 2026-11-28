@@ -291,17 +291,48 @@ namespace ApexERP.Application.Services
             // source and mirror journals. These accounts are not necessarily the same GL code
             // (revenue versus expense), so balance-sheet reciprocal-account matching above cannot
             // safely identify them. Translate each P&L line at its own posting-date rate first.
-            var matchedIntercompanyTransactions = await _db.IntercompanyTransactions.IgnoreQueryFilters()
-                .Where(t => groupIds.Contains(t.FromCompanyId) && groupIds.Contains(t.ToCompanyId) &&
-                    t.Status != IntercompanyStatus.Unmatched &&
-                    t.SourceJournalEntryId.HasValue && t.MirrorJournalEntryId.HasValue)
+            var groupIntercompanyTransactions = await _db.IntercompanyTransactions.IgnoreQueryFilters()
+                .Where(t => groupIds.Contains(t.FromCompanyId) && groupIds.Contains(t.ToCompanyId))
                 .OrderBy(t => t.TransactionDate).ThenBy(t => t.Id)
                 .ToListAsync(ct);
 
-            foreach (var transaction in matchedIntercompanyTransactions)
+            var journalIds = groupIntercompanyTransactions
+                .SelectMany(t => new[] { t.SourceJournalEntryId, t.MirrorJournalEntryId })
+                .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+            var journalHeaders = await _db.JournalEntries.IgnoreQueryFilters()
+                .Where(j => journalIds.Contains(j.Id))
+                .Select(j => new { j.Id, j.CompanyId, j.Status })
+                .ToDictionaryAsync(j => j.Id, ct);
+
+            foreach (var transaction in groupIntercompanyTransactions)
             {
-                var sourceJournalId = transaction.SourceJournalEntryId!.Value;
-                var mirrorJournalId = transaction.MirrorJournalEntryId!.Value;
+                var transactionCode = $"IC-TXN-{transaction.Id:N}";
+                if (transaction.Status == IntercompanyStatus.Unmatched ||
+                    !transaction.SourceJournalEntryId.HasValue || !transaction.MirrorJournalEntryId.HasValue)
+                {
+                    intercompanyExceptions.Add(new IntercompanyEliminationException(
+                        transaction.FromCompanyId, transaction.ToCompanyId, transactionCode,
+                        transaction.Amount, 0m, transaction.Amount,
+                        "Intercompany transaction is unmatched or is missing its source/mirror journal link; no elimination was performed."));
+                    continue;
+                }
+
+                var sourceJournalId = transaction.SourceJournalEntryId.Value;
+                var mirrorJournalId = transaction.MirrorJournalEntryId.Value;
+                var sourceValid = journalHeaders.TryGetValue(sourceJournalId, out var sourceHeader) &&
+                    sourceHeader.CompanyId == transaction.FromCompanyId &&
+                    sourceHeader.Status is JournalStatus.Posted or JournalStatus.Reversed;
+                var mirrorValid = journalHeaders.TryGetValue(mirrorJournalId, out var mirrorHeader) &&
+                    mirrorHeader.CompanyId == transaction.ToCompanyId &&
+                    mirrorHeader.Status is JournalStatus.Posted or JournalStatus.Reversed;
+                if (!sourceValid || !mirrorValid)
+                {
+                    intercompanyExceptions.Add(new IntercompanyEliminationException(
+                        transaction.FromCompanyId, transaction.ToCompanyId, transactionCode,
+                        transaction.Amount, 0m, transaction.Amount,
+                        "Source or mirror journal is missing, belongs to the wrong company, or is not posted; no elimination was performed."));
+                    continue;
+                }
                 var pnlLines = await (
                     from journalLine in _db.JournalLines.IgnoreQueryFilters()
                     join journal in _db.JournalEntries.IgnoreQueryFilters()
@@ -320,7 +351,14 @@ namespace ApexERP.Application.Services
                         SignedAmount = journalLine.BaseDebit - journalLine.BaseCredit
                     }).ToListAsync(ct);
 
-                if (pnlLines.Count == 0) continue;
+                if (pnlLines.Count == 0)
+                {
+                    intercompanyExceptions.Add(new IntercompanyEliminationException(
+                        transaction.FromCompanyId, transaction.ToCompanyId, transactionCode,
+                        0m, 0m, 0m,
+                        "Linked journals contain no posted income or expense lines to reconcile; no P&L elimination was performed."));
+                    continue;
+                }
 
                 decimal TranslatePnlLine(Guid companyId, DateTime entryDate, decimal signedAmount)
                 {
