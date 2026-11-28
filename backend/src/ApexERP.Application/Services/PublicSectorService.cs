@@ -763,6 +763,7 @@ namespace ApexERP.Application.Services
             decimal sourceAmount;
             DateTime sourceDate;
             string sourceCurrency;
+            Guid? sourceJournalEntryId;
             if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
             {
                 var source = await _db.BankTransactions.FirstOrDefaultAsync(x =>
@@ -770,6 +771,7 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("The bank transaction does not exist in this company.");
                 sourceAmount = Math.Max(source.Debit, source.Credit);
                 sourceDate = source.TransactionDate;
+                sourceJournalEntryId = source.JournalEntryId;
                 sourceCurrency = await _db.BankAccounts.Where(x => x.Id == source.BankAccountId && x.CompanyId == companyId)
                     .Select(x => x.Currency).SingleOrDefaultAsync(ct)
                     ?? throw new InvalidOperationException("The bank account currency is unavailable.");
@@ -789,6 +791,7 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("The AR receipt does not belong to the registered receivables control account.");
                 sourceAmount = source.Amount;
                 sourceDate = source.ReceiptDate;
+                sourceJournalEntryId = source.JournalEntryId;
                 sourceCurrency = source.Currency;
             }
             else
@@ -802,11 +805,16 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("The AP payment does not belong to the registered payables control account.");
                 sourceAmount = source.Amount;
                 sourceDate = source.PaymentDate;
+                sourceJournalEntryId = source.JournalEntryId;
                 sourceCurrency = source.Currency;
             }
 
             if (sourceDate < submission.PeriodStart || sourceDate >= submission.PeriodEnd)
                 throw new InvalidOperationException("The source record falls outside the submitted reporting period.");
+            if (!sourceJournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(j =>
+                j.Id == sourceJournalEntryId.Value && j.CompanyId == companyId &&
+                j.Status == JournalStatus.Posted, ct))
+                throw new InvalidOperationException("Only source records linked to a posted settlement journal can be allocated or excluded from the cash-basis budget population.");
             if (!string.Equals(sourceCurrency, submission.Currency, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The source record currency must match the reviewed source submission currency; no implicit FX conversion is permitted.");
             if (isExcluded)
