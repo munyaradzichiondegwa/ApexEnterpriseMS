@@ -1385,8 +1385,10 @@ namespace ApexERP.Application.Services
                         comparabilityIssues.Add("The zero-activity attestation is no longer valid: its recorded source counts are inconsistent.");
                 }
 
+                // Reversal events compensate an existing actual; they are not a second
+                // source-population record and must never inflate completeness counts.
                 var capturedSourceIds = cashActuals
-                    .Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
+                    .Where(x => !x.ReversalOfId.HasValue && x.SourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
                 var arReceiptIds = cashActuals.Where(x => !x.ReversalOfId.HasValue && x.SourceKind == PublicSectorBudgetActualSourceKind.ArReceipt)
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
@@ -2753,6 +2755,66 @@ namespace ApexERP.Application.Services
             return actual;
         }
 
+        /// <summary>
+        /// Initiates a compensating reversal for a certified cash actual. The original evidence
+        /// remains immutable; the reversal is independently certified before the original is
+        /// marked reversed and the compensating event affects the comparison.
+        /// </summary>
+        public async Task<PublicSectorBudgetExecutionActual> CreateBudgetExecutionActualReversalAsync(
+            Guid companyId, Guid originalActualId, string reason, Guid actorId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length < 10 || reason.Trim().Length > 2000)
+                throw new InvalidOperationException("A reversal reason of between 10 and 2,000 characters is required.");
+
+            return await _db.InTransactionAsync(async token =>
+            {
+                var original = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
+                    x.Id == originalActualId && x.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("The original budget execution actual was not found.");
+                if (original.ReversalOfId.HasValue || original.Status != PublicSectorBudgetActualStatus.Certified)
+                    throw new InvalidOperationException("Only an unreversed, certified original actual can be reversed.");
+                if (original.CreatedBy == actorId || original.CertifiedBy == actorId)
+                    throw new InvalidOperationException("The original preparer or certifier cannot initiate its reversal.");
+                if (await _db.PublicSectorBudgetExecutionActuals.AnyAsync(x =>
+                    x.CompanyId == companyId && x.ReversalOfId == original.Id, token))
+                    throw new InvalidOperationException("This actual already has a reversal. Chained or duplicate reversals are prohibited.");
+
+                var reversal = new PublicSectorBudgetExecutionActual
+                {
+                    CompanyId = companyId,
+                    FinancialYear = original.FinancialYear,
+                    BudgetVersionId = original.BudgetVersionId,
+                    BudgetVersionLineId = original.BudgetVersionLineId,
+                    FundCentreId = original.FundCentreId,
+                    GlAccountId = original.GlAccountId,
+                    CostCentreId = original.CostCentreId,
+                    EventKind = original.EventKind == PublicSectorBudgetActualEventKind.CashReceipt
+                        ? PublicSectorBudgetActualEventKind.CashPayment
+                        : PublicSectorBudgetActualEventKind.CashReceipt,
+                    SourceKind = original.SourceKind,
+                    SourceRecordId = original.SourceRecordId,
+                    SourceReference = original.SourceReference,
+                    SourceDate = original.SourceDate,
+                    EffectiveDate = original.EffectiveDate,
+                    Currency = original.Currency,
+                    Amount = original.Amount,
+                    ExchangeRateToBudgetCurrency = original.ExchangeRateToBudgetCurrency,
+                    CashFlowSection = original.CashFlowSection,
+                    ReversalOfId = original.Id,
+                    ReversalReason = reason.Trim(),
+                    Status = PublicSectorBudgetActualStatus.Draft,
+                    CreatedBy = actorId
+                };
+                _db.PublicSectorBudgetExecutionActuals.Add(reversal);
+                _audit.Record(companyId, actorId, "PublicSectorBudgetExecutionActual.ReversalCreated", "PublicSector",
+                    nameof(PublicSectorBudgetExecutionActual), reversal.Id, null,
+                    new { OriginalActualId = original.Id, original.SourceKind, original.SourceRecordId,
+                        original.Amount, Reason = reversal.ReversalReason });
+                await _db.SaveChangesAsync(token);
+                return reversal;
+            }, ct);
+        }
+
         public async Task<PublicSectorBudgetExecutionActual> SubmitBudgetExecutionActualAsync(
             Guid companyId, Guid actualId, Guid actorId, CancellationToken ct = default)
         {
@@ -2782,6 +2844,28 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("Only a pending budget actual can be certified.");
                 if (actual.CreatedBy == certifierId)
                     throw new InvalidOperationException("The person who captured the budget actual cannot certify it.");
+                PublicSectorBudgetExecutionActual? reversalOriginal = null;
+                if (actual.ReversalOfId.HasValue)
+                {
+                    reversalOriginal = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
+                        x.Id == actual.ReversalOfId.Value && x.CompanyId == companyId, token);
+                    if (reversalOriginal == null ||
+                        reversalOriginal.Status != PublicSectorBudgetActualStatus.Certified ||
+                        reversalOriginal.ReversalOfId.HasValue ||
+                        reversalOriginal.CreatedBy == certifierId ||
+                        reversalOriginal.CertifiedBy == certifierId ||
+                        reversalOriginal.Amount != actual.Amount ||
+                        reversalOriginal.SourceKind != actual.SourceKind ||
+                        reversalOriginal.SourceRecordId != actual.SourceRecordId ||
+                        reversalOriginal.BudgetVersionId != actual.BudgetVersionId ||
+                        reversalOriginal.BudgetVersionLineId != actual.BudgetVersionLineId ||
+                        reversalOriginal.EventKind == actual.EventKind ||
+                        string.IsNullOrWhiteSpace(actual.ReversalReason))
+                        throw new InvalidOperationException("The reversal no longer matches an independently certifiable original actual.");
+                    if (await _db.PublicSectorBudgetExecutionActuals.AnyAsync(x =>
+                        x.CompanyId == companyId && x.ReversalOfId == reversalOriginal.Id, token))
+                        throw new InvalidOperationException("The original actual already has a reversal.");
+                }
                 if (!actual.ReversalOfId.HasValue &&
                     actual.SourceKind is PublicSectorBudgetActualSourceKind.ArReceipt or PublicSectorBudgetActualSourceKind.ApPayment)
                 {
@@ -2798,6 +2882,14 @@ namespace ApexERP.Application.Services
                 }
                 actual.Status = PublicSectorBudgetActualStatus.Certified;
                 actual.CertifiedBy = certifierId;
+                if (reversalOriginal != null)
+                {
+                    reversalOriginal.Status = PublicSectorBudgetActualStatus.Reversed;
+                    _audit.Record(companyId, certifierId, "PublicSectorBudgetExecutionActual.ReversalCertified", "PublicSector",
+                        nameof(PublicSectorBudgetExecutionActual), reversalOriginal.Id,
+                        new { Status = PublicSectorBudgetActualStatus.Certified },
+                        new { Status = PublicSectorBudgetActualStatus.Reversed, ReversalActualId = actual.Id });
+                }
                 actual.CertifiedAt = DateTime.UtcNow;
                 _audit.Record(companyId, certifierId, "PublicSectorBudgetExecutionActual.Certified", "PublicSector",
                     nameof(PublicSectorBudgetExecutionActual), actual.Id,
