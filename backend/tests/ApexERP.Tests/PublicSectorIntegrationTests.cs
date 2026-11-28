@@ -534,6 +534,8 @@ namespace ApexERP.Tests
             Assert.Equal(40m, program.OutstandingCommitments);
             Assert.Equal(15m, program.PostedActuals);
             Assert.Equal(45m, program.AvailableBudget);
+            Assert.Equal(45m, program.ActualVariance);
+            Assert.Equal(45m, program.ActualVariancePercent);
             var utilisation = await service.GetBudgetUtilizationAsync(companyId, programId);
             Assert.Equal(15m, utilisation.Actuals);
             Assert.Equal(45m, utilisation.Available);
