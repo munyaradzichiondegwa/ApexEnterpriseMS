@@ -261,4 +261,27 @@ public sealed class ConsolidationIntercompanyIntegrationTests
         Assert.Equal(5m, intercompanyLine.ConsolidatedAmount);
         Assert.Contains("do not agree", exception.Reason);
     }
+    [PostgresFact]
+    public async Task Consolidation_is_blocked_when_a_group_entity_has_a_different_reporting_window()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var group = await SeedGroupAsync(db, 100m);
+
+        await using (var subsidiary = db.NewContext(group.CompanyBId, tenantId: group.TenantId))
+        {
+            var period = await subsidiary.AccountingPeriods.SingleAsync();
+            period.EndDate = new DateTime(2026, 2, 28);
+            await subsidiary.SaveChangesAsync();
+        }
+
+        await using var ctx = db.NewContext(group.ParentId, tenantId: group.TenantId);
+        var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ConsolidateAsync(group.ParentId, new DateTime(2026, 1, 31)));
+
+        Assert.Contains("group reporting-period policy", error.Message);
+        Assert.Contains("Intercompany Buyer", error.Message);
+    }
+
 }
