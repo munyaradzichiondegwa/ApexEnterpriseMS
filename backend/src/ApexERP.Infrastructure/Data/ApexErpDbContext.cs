@@ -1025,6 +1025,23 @@ namespace ApexERP.Infrastructure.Data
                     entry.Property(x => x.Status).OriginalValue == PublicSectorBudgetReconciliationStatus.Approved)
                     throw new InvalidOperationException("Approved IPSAS 24 reconciliations are immutable. Reject and replace them using current source evidence.");
             }
+            foreach (var entry in ChangeTracker.Entries<ModifiedCashRecognitionPolicy>())
+            {
+                if ((entry.State is EntityState.Modified or EntityState.Deleted) &&
+                    entry.Property(x => x.Status).OriginalValue == ModifiedCashRecognitionPolicyStatus.Approved)
+                    throw new InvalidOperationException("Approved modified-cash recognition policies are immutable. Create a new effective-dated version.");
+            }
+            foreach (var entry in ChangeTracker.Entries<ModifiedCashRecognitionMapping>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted)
+                    throw new InvalidOperationException("Modified-cash recognition mappings are immutable; create a new policy version.");
+            }
+            foreach (var entry in ChangeTracker.Entries<ModifiedCashRecognitionLedgerEvent>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted &&
+                    entry.Property(x => x.Status).OriginalValue == ModifiedCashLedgerEventStatus.Certified)
+                    throw new InvalidOperationException("Certified modified-cash ledger events are immutable; correct them through a separately certified reversal.");
+            }
             foreach (var entry in ChangeTracker.Entries<JournalLine>())
             {
                 if (entry.State is EntityState.Modified or EntityState.Deleted)
