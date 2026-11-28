@@ -1576,6 +1576,7 @@ namespace ApexERP.Tests
             await using var db = await TestDb.CreateAsync();
             var companyId = Guid.NewGuid();
             var fundCentreId = Guid.NewGuid();
+            var costCentreId = Guid.NewGuid();
             var bankGlId = Guid.NewGuid();
             var arControlGlId = Guid.NewGuid();
             var apControlGlId = Guid.NewGuid();
@@ -1619,6 +1620,11 @@ namespace ApexERP.Tests
                 {
                     Id = fundCentreId, CompanyId = companyId, Code = "VOTE-SETTLE",
                     Name = "Settlement Vote", Level = FundCentreLevel.Vote, FinancialYear = 2026
+                });
+                seed.CostCentres.Add(new CostCentre
+                {
+                    Id = costCentreId, CompanyId = companyId, Code = "CC-SETTLE",
+                    Name = "Settlement Cost Centre", IsActive = true
                 });
                 seed.GlAccounts.AddRange(
                     new GlAccount
@@ -1681,14 +1687,14 @@ namespace ApexERP.Tests
                     new JournalEntry { Id = apInvoice2JournalId, CompanyId = companyId, EntryNo = "JE-AP-INV-2", Description = "AP invoice 2", EntryDate = effectiveDate, PeriodId = periodId, Source = JournalSource.AP, Status = JournalStatus.Posted },
                     new JournalEntry { Id = apPaymentJournalId, CompanyId = companyId, EntryNo = "JE-AP-PAY", Description = "AP payment", EntryDate = effectiveDate, PeriodId = periodId, Source = JournalSource.AP, Status = JournalStatus.Posted });
                 seed.JournalLines.AddRange(
-                    new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = revenueGlId, FundCentreId = fundCentreId, Credit = 60m, Debit = 0m, BaseCredit = 60m, BaseDebit = 0m },
+                    new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = revenueGlId, FundCentreId = fundCentreId, CostCentreId = costCentreId, Credit = 60m, Debit = 0m, BaseCredit = 60m, BaseDebit = 0m },
                     new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = revenueGl2Id, FundCentreId = fundCentreId, Credit = 40m, Debit = 0m, BaseCredit = 40m, BaseDebit = 0m },
                     new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = arControlGlId, Debit = 100m, Credit = 0m, BaseDebit = 100m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = arInvoice2JournalId, GlAccountId = revenueGl2Id, FundCentreId = fundCentreId, Credit = 60m, Debit = 0m, BaseCredit = 60m, BaseDebit = 0m },
                     new JournalLine { JournalEntryId = arInvoice2JournalId, GlAccountId = arControlGlId, Debit = 60m, Credit = 0m, BaseDebit = 60m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = bankGlId, Debit = 130m, Credit = 0m, BaseDebit = 130m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = arControlGlId, Debit = 0m, Credit = 130m, BaseDebit = 0m, BaseCredit = 130m },
-                    new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = expenseGlId, FundCentreId = fundCentreId, Debit = 120m, Credit = 0m, BaseDebit = 120m, BaseCredit = 0m },
+                    new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = expenseGlId, FundCentreId = fundCentreId, CostCentreId = costCentreId, Debit = 120m, Credit = 0m, BaseDebit = 120m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = expenseGl2Id, FundCentreId = fundCentreId, Debit = 80m, Credit = 0m, BaseDebit = 80m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = apControlGlId, Debit = 0m, Credit = 200m, BaseDebit = 0m, BaseCredit = 200m },
                     new JournalLine { JournalEntryId = apInvoice2JournalId, GlAccountId = expenseGl2Id, FundCentreId = fundCentreId, Debit = 120m, Credit = 0m, BaseDebit = 120m, BaseCredit = 0m },
@@ -1705,7 +1711,7 @@ namespace ApexERP.Tests
                     Status = InvoiceStatus.Paid, JournalEntryId = arInvoiceJournalId, FundCentreId = fundCentreId,
                     Lines = new List<ArInvoiceLine>
                     {
-                        new() { ArInvoiceId = arInvoiceId, Description = "Service", Quantity = 1m, UnitPrice = 60m, LineSubtotal = 60m, LineVat = 0m, LineTotal = 60m, GlAccountId = revenueGlId },
+                        new() { ArInvoiceId = arInvoiceId, Description = "Service", Quantity = 1m, UnitPrice = 60m, LineSubtotal = 60m, LineVat = 0m, LineTotal = 60m, GlAccountId = revenueGlId, CostCentreId = costCentreId },
                         new() { ArInvoiceId = arInvoiceId, Description = "Other service", Quantity = 1m, UnitPrice = 40m, LineSubtotal = 40m, LineVat = 0m, LineTotal = 40m, GlAccountId = revenueGl2Id }
                     }
                 });
@@ -1739,7 +1745,7 @@ namespace ApexERP.Tests
                     Status = InvoiceStatus.Paid, JournalEntryId = apInvoiceJournalId, FundCentreId = fundCentreId,
                     Lines = new List<ApInvoiceLine>
                     {
-                        new() { ApInvoiceId = apInvoiceId, Description = "Supplies", Quantity = 1m, UnitCost = 120m, LineSubtotal = 120m, LineVat = 0m, LineTotal = 120m, GlAccountId = expenseGlId },
+                        new() { ApInvoiceId = apInvoiceId, Description = "Supplies", Quantity = 1m, UnitCost = 120m, LineSubtotal = 120m, LineVat = 0m, LineTotal = 120m, GlAccountId = expenseGlId, CostCentreId = costCentreId },
                         new() { ApInvoiceId = apInvoiceId, Description = "Other supplies", Quantity = 1m, UnitCost = 80m, LineSubtotal = 80m, LineVat = 0m, LineTotal = 80m, GlAccountId = expenseGl2Id }
                     }
                 });
@@ -1781,7 +1787,7 @@ namespace ApexERP.Tests
                 version.Lines.Add(new PublicSectorBudgetVersionLine
                 {
                     Id = arBudgetLineId, CompanyId = companyId, BudgetVersionId = budgetVersionId,
-                    FundCentreId = fundCentreId, GlAccountId = revenueGlId, LineNumber = 1,
+                    FundCentreId = fundCentreId, GlAccountId = revenueGlId, CostCentreId = costCentreId, LineNumber = 1,
                     Description = "Service revenue", ClassificationCode = "REV-SVC", Amount = 60m, CreatedBy = preparerId
                 });
                 version.Lines.Add(new PublicSectorBudgetVersionLine
@@ -1793,7 +1799,7 @@ namespace ApexERP.Tests
                 version.Lines.Add(new PublicSectorBudgetVersionLine
                 {
                     Id = apBudgetLineId, CompanyId = companyId, BudgetVersionId = budgetVersionId,
-                    FundCentreId = fundCentreId, GlAccountId = expenseGlId, LineNumber = 3,
+                    FundCentreId = fundCentreId, GlAccountId = expenseGlId, CostCentreId = costCentreId, LineNumber = 3,
                     Description = "Operating supplies", ClassificationCode = "EXP-SUP", Amount = 120m, CreatedBy = preparerId
                 });
                 version.Lines.Add(new PublicSectorBudgetVersionLine
