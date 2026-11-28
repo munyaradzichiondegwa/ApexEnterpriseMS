@@ -101,6 +101,31 @@ namespace ApexERP.Domain.Entities
     }
 
     /// <summary>
+    /// Period submission for one approved expected cash source. It captures source control
+    /// totals and evidence; it does not itself assert that individual source records have been
+    /// mapped to budget actuals.
+    /// </summary>
+    public class PublicSectorCashSourceSubmission : TenantEntity
+    {
+        public Guid ExpectedCashSourceId { get; set; }
+        public Guid BudgetVersionId { get; set; }
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+        public int RecordCount { get; set; }
+        public decimal ControlTotal { get; set; }
+        public decimal OpeningBalance { get; set; }
+        public decimal ClosingBalance { get; set; }
+        public string Currency { get; set; } = "USD";
+        public string EvidenceReference { get; set; } = string.Empty;
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? ReviewedBy { get; set; }
+        public DateTime? ReviewedAt { get; set; }
+        public string? ReviewNote { get; set; }
+    }
+
+    /// <summary>
     /// Independent period-level declaration that no cash source activity occurred.
     /// This is evidence of completeness, not a mechanism for assuming missing records are zero.
     /// Certification is permitted only after re-counting all supported source populations.
