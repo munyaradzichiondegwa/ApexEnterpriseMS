@@ -312,6 +312,10 @@ namespace ApexERP.Domain.Common
         Cash
     }
 
+    public enum PublicSectorBudgetActualEventKind { CashReceipt, CashPayment }
+    public enum PublicSectorBudgetActualSourceKind { BankTransaction, ArReceipt, ApPayment }
+    public enum PublicSectorBudgetActualStatus { Draft, PendingCertification, Certified, Rejected, Reversed }
+
     /// <summary>Which business process raised an <c>ExceptionItem</c>.</summary>
     public enum ExceptionCategory
     {
