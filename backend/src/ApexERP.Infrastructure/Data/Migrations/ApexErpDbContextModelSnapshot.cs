@@ -3934,7 +3934,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
                     b.HasIndex("CommitmentId");
-                    b.HasIndex("OriginalEventId").IsUnique().HasFilter("\"OriginalEventId\" IS NOT NULL")
+                    b.HasIndex("OriginalEventId").IsUnique().HasFilter("\"OriginalEventId\" IS NOT NULL AND \"EventKind\" = 2")
                         .HasDatabaseName("UX_ModifiedCashLedger_OneReversal");
                     b.HasIndex("PolicyId");
                     b.HasIndex("CompanyId", "CommitmentId", "Status", "EventDate")
