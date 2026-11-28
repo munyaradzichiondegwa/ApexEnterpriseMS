@@ -3720,6 +3720,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<int>("CashFlowSection").HasColumnType("integer");
                     b.Property<int>("Status").HasColumnType("integer");
                     b.Property<Guid?>("ReversalOfId").HasColumnType("uuid");
+                    b.Property<string>("ReversalReason").HasMaxLength(2000).HasColumnType("character varying(2000)");
                     b.Property<Guid?>("CertifiedBy").HasColumnType("uuid");
                     b.Property<DateTime?>("CertifiedAt").HasColumnType("timestamp with time zone");
                     b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
@@ -3731,7 +3732,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("FundCentreId");
                     b.HasIndex("GlAccountId");
                     b.HasIndex("CompanyId", "SourceKind", "SourceRecordId", "BudgetVersionLineId")
-                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetExecutionActual_SourceAllocation");
+                        .IsUnique().HasFilter("\\\"ReversalOfId\\\" IS NULL")
+                        .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_SourceAllocation");
+                    b.HasIndex("ReversalOfId").IsUnique()
+                        .HasFilter("\\\"ReversalOfId\\\" IS NOT NULL")
+                        .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_OneReversal");
                     b.HasIndex("BudgetVersionId", "EffectiveDate");
                     b.ToTable("PublicSectorBudgetExecutionActuals", t =>
                         {
