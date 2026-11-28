@@ -97,6 +97,15 @@ namespace ApexERP.Application.Services
             if (invoice.Status != InvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be posted.");
 
+            if (invoice.VatAmount > 0m)
+            {
+                var taxAccount = await _db.GlAccounts.SingleOrDefaultAsync(x =>
+                    x.Id == vatOutputAccountId && x.CompanyId == companyId && x.IsActive && x.IsPostable, ct);
+                if (taxAccount == null || taxAccount.Type != GlAccountType.Liability)
+                    throw new InvalidOperationException("VAT output must post to an active, postable liability account belonging to this company.");
+                invoice.VatOutputAccountId = taxAccount.Id;
+            }
+
             var glLines = new List<GlLineRequest>
             {
                 new(arControlAccountId, invoice.Total, 0, invoice.Currency, invoice.ExchangeRate, null, $"AR: {invoice.InvoiceNo}")
