@@ -180,7 +180,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         if (DenyManagement() is { } denied) return denied;
         var tin = request.ZimbabweTaxpayerTin?.Trim();
         if (!ZimbabweTaxpayerTinValidator.IsValid(tin))
-            return BadRequest(new { error = "A valid ZIMRA TIN (maximum 40 letters, digits, hyphens or slashes) is required." });
+            return BadRequest(new { error = "A non-empty ZIMRA TIN of no more than 40 characters is required." });
 
         using var scope = _db.SystemAccessScope("tenant administration: update Zimbabwe tax profile");
         var company = await _db.Companies.IgnoreQueryFilters()
@@ -190,8 +190,13 @@ public sealed class OrganisationManagementController : ApiControllerBase
         var previousTin = company.ZimbabweTaxpayerTin;
         if (!string.Equals(previousTin, tin, StringComparison.Ordinal))
         {
-            static string? MaskTin(string? value) => string.IsNullOrWhiteSpace(value)
-                ? null : $"***{value.Trim()[^Math.Min(4, value.Trim().Length)..]}";
+            static string? MaskTin(string? value)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return null;
+                var normalized = value.Trim();
+                var suffix = normalized.Length <= 4 ? normalized : normalized.Substring(normalized.Length - 4);
+                return $"***{suffix}";
+            }
             company.ZimbabweTaxpayerTin = tin;
             _audit.Record(company.Id, UserId, "Company.ZimbabweTaxProfileUpdated", "Tax",
                 nameof(Company), company.Id,
