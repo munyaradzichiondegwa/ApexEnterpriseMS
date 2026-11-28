@@ -1032,50 +1032,33 @@ namespace ApexERP.Application.Services
             string currency;
             DateTime sourceDate;
             string sourceReference;
-            if (sourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
-            {
-                var source = await _db.BankTransactions.FirstOrDefaultAsync(x =>
-                    x.Id == sourceRecordId && x.CompanyId == companyId && x.IsReconciled, ct)
-                    ?? throw new InvalidOperationException("A reconciled bank transaction is required as cash evidence.");
-                if (!source.JournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(x =>
-                    x.Id == source.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
-                    throw new InvalidOperationException("The reconciled bank transaction must be linked to a posted journal entry.");
-                var isReceipt = eventKind == PublicSectorBudgetActualEventKind.CashReceipt;
-                amount = isReceipt ? source.Credit : source.Debit;
-                if (amount <= 0m || (isReceipt ? source.Debit != 0m : source.Credit != 0m))
-                    throw new InvalidOperationException("The bank transaction direction and amount do not match the selected cash event type.");
-                var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
-                    x.Id == source.BankAccountId && x.CompanyId == companyId, ct)
-                    ?? throw new InvalidOperationException("The source bank account is not available to this company.");
-                currency = bank.Currency;
-                sourceDate = source.TransactionDate;
-                sourceReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
-            }
-            else if (sourceKind == PublicSectorBudgetActualSourceKind.ArReceipt &&
-                eventKind == PublicSectorBudgetActualEventKind.CashReceipt)
-            {
-                var source = await _db.ArReceipts.FirstOrDefaultAsync(x => x.Id == sourceRecordId && x.CompanyId == companyId, ct)
-                    ?? throw new InvalidOperationException("AR receipt source was not found for this company.");
-                if (!source.JournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(x =>
-                    x.Id == source.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
-                    throw new InvalidOperationException("The AR receipt must be posted to the general ledger before it can be captured.");
-                amount = source.Amount; currency = source.Currency; sourceDate = source.ReceiptDate; sourceReference = source.ReceiptNo;
-            }
-            else if (sourceKind == PublicSectorBudgetActualSourceKind.ApPayment &&
-                eventKind == PublicSectorBudgetActualEventKind.CashPayment)
-            {
-                var source = await _db.ApPayments.FirstOrDefaultAsync(x => x.Id == sourceRecordId && x.CompanyId == companyId, ct)
-                    ?? throw new InvalidOperationException("AP payment source was not found for this company.");
-                if (!source.AuthorisedBy.HasValue || !source.AuthorisedAt.HasValue || !source.JournalEntryId.HasValue ||
-                    !await _db.JournalEntries.AnyAsync(x => x.Id == source.JournalEntryId.Value &&
-                        x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
-                    throw new InvalidOperationException("The AP payment must be independently authorised and posted before it can be captured.");
-                amount = source.Amount; currency = source.Currency; sourceDate = source.PaymentDate; sourceReference = source.PaymentNo;
-            }
-            else
-            {
-                throw new InvalidOperationException("The source type is not valid for the selected cash receipt/payment event.");
-            }
+            if (sourceKind != PublicSectorBudgetActualSourceKind.BankTransaction)
+                throw new InvalidOperationException("Only reconciled bank transactions with a directly mapped posted cash journal are enabled in this phase. AR/AP settlement allocation mapping is not yet implemented.");
+            var source = await _db.BankTransactions.FirstOrDefaultAsync(x =>
+                x.Id == sourceRecordId && x.CompanyId == companyId && x.IsReconciled, ct)
+                ?? throw new InvalidOperationException("A reconciled bank transaction is required as cash evidence.");
+            if (!source.JournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(x =>
+                x.Id == source.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
+                throw new InvalidOperationException("The reconciled bank transaction must be linked to a posted journal entry.");
+            var isReceipt = eventKind == PublicSectorBudgetActualEventKind.CashReceipt;
+            amount = isReceipt ? source.Credit : source.Debit;
+            if (amount <= 0m || (isReceipt ? source.Debit != 0m : source.Credit != 0m))
+                throw new InvalidOperationException("The bank transaction direction and amount do not match the selected cash event type.");
+            if ((isReceipt && account.Type != GlAccountType.Income) ||
+                (!isReceipt && account.Type != GlAccountType.Expense))
+                throw new InvalidOperationException("Cash receipts must map to income accounts and cash payments to expense accounts in this capture phase.");
+            var mappedJournalAmount = await _db.JournalLines.Where(x =>
+                x.JournalEntryId == source.JournalEntryId.Value && x.GlAccountId == line.GlAccountId &&
+                x.FundCentreId == line.FundCentreId && x.CostCentreId == line.CostCentreId)
+                .SumAsync(x => isReceipt ? x.Credit - x.Debit : x.Debit - x.Credit, ct);
+            if (mappedJournalAmount != amount)
+                throw new InvalidOperationException("The posted journal does not contain an exact matching amount for this budget line, Fund Centre and cost centre. The source cannot be assigned to an unsupported budget dimension.");
+            var bank = await _db.BankAccounts.FirstOrDefaultAsync(x =>
+                x.Id == source.BankAccountId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("The source bank account is not available to this company.");
+            currency = bank.Currency;
+            sourceDate = source.TransactionDate;
+            sourceReference = string.IsNullOrWhiteSpace(source.Reference) ? source.Id.ToString("N") : source.Reference!;
 
             if (amount <= 0m || !string.Equals(currency, version.Currency, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The source amount must be positive and its currency must match the approved budget currency. Foreign-currency conversion requires approved rate provenance and is not enabled in this phase.");
