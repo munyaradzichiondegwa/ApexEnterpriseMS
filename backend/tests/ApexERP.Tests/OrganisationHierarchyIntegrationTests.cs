@@ -29,7 +29,7 @@ public sealed class OrganisationHierarchyIntegrationTests
             new Claim("sub", Guid.NewGuid().ToString()),
             new Claim(ClaimTypes.Role, "Administrator")
         };
-        var controller = new OrganisationManagementController(db, new NoopEmailDeliveryService());
+        var controller = new OrganisationManagementController(db, new NoopEmailDeliveryService(), new AuditService(db));
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "integration-test")) }
