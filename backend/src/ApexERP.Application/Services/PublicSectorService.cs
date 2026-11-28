@@ -2878,7 +2878,11 @@ namespace ApexERP.Application.Services
                 _audit.Record(companyId, actorId, "PublicSectorBudgetExecutionActual.ReversalCreated", "PublicSector",
                     nameof(PublicSectorBudgetExecutionActual), reversal.Id, null,
                     new { OriginalActualId = original.Id, original.SourceKind, original.SourceRecordId,
-                        original.Amount, Reason = reversal.ReversalReason });
+                        original.Currency, original.SourceAmount, original.Amount,
+                        original.ExchangeRateToBudgetCurrency, original.ExchangeRateDate,
+                        original.ExchangeRateSource, original.ExchangeRateSourceReference,
+                        original.ExchangeRateIsInverse, original.ExchangeRateApprovedBy,
+                        original.ExchangeRateApprovedAt, Reason = reversal.ReversalReason });
                 await _db.SaveChangesAsync(token);
                 return reversal;
             }, ct);
@@ -2924,6 +2928,19 @@ namespace ApexERP.Application.Services
                         reversalOriginal.CreatedBy == certifierId ||
                         reversalOriginal.CertifiedBy == certifierId ||
                         reversalOriginal.Amount != actual.Amount ||
+                        reversalOriginal.SourceAmount != actual.SourceAmount ||
+                        reversalOriginal.Currency != actual.Currency ||
+                        reversalOriginal.ExchangeRateToBudgetCurrency != actual.ExchangeRateToBudgetCurrency ||
+                        reversalOriginal.ExchangeRateDate != actual.ExchangeRateDate ||
+                        reversalOriginal.ExchangeRateSource != actual.ExchangeRateSource ||
+                        reversalOriginal.ExchangeRateSourceReference != actual.ExchangeRateSourceReference ||
+                        reversalOriginal.ExchangeRateIsInverse != actual.ExchangeRateIsInverse ||
+                        reversalOriginal.ExchangeRateApprovedBy != actual.ExchangeRateApprovedBy ||
+                        reversalOriginal.ExchangeRateApprovedAt != actual.ExchangeRateApprovedAt ||
+                        reversalOriginal.SourceDate != actual.SourceDate ||
+                        reversalOriginal.EffectiveDate != actual.EffectiveDate ||
+                        reversalOriginal.SourceReference != actual.SourceReference ||
+                        reversalOriginal.CashFlowSection != actual.CashFlowSection ||
                         reversalOriginal.SourceKind != actual.SourceKind ||
                         reversalOriginal.SourceRecordId != actual.SourceRecordId ||
                         reversalOriginal.BudgetVersionId != actual.BudgetVersionId ||
