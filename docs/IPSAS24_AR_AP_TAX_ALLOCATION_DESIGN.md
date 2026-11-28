@@ -37,6 +37,7 @@ Tax mappings and budget policies are created as drafts, submitted through the co
 - The implementation currently supports VAT and WHT. DST and other tax types are not enabled for IPSAS 24 actuals.
 - An AR invoice and an AP invoice currently use one VAT control-account argument per posting. Multiple tax codes may be represented, but their approved mappings must resolve to that same control account for the invoice.
 - WHT remittance allocation requires the bank transaction to be reconciled and its posted journal to contain one exact WHT payable debit line per mapped payable account. Mixed-purpose bank payments containing other debit components are not silently treated as WHT-only remittances.
+- WHT IncludeInBudgetActual follows the originating AP expense dimension only for a single-line invoice. Multi-line WHT must use an approved SeparateClassification or ExcludeFromBudgetActual policy; the application does not prorate the invoice-level WHT component across expense lines.
 - No legal/tax policy is preconfigured. The reporting entity must approve the effective-dated treatment for each VAT code and WHT. Recoverability, budget classification and Fund Centre policy are entity decisions.
 - Modified-cash recognition, Treasury 2026 official classification dictionaries/templates, cashbook ingestion and external tax-authority integrations remain separate acceptance items.
 
