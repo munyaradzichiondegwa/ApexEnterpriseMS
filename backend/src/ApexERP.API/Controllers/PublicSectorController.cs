@@ -108,7 +108,8 @@ namespace ApexERP.API.Controllers
                     return BadRequest(new { error = "Only code-less AP withholding-tax components can be remitted through this endpoint." });
                 var invoiceIds = req.Select(x => x.InvoiceId).Distinct().ToArray();
                 var invoices = await _db.ApInvoices.Where(x => x.CompanyId == CompanyId && invoiceIds.Contains(x.Id)).ToListAsync(token);
-                if (invoices.Count != invoiceIds.Length || components.Any(x => !invoiceIds.Contains(x.InvoiceId)))
+                if (invoices.Count != invoiceIds.Length || req.Any(item =>
+                    components.SingleOrDefault(x => x.Id == item.TaxComponentId)?.InvoiceId != item.InvoiceId))
                     return BadRequest(new { error = "Every WHT component must belong to its stated company AP invoice." });
 
                 foreach (var component in components)
