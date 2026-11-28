@@ -179,6 +179,7 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<PublicSectorCashPeriodAttestation> PublicSectorCashPeriodAttestations => Set<PublicSectorCashPeriodAttestation>();
         public DbSet<PublicSectorExpectedCashSource> PublicSectorExpectedCashSources => Set<PublicSectorExpectedCashSource>();
         public DbSet<PublicSectorCashSourceSubmission> PublicSectorCashSourceSubmissions => Set<PublicSectorCashSourceSubmission>();
+        public DbSet<PublicSectorCashSourceReconciliationLine> PublicSectorCashSourceReconciliationLines => Set<PublicSectorCashSourceReconciliationLine>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
@@ -374,6 +375,13 @@ namespace ApexERP.Infrastructure.Data
             // A journal can be reversed at most once: no two entries may reverse the same original
             // (PostgreSQL permits many NULLs in a unique index, so ordinary entries are unaffected).
             modelBuilder.Entity<JournalEntry>().HasIndex(j => j.ReversalOfId).IsUnique();
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId, x.BudgetExecutionActualId })
+                .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => x.BudgetExecutionActualId).IsUnique()
+                .HasFilter("\\"BudgetExecutionActualId\\" IS NOT NULL")
+                .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
             // One accounting period per company per month (guards concurrent first-posting races).
             modelBuilder.Entity<AccountingPeriod>().HasIndex(p => new { p.CompanyId, p.Year, p.PeriodNo }).IsUnique();
             // An AR invoice is mirrored into the counterparty's books at most once.
@@ -392,6 +400,21 @@ namespace ApexERP.Infrastructure.Data
             });
 
             // ---- Relationships (delete behaviour Restrict to protect financial history) ----
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_CashSourceReconciliationLine_Amounts",
+                    "(\\"IsExcluded\\" = TRUE AND \\"BudgetExecutionActualId\\" IS NULL AND \\"AllocatedAmount\\" = 0 AND length(trim(\\"ExclusionReason\\")) > 0) OR (\\"IsExcluded\\" = FALSE AND \\"BudgetExecutionActualId\\" IS NOT NULL AND \\"AllocatedAmount\\" > 0 AND \\"ExclusionReason\\" IS NULL)");
+                t.HasCheckConstraint("CK_CashSourceReconciliationLine_SourceAmount", "\\"SourceAmount\\" > 0");
+            });
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasOne<PublicSectorCashSourceSubmission>().WithMany()
+                .HasForeignKey(x => x.CashSourceSubmissionId).OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_CashSourceReconciliationLine_Submission");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasOne<PublicSectorBudgetExecutionActual>().WithMany()
+                .HasForeignKey(x => x.BudgetExecutionActualId).OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_CashSourceReconciliationLine_Actual");
+
             modelBuilder.Entity<JournalEntry>()
                 .HasMany(j => j.Lines)
                 .WithOne(l => l.JournalEntry!)
@@ -508,6 +531,7 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<PublicSectorCashPeriodAttestation>(modelBuilder);
             ApplyTenantFilter<PublicSectorExpectedCashSource>(modelBuilder);
             ApplyTenantFilter<PublicSectorCashSourceSubmission>(modelBuilder);
+            ApplyTenantFilter<PublicSectorCashSourceReconciliationLine>(modelBuilder);
             ApplyTenantFilter<Commitment>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
