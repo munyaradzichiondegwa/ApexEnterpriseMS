@@ -732,7 +732,7 @@ namespace ApexERP.Infrastructure.Data
                     "(\"IsNoDifferenceAttestation\" = TRUE AND \"RevenueAmount\" = 0 AND \"ExpenseAmount\" = 0 AND \"OperatingAmount\" = 0 AND \"InvestingAmount\" = 0 AND \"FinancingAmount\" = 0) OR (\"IsNoDifferenceAttestation\" = FALSE AND (\"RevenueAmount\" <> 0 OR \"ExpenseAmount\" <> 0 OR \"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0))");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasIndex(x => new { x.CompanyId, x.SourceKind, x.SourceRecordId, x.BudgetVersionLineId })
-                .IsUnique().HasFilter("\\"ReversalOfId\\" IS NULL")
+                .IsUnique().HasFilter("\\"ReversalOfId\\" IS NULL AND \\"Status\\" <> 4")
                 .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_SourceAllocation");
             modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
                 .HasIndex(x => x.ReversalOfId).IsUnique()
