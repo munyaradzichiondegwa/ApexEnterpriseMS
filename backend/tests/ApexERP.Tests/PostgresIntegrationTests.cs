@@ -1143,6 +1143,62 @@ namespace ApexERP.Tests
 
 
         [PostgresFact]
+        public async Task Dswt_filing_snapshot_is_idempotent_evidence_backed_and_payload_immutable()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var tenantId = Guid.NewGuid();
+            var company = new Company
+            {
+                TenantId = tenantId,
+                Name = "DSWT filing workflow company",
+                BaseCurrency = "USD",
+                FunctionalCurrency = "USD"
+            };
+
+            await using (var seed = db.NewContext(null))
+            {
+                seed.CustomerOrganisations.Add(new CustomerOrganisation
+                {
+                    Id = tenantId,
+                    Name = "DSWT filing workflow tenant"
+                });
+                seed.Companies.Add(company);
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(company.Id, tenantId: tenantId);
+            var persisted = await ctx.Companies.SingleAsync(x => x.Id == company.Id);
+            persisted.ZimbabweTaxpayerTin = "TIN-FILING-123";
+            await ctx.SaveChangesAsync();
+
+            var audit = new AuditService(ctx);
+            var register = new ZimbabweDswtWithholdingRegisterService(ctx, audit);
+            var workflow = new ZimbabweDswtFilingWorkflowService(ctx, register, audit);
+            var request = new ZimbabweDswtFilingPreparationRequest(2026, 11, 1, "TIN-FILING-123");
+
+            var first = await workflow.PrepareAsync(company.Id, request);
+            var repeated = await workflow.PrepareAsync(company.Id, request);
+            Assert.Equal(first.Id, repeated.Id);
+            Assert.Equal(first.PayloadSha256, repeated.PayloadSha256);
+            Assert.Equal(64, first.PayloadSha256.Length);
+            Assert.Equal(64, first.IdempotencyKey.Length);
+            Assert.Equal(ZimbabweDswtFilingStatus.Prepared, first.Status);
+
+            var submittedAt = new DateTime(2026, 11, 28, 10, 0, 0, DateTimeKind.Utc);
+            await workflow.MarkSubmittedAsync(company.Id, first.Id,
+                new ZimbabweDswtFilingSubmissionRequest(submittedAt, "TARMS-REF-001", "evidence://submission/001"));
+            var acknowledgedAt = submittedAt.AddMinutes(5);
+            var acknowledged = await workflow.RecordAcknowledgementAsync(company.Id, first.Id,
+                new ZimbabweDswtFilingAcknowledgementRequest(
+                    acknowledgedAt, true, "TARMS-ACK-001", "evidence://ack/001"));
+            Assert.Equal(ZimbabweDswtFilingStatus.Acknowledged, acknowledged.Status);
+
+            first.PayloadJson = "{}";
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => ctx.SaveChangesAsync());
+            Assert.Contains("immutable", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [PostgresFact]
         public async Task Dswt_monthly_return_requires_company_tin_and_rejects_a_mismatched_tin()
         {
             await using var db = await TestDb.CreateAsync();
