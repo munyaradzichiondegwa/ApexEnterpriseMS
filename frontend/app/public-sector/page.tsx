@@ -83,9 +83,16 @@ export default function PublicSectorPage() {
   function exportBudgetComparison() {
     if (!budgetComparison) return;
     downloadCsv(`apexerp-ipsas24-budget-comparison-${year}`, budgetComparison.lines, [
-      { header: "Classification", value: (row: any) => row.classificationCode },
+      // Core Appendix 5 statement columns, in the prescribed order.
+      { header: "Budget Line", value: (row: any) => row.description },
       { header: "Notes", value: (row: any) => row.noteReference ?? "" },
+      { header: "Original", value: (row: any) => row.originalBudget },
+      { header: "Final", value: (row: any) => row.finalBudget },
+      { header: "Actual Amounts on Comparable Basis", value: (row: any) => row.actualOnComparableBasis },
+      { header: "Difference between final budget and actual", value: (row: any) => row.variance },
       { header: "Comment Ref", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.evidenceReference ?? "" },
+      // Supporting dimensions and audit references.
+      { header: "Treasury Classification", value: (row: any) => row.classificationCode },
       { header: "Fund Centre Code", value: (row: any) => row.fundCentreCode },
       { header: "Fund Centre", value: (row: any) => row.fundCentreName },
       { header: "Fund Centre Level", value: (row: any) => row.fundCentreLevel },
@@ -93,13 +100,10 @@ export default function PublicSectorPage() {
       { header: "Cost Centre", value: (row: any) => row.costCentreName },
       { header: "GL Account Code", value: (row: any) => row.accountCode },
       { header: "GL Account", value: (row: any) => row.accountName },
-      { header: "Original Budget", value: (row: any) => row.originalBudget },
-      { header: "Final Budget", value: (row: any) => row.finalBudget },
-      { header: "Actual on Comparable Basis", value: (row: any) => row.actualOnComparableBasis },
-      { header: "Variance", value: (row: any) => row.variance },
       { header: "Variance Percent", value: (row: any) => row.variancePercent },
-      { header: "Explanation", value: (row: any) => row.originalToFinalExplanation },
+      { header: "Original-to-Final Explanation", value: (row: any) => row.originalToFinalExplanation },
       { header: "Variance Explanation", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.explanation ?? "" },
+      { header: "Evidence Reference", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.evidenceReference ?? "" },
     ]);
   }
 
