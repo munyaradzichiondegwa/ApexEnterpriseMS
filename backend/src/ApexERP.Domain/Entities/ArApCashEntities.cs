@@ -42,6 +42,8 @@ namespace ApexERP.Domain.Entities
         public decimal Outstanding { get; set; }
         public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
         public Guid? JournalEntryId { get; set; }
+        /// <summary>Exact VAT output control account used when the posted invoice journal was created.</summary>
+        public Guid? VatOutputAccountId { get; set; }
         /// <summary>Public-sector vote dimension required to map cash receipts to an approved budget line.</summary>
         public Guid? FundCentreId { get; set; }
 
@@ -133,6 +135,10 @@ namespace ApexERP.Domain.Entities
         public decimal Outstanding { get; set; }
         public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
         public Guid? JournalEntryId { get; set; }
+        /// <summary>Exact VAT input control account used when the posted invoice journal was created.</summary>
+        public Guid? VatInputAccountId { get; set; }
+        /// <summary>Exact WHT payable control account used when the posted invoice journal was created.</summary>
+        public Guid? WhtPayableAccountId { get; set; }
 
         /// <summary>Public Sector (Module 16): fund centre this expenditure is committed/actualised against.</summary>
         public Guid? FundCentreId { get; set; }
