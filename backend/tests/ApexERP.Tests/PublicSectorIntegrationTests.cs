@@ -1329,6 +1329,32 @@ namespace ApexERP.Tests
             var comparisonLine = Assert.Single(comparison.Lines);
             Assert.Equal(75m, comparisonLine.ActualOnComparableBasis);
 
+            // A source population can be corrected by a new numbered revision without
+            // mutating the previously reviewed submission. Certified actuals are reused
+            // only within the latest revision's record-level mapping.
+            var revisedSubmission = await service.CreateCashSourceSubmissionAsync(companyId,
+                expectedSource.Id, 2, 100m, 1000m, 900m, "USD",
+                "Replacement bank statement after late statement delivery", preparerId,
+                default, "The bank supplied a corrected statement export; reconcile the revised source population.");
+            Assert.Equal(2, revisedSubmission.SubmissionRevision);
+            Assert.Equal("Reviewed", submission.Status);
+            Assert.Equal("Reviewed", submission.RecordLevelStatus);
+            await service.SubmitCashSourceSubmissionAsync(companyId, revisedSubmission.Id, preparerId);
+            await service.ReviewCashSourceSubmissionAsync(companyId, revisedSubmission.Id, sourceReviewerId,
+                true, "Replacement statement control totals independently confirmed.");
+            await service.AddCashSourceReconciliationLineAsync(companyId, revisedSubmission.Id,
+                bankTransactionId, "BANK-REF-001", certified.Id, false, null, reconciliationPreparerId);
+            await service.AddCashSourceReconciliationLineAsync(companyId, revisedSubmission.Id,
+                unmappedBankTransactionId, "BANK-REF-002", null, true,
+                "Separately identified bank charge excluded from this budget line under the approved classification workpaper.",
+                reconciliationPreparerId);
+            await service.SubmitCashSourceRecordReconciliationAsync(companyId, revisedSubmission.Id,
+                reconciliationPreparerId);
+            await service.ReviewCashSourceRecordReconciliationAsync(companyId, revisedSubmission.Id,
+                reconciliationReviewerId, true, "Replacement source population reconciled and independently reviewed.");
+            var revisedComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.True(revisedComparison.ComparableActualsAvailable, revisedComparison.ComparabilityMessage);
+
             // Reconciliation must also revalidate each record, not just the aggregate
             // count and control total. A changed reference on an excluded record is stale.
             var changedExcludedSource = await ctx.BankTransactions.SingleAsync(x => x.Id == unmappedBankTransactionId);
