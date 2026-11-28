@@ -1184,5 +1184,180 @@ namespace ApexERP.Tests
             Assert.Equal(assetAccountId, line.GlAccountId);
             Assert.Equal(250m, line.Amount);
         }
+
+        [PostgresFact]
+        public async Task Ipsas24_cash_actuals_accept_fully_settled_AR_receipts_and_authorised_AP_payments()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var bankGlId = Guid.NewGuid();
+            var revenueGlId = Guid.NewGuid();
+            var expenseGlId = Guid.NewGuid();
+            var bankAccountId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
+            var arInvoiceJournalId = Guid.NewGuid();
+            var arReceiptJournalId = Guid.NewGuid();
+            var apInvoiceJournalId = Guid.NewGuid();
+            var apPaymentJournalId = Guid.NewGuid();
+            var customerId = Guid.NewGuid();
+            var supplierId = Guid.NewGuid();
+            var arInvoiceId = Guid.NewGuid();
+            var arReceiptId = Guid.NewGuid();
+            var apInvoiceId = Guid.NewGuid();
+            var apPaymentId = Guid.NewGuid();
+            var budgetVersionId = Guid.NewGuid();
+            var arBudgetLineId = Guid.NewGuid();
+            var apBudgetLineId = Guid.NewGuid();
+            var preparerId = Guid.NewGuid();
+            var certifierId = Guid.NewGuid();
+            var effectiveDate = new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "IPSAS AR AP Settlement MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-SETTLE",
+                    Name = "Settlement Vote", Level = FundCentreLevel.Vote, FinancialYear = 2026
+                });
+                seed.GlAccounts.AddRange(
+                    new GlAccount
+                    {
+                        Id = bankGlId, CompanyId = companyId, Code = "1000", Name = "Operating Bank",
+                        Type = GlAccountType.Asset, SubType = "BANK", Currency = "USD",
+                        CashFlowCategory = CashFlowCategory.CashAndCashEquivalents
+                    },
+                    new GlAccount
+                    {
+                        Id = revenueGlId, CompanyId = companyId, Code = "4100", Name = "Service Revenue",
+                        Type = GlAccountType.Income, SubType = "REV-SVC", Currency = "USD",
+                        CashFlowCategory = CashFlowCategory.Operating
+                    },
+                    new GlAccount
+                    {
+                        Id = expenseGlId, CompanyId = companyId, Code = "5100", Name = "Operating Supplies",
+                        Type = GlAccountType.Expense, SubType = "EXP-SUP", Currency = "USD",
+                        CashFlowCategory = CashFlowCategory.Operating
+                    });
+                seed.BankAccounts.Add(new BankAccount
+                {
+                    Id = bankAccountId, CompanyId = companyId, Name = "Operating Bank",
+                    AccountNo = "SETTLE-001", BankName = "Test Bank", Currency = "USD", GlAccountId = bankGlId
+                });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 6,
+                    StartDate = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+                    EndDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Status = PeriodStatus.Open
+                });
+                seed.JournalEntries.AddRange(
+                    new JournalEntry { Id = arInvoiceJournalId, CompanyId = companyId, EntryNo = "JE-AR-INV", Description = "AR invoice", EntryDate = effectiveDate, PeriodId = periodId, Source = JournalSource.AR, Status = JournalStatus.Posted },
+                    new JournalEntry { Id = arReceiptJournalId, CompanyId = companyId, EntryNo = "JE-AR-REC", Description = "AR receipt", EntryDate = effectiveDate, PeriodId = periodId, Source = JournalSource.AR, Status = JournalStatus.Posted },
+                    new JournalEntry { Id = apInvoiceJournalId, CompanyId = companyId, EntryNo = "JE-AP-INV", Description = "AP invoice", EntryDate = effectiveDate, PeriodId = periodId, Source = JournalSource.AP, Status = JournalStatus.Posted },
+                    new JournalEntry { Id = apPaymentJournalId, CompanyId = companyId, EntryNo = "JE-AP-PAY", Description = "AP payment", EntryDate = effectiveDate, PeriodId = periodId, Source = JournalSource.AP, Status = JournalStatus.Posted });
+                seed.JournalLines.AddRange(
+                    new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = revenueGlId, FundCentreId = fundCentreId, Credit = 100m, Debit = 0m, BaseCredit = 100m, BaseDebit = 0m },
+                    new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = bankGlId, Debit = 100m, Credit = 0m, BaseDebit = 100m, BaseCredit = 0m },
+                    new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = Guid.NewGuid(), Debit = 0m, Credit = 100m, BaseDebit = 0m, BaseCredit = 100m },
+                    new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = expenseGlId, FundCentreId = fundCentreId, Debit = 200m, Credit = 0m, BaseDebit = 200m, BaseCredit = 0m },
+                    new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = Guid.NewGuid(), Debit = 200m, Credit = 0m, BaseDebit = 200m, BaseCredit = 0m },
+                    new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = bankGlId, Debit = 0m, Credit = 200m, BaseDebit = 0m, BaseCredit = 200m });
+                seed.Customers.Add(new Customer { Id = customerId, CompanyId = companyId, Code = "C-SETTLE", Name = "Settlement Customer", Currency = "USD" });
+                seed.Suppliers.Add(new Supplier { Id = supplierId, CompanyId = companyId, Code = "S-SETTLE", Name = "Settlement Supplier", Currency = "USD" });
+                seed.ArInvoices.Add(new ArInvoice
+                {
+                    Id = arInvoiceId, CompanyId = companyId, InvoiceNo = "AR-SETTLE-001",
+                    CustomerId = customerId, InvoiceDate = effectiveDate, DueDate = effectiveDate,
+                    Currency = "USD", Subtotal = 100m, Total = 100m, Outstanding = 0m,
+                    Status = InvoiceStatus.Paid, JournalEntryId = arInvoiceJournalId, FundCentreId = fundCentreId,
+                    Lines = new List<ArInvoiceLine>
+                    {
+                        new() { ArInvoiceId = arInvoiceId, Description = "Service", Quantity = 1m, UnitPrice = 100m, LineSubtotal = 100m, LineVat = 0m, LineTotal = 100m, GlAccountId = revenueGlId }
+                    }
+                });
+                seed.ArReceipts.Add(new ArReceipt
+                {
+                    Id = arReceiptId, CompanyId = companyId, ReceiptNo = "RCT-SETTLE-001",
+                    CustomerId = customerId, ReceiptDate = effectiveDate, Currency = "USD",
+                    Amount = 100m, JournalEntryId = arReceiptJournalId,
+                    Allocations = new List<ArReceiptAllocation>
+                    {
+                        new() { ArReceiptId = arReceiptId, ArInvoiceId = arInvoiceId, AmountApplied = 100m }
+                    }
+                });
+                seed.ApInvoices.Add(new ApInvoice
+                {
+                    Id = apInvoiceId, CompanyId = companyId, InvoiceNo = "AP-SETTLE-001",
+                    SupplierId = supplierId, InvoiceDate = effectiveDate, DueDate = effectiveDate,
+                    Currency = "USD", Subtotal = 200m, Total = 200m, Outstanding = 0m,
+                    Status = InvoiceStatus.Paid, JournalEntryId = apInvoiceJournalId, FundCentreId = fundCentreId,
+                    Lines = new List<ApInvoiceLine>
+                    {
+                        new() { ApInvoiceId = apInvoiceId, Description = "Supplies", Quantity = 1m, UnitCost = 200m, LineSubtotal = 200m, LineVat = 0m, LineTotal = 200m, GlAccountId = expenseGlId }
+                    }
+                });
+                seed.ApPayments.Add(new ApPayment
+                {
+                    Id = apPaymentId, CompanyId = companyId, PaymentNo = "PAY-SETTLE-001",
+                    SupplierId = supplierId, PaymentDate = effectiveDate, Currency = "USD",
+                    Amount = 200m, JournalEntryId = apPaymentJournalId,
+                    PreparedBy = preparerId, AuthorisedBy = certifierId, AuthorisedAt = DateTime.UtcNow,
+                    Allocations = new List<ApPaymentAllocation>
+                    {
+                        new() { ApPaymentId = apPaymentId, ApInvoiceId = apInvoiceId, AmountApplied = 200m }
+                    }
+                });
+                var version = new PublicSectorBudgetVersion
+                {
+                    Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
+                    VersionNumber = 1, Kind = PublicSectorBudgetVersionKind.Original,
+                    Status = PublicSectorBudgetVersionStatus.Approved, Currency = "USD",
+                    AccountingBasis = AccountingBasis.Cash, ClassificationBasis = "Cash economic classification",
+                    EntityScope = "IPSAS AR AP Settlement MDA",
+                    PeriodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    PeriodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    AuthorityReference = "Appropriation Act 2026", ApprovedBy = certifierId,
+                    ApprovedAt = DateTime.UtcNow, CreatedBy = preparerId
+                };
+                version.Lines.Add(new PublicSectorBudgetVersionLine
+                {
+                    Id = arBudgetLineId, CompanyId = companyId, BudgetVersionId = budgetVersionId,
+                    FundCentreId = fundCentreId, GlAccountId = revenueGlId, LineNumber = 1,
+                    Description = "Service revenue", ClassificationCode = "REV-SVC", Amount = 100m, CreatedBy = preparerId
+                });
+                version.Lines.Add(new PublicSectorBudgetVersionLine
+                {
+                    Id = apBudgetLineId, CompanyId = companyId, BudgetVersionId = budgetVersionId,
+                    FundCentreId = fundCentreId, GlAccountId = expenseGlId, LineNumber = 2,
+                    Description = "Operating supplies", ClassificationCode = "EXP-SUP", Amount = 200m, CreatedBy = preparerId
+                });
+                seed.PublicSectorBudgetVersions.Add(version);
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var arActual = await service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
+                arBudgetLineId, PublicSectorBudgetActualEventKind.CashReceipt,
+                PublicSectorBudgetActualSourceKind.ArReceipt, arReceiptId,
+                effectiveDate, CashFlowCategory.Operating, preparerId);
+            var apActual = await service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
+                apBudgetLineId, PublicSectorBudgetActualEventKind.CashPayment,
+                PublicSectorBudgetActualSourceKind.ApPayment, apPaymentId,
+                effectiveDate, CashFlowCategory.Operating, preparerId);
+
+            Assert.Equal(100m, arActual.Amount);
+            Assert.Equal("RCT-SETTLE-001", arActual.SourceReference);
+            Assert.Equal(200m, apActual.Amount);
+            Assert.Equal("PAY-SETTLE-001", apActual.SourceReference);
+            Assert.Equal(PublicSectorBudgetActualStatus.Draft, arActual.Status);
+            Assert.Equal(PublicSectorBudgetActualStatus.Draft, apActual.Status);
+        }
     }
 }
