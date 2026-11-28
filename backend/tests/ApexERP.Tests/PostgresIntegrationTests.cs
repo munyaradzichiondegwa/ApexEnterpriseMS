@@ -1169,6 +1169,27 @@ namespace ApexERP.Tests
             await using var ctx = db.NewContext(company.Id, tenantId: tenantId);
             var persisted = await ctx.Companies.SingleAsync(x => x.Id == company.Id);
             persisted.ZimbabweTaxpayerTin = "TIN-FILING-123";
+            ctx.ZimbabweDswtWithholdingRecords.Add(new ZimbabweDswtWithholdingRecord
+            {
+                CompanyId = company.Id,
+                PaymentReference = "INTERMEDIARY-DSWT-001",
+                IntermediaryName = "Zimbabwe Bank",
+                SupplierName = "Foreign Cloud Ltd",
+                SupplierCountryCode = "US",
+                Currency = "USD",
+                GrossPaymentAmount = 100m,
+                WithholdingRate = 0.155m,
+                WithheldAmount = 15.50m,
+                SupplierRemittanceAmount = 84.50m,
+                ServiceKind = ZimbabweDigitalServiceKind.ElectronicService,
+                SupplierVatStatus = ZimbabweSupplierVatStatus.NotRegistered,
+                PaymentRoute = ZimbabweDigitalPaymentRoute.ZimbabweIntermediary,
+                ConsumedInZimbabwe = true,
+                WithheldAt = new DateTime(2026, 11, 10, 9, 0, 0, DateTimeKind.Utc),
+                TaxPeriodYear = 2026,
+                TaxPeriodMonth = 11,
+                EvidenceReference = "evidence://intermediary/001"
+            });
             await ctx.SaveChangesAsync();
 
             var audit = new AuditService(ctx);
@@ -1192,10 +1213,21 @@ namespace ApexERP.Tests
                 new ZimbabweDswtFilingAcknowledgementRequest(
                     acknowledgedAt, true, "TARMS-ACK-001", "evidence://ack/001"));
             Assert.Equal(ZimbabweDswtFilingStatus.Acknowledged, acknowledged.Status);
+            Assert.Equal(15.50m, acknowledged.TaxAmount);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                workflow.ConfirmPaymentAsync(company.Id, first.Id,
+                    new ZimbabweDswtFilingPaymentRequest(
+                        acknowledgedAt.AddDays(1), "ZIMRA-PAY-001", 15m, "USD", "evidence://payment/wrong")));
+            var paid = await workflow.ConfirmPaymentAsync(company.Id, first.Id,
+                new ZimbabweDswtFilingPaymentRequest(
+                    acknowledgedAt.AddDays(1), "ZIMRA-PAY-001", 15.50m, "USD", "evidence://payment/001"));
+            Assert.Equal(ZimbabweDswtFilingStatus.PaymentConfirmed, paid.Status);
+            Assert.Equal("ZIMRA-PAY-001", paid.PaymentReference);
 
             first.PayloadJson = "{}";
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => ctx.SaveChangesAsync());
-            Assert.Contains("immutable", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("immutable", error.Message.ToLowerInvariant());
         }
 
         [PostgresFact]
