@@ -2714,6 +2714,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<string>("VatNo")
                         .HasColumnType("text");
 
+                    b.Property<string>("ZimbabweTaxpayerTin")
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId");
