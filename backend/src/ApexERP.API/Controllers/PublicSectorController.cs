@@ -91,6 +91,11 @@ namespace ApexERP.API.Controllers
                 return BadRequest(new { error = "Provide unique positive WHT tax-component allocations." });
             return await _db.InTransactionAsync<IActionResult>(async token =>
             {
+                // A WHT component can only be remitted up to its unpaid balance. Serialize
+                // concurrent remittances of the same component before reading that balance.
+                foreach (var componentId in req.Select(x => x.TaxComponentId).OrderBy(x => x))
+                    await _db.TryAcquireTransactionLockAsync($"wht-remittance:{CompanyId:N}:{componentId:N}", token);
+
                 var bankTransaction = await _db.BankTransactions.FirstOrDefaultAsync(x =>
                     x.Id == id && x.CompanyId == CompanyId, token);
                 if (bankTransaction == null) return NotFound(new { error = "Bank transaction not found." });
