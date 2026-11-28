@@ -1611,7 +1611,7 @@ namespace ApexERP.Application.Services
                     line.Description, fund.Code, fund.Name, fund.Level.ToString(),
                     costCentre?.Code ?? string.Empty, costCentre?.Name ?? string.Empty,
                     account.Code, account.Name, line.ClassificationCode,
-                    dimension.FinalLine?.NoteReference ?? dimension.OriginalLine?.NoteReference,
+                    dimension.FinalLine != null ? dimension.FinalLine.NoteReference : dimension.OriginalLine?.NoteReference,
                     originalAmount, finalAmount, actual, variance,
                     actual.HasValue && finalAmount != 0m
                         ? Math.Round(variance!.Value / finalAmount * 100m, 2) : null,
