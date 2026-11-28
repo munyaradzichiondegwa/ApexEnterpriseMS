@@ -1233,6 +1233,34 @@ namespace ApexERP.Tests
             Assert.Equal(certifierId, certified.CertifiedBy);
             Assert.NotNull(certified.CertifiedAt);
 
+            var sourceReviewerId = Guid.NewGuid();
+            var reconciliationPreparerId = Guid.NewGuid();
+            var reconciliationReviewerId = Guid.NewGuid();
+            var expectedSource = await service.CreateExpectedCashSourceAsync(companyId, budgetVersionId,
+                "BankAccount", "BANK-OPERATING-01", "Operating bank account",
+                bankAccountId.ToString(), true,
+                new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), preparerId);
+            await service.SubmitExpectedCashSourceAsync(companyId, expectedSource.Id, preparerId);
+            await service.ApproveExpectedCashSourceAsync(companyId, expectedSource.Id, sourceReviewerId);
+            var submission = await service.CreateCashSourceSubmissionAsync(companyId, expectedSource.Id,
+                1, 75m, 1000m, 925m, "USD", "Operating bank statement and reconciliation", preparerId);
+            await service.SubmitCashSourceSubmissionAsync(companyId, submission.Id, preparerId);
+            await service.ReviewCashSourceSubmissionAsync(companyId, submission.Id, sourceReviewerId,
+                true, "Statement control total independently confirmed.");
+            await service.AddCashSourceReconciliationLineAsync(companyId, submission.Id,
+                bankTransactionId, "BANK-REF-001", certified.Id, false, null, reconciliationPreparerId);
+            await service.SubmitCashSourceRecordReconciliationAsync(companyId, submission.Id,
+                reconciliationPreparerId);
+            await service.ReviewCashSourceRecordReconciliationAsync(companyId, submission.Id,
+                reconciliationReviewerId, true, "Bank statement transaction matched to certified budget actual.");
+            var registerAttestation = await service.CreateExpectedCashSourceRegisterAttestationAsync(
+                companyId, budgetVersionId, 1, "IPSAS Cash Actual MDA",
+                "Signed bank account register for the reporting entity", preparerId);
+            await service.SubmitExpectedCashSourceRegisterAttestationAsync(companyId, registerAttestation.Id, preparerId);
+            await service.ReviewExpectedCashSourceRegisterAttestationAsync(companyId, registerAttestation.Id,
+                certifierId, true, "All expected bank source populations independently confirmed.");
+
             // Cash-basis IPSAS 24 comparison must use certified source actuals, never
             // accrual GL totals. An unlinked bank movement is not treated as a posted
             // cash event and remains ineligible for capture.
