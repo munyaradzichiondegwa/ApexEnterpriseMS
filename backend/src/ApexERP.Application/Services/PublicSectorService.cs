@@ -100,8 +100,12 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("Every budget line must reference a fund centre in the same company and financial year.");
                 var account = await _db.GlAccounts.FirstOrDefaultAsync(x => x.Id == line.GlAccountId &&
                     x.CompanyId == companyId && x.IsActive &&
-                    (x.Type == GlAccountType.Income || x.Type == GlAccountType.Expense), ct)
-                    ?? throw new InvalidOperationException("Budget lines must map to an active income or expense GL account in the same company.");
+                    (x.Type == GlAccountType.Income || x.Type == GlAccountType.Expense ||
+                     (accountingBasis == AccountingBasis.Cash &&
+                      (x.CashFlowCategory == CashFlowCategory.Operating ||
+                       x.CashFlowCategory == CashFlowCategory.Investing ||
+                       x.CashFlowCategory == CashFlowCategory.Financing))), ct)
+                    ?? throw new InvalidOperationException("Budget lines must map to an active income/expense GL account, or for cash-basis budgets an active account classified to operating, investing or financing cash flows, in the same company.");
                 if (string.IsNullOrWhiteSpace(account.SubType) ||
                     !string.Equals(account.SubType.Trim(), line.ClassificationCode.Trim(), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("Each budget classification code must match the selected GL account's configured SubType classification.");
@@ -1115,13 +1119,14 @@ namespace ApexERP.Application.Services
             if (!source.JournalEntryId.HasValue || !await _db.JournalEntries.AnyAsync(x =>
                 x.Id == source.JournalEntryId.Value && x.CompanyId == companyId && x.Status == JournalStatus.Posted, ct))
                 throw new InvalidOperationException("The reconciled bank transaction must be linked to a posted journal entry.");
+            if (eventKind != PublicSectorBudgetActualEventKind.CashReceipt &&
+                eventKind != PublicSectorBudgetActualEventKind.CashPayment)
+                throw new InvalidOperationException("A supported cash receipt or cash payment event type is required.");
             var isReceipt = eventKind == PublicSectorBudgetActualEventKind.CashReceipt;
             amount = isReceipt ? source.Credit : source.Debit;
             if (amount <= 0m || (isReceipt ? source.Debit != 0m : source.Credit != 0m))
                 throw new InvalidOperationException("The bank transaction direction and amount do not match the selected cash event type.");
-            if ((isReceipt && account.Type != GlAccountType.Income) ||
-                (!isReceipt && account.Type != GlAccountType.Expense))
-                throw new InvalidOperationException("Cash receipts must map to income accounts and cash payments to expense accounts in this capture phase.");
+            // Cash receipts/payments may map to revenue/expense or balance-sheet accounts (for example, borrowing or capital acquisitions). The configured cash-flow section, not the GL normal-balance type, determines the statement classification.
             var mappedJournalAmount = await _db.JournalLines.Where(x =>
                 x.JournalEntryId == source.JournalEntryId.Value && x.GlAccountId == line.GlAccountId &&
                 x.FundCentreId == line.FundCentreId && x.CostCentreId == line.CostCentreId)
