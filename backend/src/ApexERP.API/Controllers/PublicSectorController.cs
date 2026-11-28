@@ -28,6 +28,10 @@ namespace ApexERP.API.Controllers
         decimal FinancingAmount, string SupportingReference, decimal RevenueAmount = 0m, decimal ExpenseAmount = 0m,
         bool IsNoDifferenceAttestation = false, Guid? BudgetVersionId = null,
         DateTime? StatementPeriodStart = null, DateTime? StatementPeriodEnd = null, string? StatementEntityScope = null);
+    public record CreateAutomaticBudgetReconciliationRequest(int FinancialYear, Guid BudgetVersionId,
+        PublicSectorBudgetReconciliationType Type, string StatementSection, string Description,
+        string SupportingReference, DateTime StatementPeriodStart, DateTime StatementPeriodEnd,
+        string StatementEntityScope);
     public record CreateBudgetExecutionActualReversalRequest(string Reason);
     public record CreateBudgetExecutionActualRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
         PublicSectorBudgetActualEventKind EventKind, PublicSectorBudgetActualSourceKind SourceKind,
@@ -448,6 +452,22 @@ namespace ApexERP.API.Controllers
                     req.InvestingAmount, req.FinancingAmount, req.SupportingReference, UserId, ct,
                     req.RevenueAmount, req.ExpenseAmount, req.IsNoDifferenceAttestation,
                     req.BudgetVersionId, req.StatementPeriodStart, req.StatementPeriodEnd, req.StatementEntityScope);
+                return Ok(item);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("budget-reconciliations/automatic")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> CreateAutomaticBudgetReconciliation(
+            CreateAutomaticBudgetReconciliationRequest req, CancellationToken ct)
+        {
+            try
+            {
+                var item = await _publicSector.CreateAutomaticBudgetReconciliationAsync(CompanyId,
+                    req.FinancialYear, req.BudgetVersionId, req.Type, req.StatementSection,
+                    req.Description, req.SupportingReference, req.StatementPeriodStart,
+                    req.StatementPeriodEnd, req.StatementEntityScope, UserId, ct);
                 return Ok(item);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
