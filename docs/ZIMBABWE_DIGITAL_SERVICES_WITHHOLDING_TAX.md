@@ -58,6 +58,9 @@ This is not a blanket accounting conclusion for every contractual arrangement. I
 - Tax-profile changes are written to the immutable audit log in the same unit of work as the company update. Audit before/after values are masked to the final four characters so the full taxpayer identifier is not copied into the audit payload.
 - AP reconciliation links a DSWT record to a posted AP payment only when supplier, currency, gross amount, originating bank account and AP allocation total agree. The link is unique per company/AP payment.
 - Bank-backed AP payments create a book-side bank transaction linked to the posted AP journal. The AP payment can retain the external bank transfer reference (separate from ApexERP's internal payment number), which is used for exact statement-row matching. DSWT bank reconciliation then requires an authenticated statement row already matched one-to-one to that exact bank transaction; it verifies gross debit, currency, bank account and AP journal before storing the statement-row link.
+- The filing workflow creates a versioned, immutable monthly return snapshot containing the prepared declaration JSON, SHA-256 payload hash and deterministic idempotency key. A unique company/year/period/version constraint prevents duplicate versions; repeating preparation with an unchanged source register returns the same snapshot, while changed source data requires a new version.
+- Filing progression is evidence-backed: Prepared → manually Submitted → Acknowledged or Rejected → Payment Confirmed. Submission reference/evidence, TaRMS acknowledgement reference/evidence, and exact USD payment reference/amount/evidence are retained and audited. Payment confirmation is refused unless the acknowledged return amount and currency reconcile exactly.
+- The workflow records manual TaRMS activity only. It does not send network requests, simulate acknowledgements, or claim a return was filed. Direct TaRMS automation remains disabled until ZIMRA provides an authorised interface specification, payload schema, authentication method and sandbox/production credentials.
 - This register is not yet a GL posting, an AP payment automation, a TaRMS filing integration or a ZIMRA-approved return. No journal is posted by this service.
 
 ## Accounting design decisions
@@ -73,7 +76,7 @@ This is not a blanket accounting conclusion for every contractual arrangement. I
 ## Open production gates
 
 - ZIMRA confirmation of the treatment where a supplier is registered but the customer/recipient also claims input VAT.
-- Confirm the tax agent's TaRMS tax-type registration, effective date and generated return periods; implement a validated TaRMS-ready return export against the current form schema.
-- Approved tax certificate numbering policy and validated monthly TaRMS return reconciliation/export.
+- Confirm the tax agent's TaRMS tax-type registration, effective date and generated return periods; obtain ZIMRA's authoritative electronic interface specification, payload schema, authentication method and sandbox/production credentials before enabling direct TaRMS transmission.
+- Confirm the approved TaRMS filing evidence and acknowledgement procedure, reconcile the generated return against the live TaRMS form, and approve the tax certificate numbering policy.
 - Any exceptional gross-up or separate-debit accounting policy and related control-account mapping.
 - Tax counsel review of legal incidence versus commercial pass-through/gross-up.
