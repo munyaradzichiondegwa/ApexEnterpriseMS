@@ -899,8 +899,11 @@ namespace ApexERP.Application.Services
                         x.CompanyId == companyId && batchIds.Contains(x.ImportBatchId)).ToListAsync(ct);
                 if (statementRows.Count != statementBatches.Sum(x => x.TransactionCount) ||
                         statementRows.Any(x => x.Status != BankStatementImportedTransactionStatus.Matched ||
-                            !x.MatchedBankTransactionId.HasValue))
-                        throw new InvalidOperationException($"Bank source {expected.SourceCode} contains unmatched or excluded statement rows; complete independent source-register exclusion review before certification.");
+                            !x.MatchedBankTransactionId.HasValue || !x.MatchedBy.HasValue ||
+                            !x.MatchedAt.HasValue || x.MatchedBy == statementBatches[0].UploadedBy ||
+                            x.MatchedBy == statementBatches[0].AuthenticatedBy ||
+                            x.MatchedBy == statementBatches[0].CompletenessCertifiedBy))
+                        throw new InvalidOperationException($"Bank source {expected.SourceCode} contains unmatched, excluded or non-independently matched statement rows; complete independent source-register review before certification.");
                 var matched = statementRows.ToDictionary(x => x.Id, x => x.MatchedBankTransactionId!.Value);
                 if (rows.Any(x => !x.IsReconciled || !x.MatchedStatementLineHash.HasValue ||
                         !matched.TryGetValue(x.MatchedStatementLineHash.Value, out var bankTransactionId) ||
