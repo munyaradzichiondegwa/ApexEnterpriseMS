@@ -124,8 +124,6 @@ public sealed class AddIpsas24BankStatementImports : Migration
             "BankStatementImportedTransactions", "ImportBatchId");
         migrationBuilder.CreateIndex("IX_BankStatementImportedTransactions_BankAccountId",
             "BankStatementImportedTransactions", "BankAccountId");
-        migrationBuilder.CreateIndex("IX_BankStatementImportedTransactions_MatchedBankTransactionId",
-            "BankStatementImportedTransactions", "MatchedBankTransactionId");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
