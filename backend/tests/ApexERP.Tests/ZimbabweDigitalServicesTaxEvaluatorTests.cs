@@ -61,9 +61,9 @@ public sealed class ZimbabweDigitalServicesTaxEvaluatorTests
     }
 
     [Fact]
-    public void Excludes_when_vat_already_accounted_for_to_prevent_double_taxation()
+    public void Excludes_when_recipient_has_already_self_accounted_to_prevent_double_collection()
     {
-        var result = ZimbabweDigitalServicesTaxEvaluator.Evaluate(Eligible() with { VatAlreadyAccountedFor = true });
+        var result = ZimbabweDigitalServicesTaxEvaluator.Evaluate(Eligible() with { RecipientAlreadySelfAccountedVat = true });
         Assert.False(result.WithholdingRequired);
     }
 
