@@ -65,6 +65,7 @@ namespace ApexERP.Domain.Entities
         public decimal LineVat { get; set; }
         public decimal LineTotal { get; set; }
         public Guid GlAccountId { get; set; } // income account (required at posting time)
+        public Guid? CostCentreId { get; set; }
     }
 
     public class ArReceipt : TenantEntity
@@ -167,6 +168,7 @@ namespace ApexERP.Domain.Entities
         public decimal LineVat { get; set; }
         public decimal LineTotal { get; set; }
         public Guid GlAccountId { get; set; } // expense/asset account being debited
+        public Guid? CostCentreId { get; set; }
     }
 
     public class ApPayment : TenantEntity
