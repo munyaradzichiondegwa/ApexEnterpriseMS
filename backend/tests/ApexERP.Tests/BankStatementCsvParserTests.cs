@@ -34,6 +34,16 @@ public sealed class BankStatementCsvParserTests
     }
 
     [Fact]
+    public void Parse_AcceptsHeaderOnlyZeroActivityStatementWhenBalancesAgree()
+    {
+        var result = Parse(Header, count: 0, debits: 0m, credits: 0m, opening: 100m, closing: 100m);
+
+        Assert.Empty(result.Transactions);
+        Assert.Equal(0m, result.TotalDebits);
+        Assert.Equal(0m, result.TotalCredits);
+    }
+
+    [Fact]
     public void Parse_RejectsDuplicateExternalTransactionIdentity()
     {
         var csv = Header + "\n" +
