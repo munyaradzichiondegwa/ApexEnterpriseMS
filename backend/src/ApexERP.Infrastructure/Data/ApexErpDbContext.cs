@@ -394,18 +394,33 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionId })
                 .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
-            modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.VersionNumber }).IsUnique();
-            modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo });
+            modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.Purpose, x.TaxCodeId, x.VersionNumber }).IsUnique();
+            modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.Purpose, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo }).HasDatabaseName("IX_TaxAccountMappings_Effective");
             modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.InvoiceKind, x.InvoiceId, x.JournalLineId }).IsUnique();
             modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.TaxAccountMappingId, x.InvoiceId });
             modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.VersionNumber }).IsUnique();
-            modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo });
-            modelBuilder.Entity<SettlementComponentAllocation>().HasIndex(x => new { x.CompanyId, x.SettlementKind, x.SettlementAllocationId, x.InvoiceLineId, x.TaxComponentId }).IsUnique();
+            modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo }).HasDatabaseName("IX_PublicSectorTaxBudgetPolicies_Effective");
+            modelBuilder.Entity<SettlementComponentAllocation>().HasIndex(x => new { x.CompanyId, x.SettlementKind, x.SettlementAllocationId, x.InvoiceLineId, x.TaxComponentId }).IsUnique().HasDatabaseName("IX_SettlementComponentAllocations_Allocation");
             modelBuilder.Entity<SettlementComponentAllocation>().ToTable(t =>
             {
-                t.HasCheckConstraint("CK_SettlementComponentAllocation_Component",
+                t.HasCheckConstraint("CK_SettlementComponentAllocations_Component",
                     "((\\"ComponentKind\\" = 0 AND \\"InvoiceLineId\\" IS NOT NULL AND \\"TaxComponentId\\" IS NULL) OR (\\"ComponentKind\\" = 1 AND \\"InvoiceLineId\\" IS NULL AND \\"TaxComponentId\\" IS NOT NULL))");
-                t.HasCheckConstraint("CK_SettlementComponentAllocation_Amount", "\\"AmountApplied\\" > 0");
+                t.HasCheckConstraint("CK_SettlementComponentAllocations_Amount", "\\"AmountApplied\\" > 0");
+            });
+            modelBuilder.Entity<TaxAccountMapping>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_TaxAccountMappings_Version", "\"VersionNumber\" > 0");
+                t.HasCheckConstraint("CK_TaxAccountMappings_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+            });
+            modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Version", "\"VersionNumber\" > 0");
+                t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Separate", "\"Treatment\" <> 2 OR \"BudgetGlAccountId\" IS NOT NULL");
+            });
+            modelBuilder.Entity<SettlementComponentAllocation>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP')");
             });
             modelBuilder.Entity<PublicSectorBudgetVarianceExplanation>()
                  .HasIndex(x => new { x.CompanyId, x.BudgetVersionLineId })
