@@ -3715,8 +3715,13 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<DateTime>("SourceDate").HasColumnType("timestamp with time zone");
                     b.Property<DateTime>("EffectiveDate").HasColumnType("timestamp with time zone");
                     b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("SourceAmount").HasColumnType("numeric(20,6)");
                     b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
                     b.Property<decimal>("ExchangeRateToBudgetCurrency").HasColumnType("numeric(20,10)");
+                    b.Property<DateTime?>("ExchangeRateDate").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ExchangeRateSource").HasMaxLength(100).HasColumnType("character varying(100)");
+                    b.Property<string>("ExchangeRateSourceReference").HasMaxLength(500).HasColumnType("character varying(500)");
+                    b.Property<bool>("ExchangeRateIsInverse").HasColumnType("boolean");
                     b.Property<int>("CashFlowSection").HasColumnType("integer");
                     b.Property<int>("Status").HasColumnType("integer");
                     b.Property<Guid?>("ReversalOfId").HasColumnType("uuid");
