@@ -38,12 +38,18 @@ namespace ApexERP.API.Controllers
     public record CreateBudgetStatementIssueRequest(int FinancialYear, DateTime? StatementPeriodStart,
         DateTime? StatementPeriodEnd, string? StatementEntityScope, string TemplateAuthorityReference,
         string TemplateVersion, string? IssueReference = null);
+    public record ReviewBudgetStatementIssueRequest(string TemplateVerificationReference, string ReviewNote);
+    public record ApproveBudgetStatementIssueRequest(string ApprovalReference, string ApprovalNote);
+    public record PublishBudgetStatementIssueRequest(string PublicationReference, string PublisherNote);
     public sealed record BudgetStatementIssueDocument(Guid Id, int FinancialYear, Guid BudgetVersionId,
         DateTime StatementPeriodStart, DateTime StatementPeriodEnd, string StatementEntityScope,
         string Currency, string AccountingBasis, string TemplateAuthorityReference, string TemplateVersion,
         string TemplateReferenceStatus, string IssueReference, string SnapshotJson, string SnapshotSha256,
         string Status, Guid PreparedBy, DateTime PreparedAt, Guid? ReviewedBy, DateTime? ReviewedAt,
-        Guid? ApprovedBy, DateTime? ApprovedAt, Guid? IssuedBy, DateTime? IssuedAt);
+        Guid? ApprovedBy, DateTime? ApprovedAt, Guid? IssuedBy, DateTime? IssuedAt,
+        string? TemplateVerificationReference = null, string? ReviewerNote = null,
+        string? ApprovalReference = null, string? ApproverNote = null,
+        string? PublicationReference = null, string? PublisherNote = null);
     public record CreateAutomaticCashFlowBudgetReconciliationRequest(int FinancialYear, Guid BudgetVersionId,
         string StatementSection, string SupportingReference);
     public record CreateBudgetExecutionActualReversalRequest(string Reason);
@@ -647,9 +653,22 @@ namespace ApexERP.API.Controllers
                 cashFlowBridge = bridgeOk.Value;
             }
 
+            // Exclude volatile candidate calculation timestamps from the immutable statement
+            // snapshot; candidates are workflow aids, not statement content. Sort every collection
+            // whose source query does not promise ordering.
+            var stableReport = report with
+            {
+                Lines = report.Lines.OrderBy(x => x.LineNumber).ThenBy(x => x.FundCentreCode)
+                    .ThenBy(x => x.AccountCode).ToArray(),
+                Reconciliations = report.Reconciliations.OrderBy(x => x.StatementSection)
+                    .ThenBy(x => x.Type).ThenBy(x => x.Id).ToArray(),
+                AutomaticReconciliationCandidates = Array.Empty<PublicSectorService.BudgetAutomaticReconciliationCandidate>(),
+                VarianceExplanations = report.VarianceExplanations.OrderBy(x => x.BudgetVersionLineId)
+                    .ThenBy(x => x.Id).ToArray()
+            };
             var snapshot = new
             {
-                Report = report,
+                Report = stableReport,
                 CashFlowBridge = cashFlowBridge,
                 TemplateAuthorityReference = templateAuthorityReference.Trim(),
                 TemplateVersion = templateVersion.Trim(),
@@ -657,7 +676,7 @@ namespace ApexERP.API.Controllers
             };
             var snapshotJson = JsonSerializer.Serialize(snapshot);
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(snapshotJson)));
-            return (report, snapshotJson, hash);
+            return (stableReport, snapshotJson, hash);
         }
 
         [HttpPost("budget-statements/issues")]
@@ -673,6 +692,8 @@ namespace ApexERP.API.Controllers
                 var issueReference = string.IsNullOrWhiteSpace(req.IssueReference)
                     ? $"IPSAS24-{req.FinancialYear}-{issueId.ToString("N")[..8].ToUpperInvariant()}"
                     : req.IssueReference.Trim();
+                if (issueReference.Length > 128)
+                    throw new InvalidOperationException("The statement issue reference cannot exceed 128 characters.");
                 var document = new BudgetStatementIssueDocument(issueId, req.FinancialYear,
                     snapshot.Report.FinalBudgetVersionId ?? snapshot.Report.OriginalBudgetVersionId,
                     snapshot.Report.StatementPeriodStart, snapshot.Report.StatementPeriodEnd,
@@ -682,6 +703,12 @@ namespace ApexERP.API.Controllers
                     snapshot.SnapshotSha256, "Draft", UserId, DateTime.UtcNow, null, null, null, null, null, null);
                 await _db.InTransactionAsync(async token =>
                 {
+                    await _db.AcquireTransactionLockAsync($"ipsas24-statement-issue-reference:{CompanyId:N}:{issueReference}", token);
+                    var existingIssues = await _db.CompanySettings.Where(x => x.CompanyId == CompanyId &&
+                        x.Key.StartsWith(BudgetStatementIssueKeyPrefix)).Select(x => x.Value).ToListAsync(token);
+                    if (existingIssues.Select(x => JsonSerializer.Deserialize<BudgetStatementIssueDocument>(x))
+                        .Any(x => x != null && string.Equals(x.IssueReference, issueReference, StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidOperationException("A statement issue with this reference already exists for the company.");
                     await _db.AcquireTransactionLockAsync($"ipsas24-statement-issue:{CompanyId:N}:{issueId:N}", token);
                     _db.CompanySettings.Add(new CompanySetting
                     {
@@ -721,8 +748,11 @@ namespace ApexERP.API.Controllers
         }
 
         private async Task<BudgetStatementIssueDocument> TransitionBudgetStatementIssueAsync(Guid id,
-            string expectedStatus, string nextStatus, Guid actorId, CancellationToken ct)
+            string expectedStatus, string nextStatus, Guid actorId, string evidenceReference, string note,
+            CancellationToken ct)
         {
+            if (string.IsNullOrWhiteSpace(evidenceReference) || string.IsNullOrWhiteSpace(note))
+                throw new InvalidOperationException("An evidence reference and decision note are required for every statement issue transition.");
             return await _db.InTransactionAsync(async token =>
             {
                 await _db.AcquireTransactionLockAsync($"ipsas24-statement-issue:{CompanyId:N}:{id:N}", token);
@@ -740,19 +770,38 @@ namespace ApexERP.API.Controllers
                 if (nextStatus == "Issued" && (actorId == document.PreparedBy || actorId == document.ReviewedBy || actorId == document.ApprovedBy))
                     throw new InvalidOperationException("The statement publisher must be independent of the preparer, reviewer and approver.");
 
+                var storedSnapshotHash = Convert.ToHexString(SHA256.HashData(
+                    Encoding.UTF8.GetBytes(document.SnapshotJson)));
+                if (!string.Equals(storedSnapshotHash, document.SnapshotSha256, StringComparison.Ordinal))
+                    throw new InvalidOperationException("The stored statement snapshot has been altered; publication is blocked.");
                 var snapshot = await BuildBudgetStatementIssueSnapshotAsync(CompanyId, document.FinancialYear,
                     document.StatementPeriodStart, document.StatementPeriodEnd, document.StatementEntityScope,
                     document.TemplateAuthorityReference, document.TemplateVersion, token);
-                if (snapshot.Report.FinalBudgetVersionId != document.BudgetVersionId ||
-                    !string.Equals(snapshot.SnapshotSha256, document.SnapshotSha256, StringComparison.Ordinal))
+                var currentBudgetVersionId = snapshot.Report.FinalBudgetVersionId ?? snapshot.Report.OriginalBudgetVersionId;
+                if (currentBudgetVersionId != document.BudgetVersionId ||
+                    !string.Equals(snapshot.SnapshotSha256, document.SnapshotSha256, StringComparison.Ordinal) ||
+                    !string.Equals(snapshot.SnapshotJson, document.SnapshotJson, StringComparison.Ordinal))
                     throw new InvalidOperationException("The approved budget, ledger, certified cash actuals, reconciliations or template reference changed after preparation. Create a new statement issue draft.");
 
                 var now = DateTime.UtcNow;
                 var changed = nextStatus switch
                 {
-                    "Reviewed" => document with { Status = nextStatus, ReviewedBy = actorId, ReviewedAt = now },
-                    "Approved" => document with { Status = nextStatus, ApprovedBy = actorId, ApprovedAt = now },
-                    "Issued" => document with { Status = nextStatus, IssuedBy = actorId, IssuedAt = now },
+                    "Reviewed" => document with
+                    {
+                        Status = nextStatus, ReviewedBy = actorId, ReviewedAt = now,
+                        TemplateReferenceStatus = "IndependentlyVerified",
+                        TemplateVerificationReference = evidenceReference.Trim(), ReviewerNote = note.Trim()
+                    },
+                    "Approved" => document with
+                    {
+                        Status = nextStatus, ApprovedBy = actorId, ApprovedAt = now,
+                        ApprovalReference = evidenceReference.Trim(), ApproverNote = note.Trim()
+                    },
+                    "Issued" => document with
+                    {
+                        Status = nextStatus, IssuedBy = actorId, IssuedAt = now,
+                        PublicationReference = evidenceReference.Trim(), PublisherNote = note.Trim()
+                    },
                     _ => throw new InvalidOperationException("Unsupported statement issue transition.")
                 };
                 setting.Value = JsonSerializer.Serialize(changed);
@@ -768,25 +817,31 @@ namespace ApexERP.API.Controllers
 
         [HttpPost("budget-statements/issues/{id:guid}/review")]
         [HasPermission(Permissions.PublicSectorBudgetOverride)]
-        public async Task<IActionResult> ReviewBudgetStatementIssue(Guid id, CancellationToken ct)
+        public async Task<IActionResult> ReviewBudgetStatementIssue(Guid id,
+            ReviewBudgetStatementIssueRequest req, CancellationToken ct)
         {
-            try { return Ok(await TransitionBudgetStatementIssueAsync(id, "Draft", "Reviewed", UserId, ct)); }
+            try { return Ok(await TransitionBudgetStatementIssueAsync(id, "Draft", "Reviewed", UserId,
+                req.TemplateVerificationReference, req.ReviewNote, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
         [HttpPost("budget-statements/issues/{id:guid}/approve")]
         [HasPermission(Permissions.PublicSectorBudgetOverride)]
-        public async Task<IActionResult> ApproveBudgetStatementIssue(Guid id, CancellationToken ct)
+        public async Task<IActionResult> ApproveBudgetStatementIssue(Guid id,
+            ApproveBudgetStatementIssueRequest req, CancellationToken ct)
         {
-            try { return Ok(await TransitionBudgetStatementIssueAsync(id, "Reviewed", "Approved", UserId, ct)); }
+            try { return Ok(await TransitionBudgetStatementIssueAsync(id, "Reviewed", "Approved", UserId,
+                req.ApprovalReference, req.ApprovalNote, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
         [HttpPost("budget-statements/issues/{id:guid}/publish")]
         [HasPermission(Permissions.PublicSectorBudgetOverride)]
-        public async Task<IActionResult> PublishBudgetStatementIssue(Guid id, CancellationToken ct)
+        public async Task<IActionResult> PublishBudgetStatementIssue(Guid id,
+            PublishBudgetStatementIssueRequest req, CancellationToken ct)
         {
-            try { return Ok(await TransitionBudgetStatementIssueAsync(id, "Approved", "Issued", UserId, ct)); }
+            try { return Ok(await TransitionBudgetStatementIssueAsync(id, "Approved", "Issued", UserId,
+                req.PublicationReference, req.PublisherNote, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
