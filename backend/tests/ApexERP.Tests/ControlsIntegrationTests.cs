@@ -8,6 +8,7 @@ using ApexERP.Domain.Controls;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace ApexERP.Tests
@@ -377,6 +378,9 @@ namespace ApexERP.Tests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 evidence.DownloadAsync(companyA, foreignEvidence.Id, Approver));
             Assert.Single(await evidence.ListAsync(companyA, nameof(ControlException), ownTarget.Id));
+            Assert.Empty(await evidence.ListAsync(companyA, nameof(ControlException), foreignTarget.Id));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                evidence.ListAsync(companyB, nameof(ControlException), foreignTarget.Id));
 
             // Simulate storage corruption after upload. A fresh company-scoped read must
             // report the hash mismatch rather than silently treating the bytes as verified.
@@ -391,6 +395,60 @@ namespace ApexERP.Tests
             var (tamperedFile, integrityOk) = await reloadedEvidence.DownloadAsync(companyA, attached.Id, Approver);
             Assert.False(integrityOk);
             Assert.NotEqual(attached.Sha256, Convert.ToHexString(SHA256.HashData(tamperedFile.Content)));
+        }
+
+        [PostgresFact]
+        public async Task Scheduled_jobs_execute_with_the_company_and_tenant_context_of_each_claim()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var tenantId = Guid.NewGuid();
+            var companyA = Guid.NewGuid();
+            var companyB = Guid.NewGuid();
+            await using (var seed = db.NewContext(null))
+            {
+                seed.CustomerOrganisations.Add(new CustomerOrganisation
+                {
+                    Id = tenantId, Name = "Scheduled job tenant", IsActive = true
+                });
+                seed.Companies.AddRange(
+                    new Company
+                    {
+                        Id = companyA, TenantId = tenantId, Name = "Scheduled company A",
+                        BaseCurrency = "USD", FunctionalCurrency = "USD", IsActive = true
+                    },
+                    new Company
+                    {
+                        Id = companyB, TenantId = tenantId, Name = "Scheduled company B",
+                        BaseCurrency = "USD", FunctionalCurrency = "USD", IsActive = true
+                    });
+                await seed.SaveChangesAsync();
+            }
+
+            var services = new ServiceCollection();
+            services.AddScoped<ApexErpDbContext>(_ => db.NewContext(null));
+            using var root = services.BuildServiceProvider();
+            var job = new JobDefinition(
+                "test.tenant-context", "Verify isolated tenant context", _ => "2026-11-28",
+                async (sp, companyId, token) =>
+                {
+                    var context = sp.GetRequiredService<ApexErpDbContext>();
+                    Assert.Equal(tenantId, context.CurrentTenantId);
+                    Assert.Equal(companyId, context.CurrentCompanyId);
+                    var visibleCompanies = await context.Companies.Select(x => x.Id).ToListAsync(token);
+                    Assert.Equal(new[] { companyId }, visibleCompanies);
+                    return "tenant context verified";
+                });
+
+            var now = new DateTime(2026, 11, 28, 0, 0, 0, DateTimeKind.Utc);
+            Assert.Equal(1, await ScheduledJobs.RunDueForCompanyAsync(root, companyA, now, new[] { job }));
+            Assert.Equal(1, await ScheduledJobs.RunDueForCompanyAsync(root, companyB, now, new[] { job }));
+
+            await using var verify = db.NewContext(null);
+            var executions = await verify.JobExecutions.IgnoreQueryFilters()
+                .Where(x => x.JobCode == "test.tenant-context").ToListAsync();
+            Assert.Equal(2, executions.Count);
+            Assert.Contains(executions, x => x.CompanyId == companyA && x.Status == "Succeeded" && x.Message == "tenant context verified");
+            Assert.Contains(executions, x => x.CompanyId == companyB && x.Status == "Succeeded" && x.Message == "tenant context verified");
         }
 
         // ---- idempotency table ---------------------------------------------------------------------------------------------
