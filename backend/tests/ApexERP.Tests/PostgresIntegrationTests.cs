@@ -841,6 +841,194 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
+        public async Task Tax_bearing_AR_receipts_and_AP_payments_require_explicit_partial_component_allocations()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var company = Guid.NewGuid();
+            var customerId = Guid.NewGuid();
+            var supplierId = Guid.NewGuid();
+            var taxCodeId = Guid.NewGuid();
+            var accounts = new Dictionary<string, GlAccount>
+            {
+                ["bank"] = new() { CompanyId = company, Code = "1000", Name = "Bank", Type = GlAccountType.Asset },
+                ["ar"] = new() { CompanyId = company, Code = "1100", Name = "AR Control", Type = GlAccountType.Asset },
+                ["ap"] = new() { CompanyId = company, Code = "2000", Name = "AP Control", Type = GlAccountType.Liability },
+                ["income1"] = new() { CompanyId = company, Code = "4000", Name = "Revenue One", Type = GlAccountType.Income },
+                ["income2"] = new() { CompanyId = company, Code = "4100", Name = "Revenue Two", Type = GlAccountType.Income },
+                ["expense1"] = new() { CompanyId = company, Code = "5000", Name = "Expense One", Type = GlAccountType.Expense },
+                ["expense2"] = new() { CompanyId = company, Code = "5100", Name = "Expense Two", Type = GlAccountType.Expense },
+                ["vatOut"] = new() { CompanyId = company, Code = "2100", Name = "VAT Output", Type = GlAccountType.Liability },
+                ["vatIn"] = new() { CompanyId = company, Code = "1300", Name = "VAT Input", Type = GlAccountType.Asset },
+                ["wht"] = new() { CompanyId = company, Code = "2230", Name = "WHT Payable", Type = GlAccountType.Liability }
+            };
+            var effectiveFrom = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            await using (var seed = db.NewContext(company))
+            {
+                seed.GlAccounts.AddRange(accounts.Values);
+                seed.Customers.Add(new Customer { Id = customerId, CompanyId = company, Code = "C-TAX", Name = "Tax customer" });
+                seed.Suppliers.Add(new Supplier
+                {
+                    Id = supplierId, CompanyId = company, Code = "S-TAX", Name = "Tax supplier",
+                    WhtApplicable = true, WhtRate = 0.10m
+                });
+                seed.TaxCodes.Add(new TaxCode
+                {
+                    Id = taxCodeId, CompanyId = company, Code = "VAT15", Name = "VAT 15%",
+                    Rate = 0.15m, Type = TaxType.VAT, IsActive = true, EffectiveFrom = effectiveFrom
+                });
+                seed.TaxAccountMappings.AddRange(
+                    new TaxAccountMapping
+                    {
+                        CompanyId = company, TaxType = TaxType.VAT, Purpose = "AR-VAT-OUTPUT",
+                        TaxCodeId = taxCodeId, GlAccountId = accounts["vatOut"].Id, VersionNumber = 1,
+                        EffectiveFrom = effectiveFrom, Status = TaxConfigurationStatus.Approved,
+                        SubmittedBy = Guid.NewGuid(), SubmittedAt = effectiveFrom,
+                        ApprovedBy = Guid.NewGuid(), ApprovedAt = effectiveFrom
+                    },
+                    new TaxAccountMapping
+                    {
+                        CompanyId = company, TaxType = TaxType.VAT, Purpose = "AP-VAT-INPUT",
+                        TaxCodeId = taxCodeId, GlAccountId = accounts["vatIn"].Id, VersionNumber = 1,
+                        EffectiveFrom = effectiveFrom, Status = TaxConfigurationStatus.Approved,
+                        SubmittedBy = Guid.NewGuid(), SubmittedAt = effectiveFrom,
+                        ApprovedBy = Guid.NewGuid(), ApprovedAt = effectiveFrom
+                    },
+                    new TaxAccountMapping
+                    {
+                        CompanyId = company, TaxType = TaxType.WHT, Purpose = "AP-WHT-PAYABLE",
+                        TaxCodeId = null, GlAccountId = accounts["wht"].Id, VersionNumber = 1,
+                        EffectiveFrom = effectiveFrom, Status = TaxConfigurationStatus.Approved,
+                        SubmittedBy = Guid.NewGuid(), SubmittedAt = effectiveFrom,
+                        ApprovedBy = Guid.NewGuid(), ApprovedAt = effectiveFrom
+                    });
+                await seed.SaveChangesAsync();
+            }
+
+            Guid arInvoiceId;
+            Guid arLine1Id;
+            Guid arLine2Id;
+            await using (var ctx = db.NewContext(company))
+            {
+                var ar = new ArService(ctx, Gl(ctx));
+                var invoice = await ar.CreateInvoiceAsync(company, customerId, Oct15, "USD", 1m,
+                    new[]
+                    {
+                        new ArInvoiceLineRequest("Revenue one", 1m, 100m, taxCodeId, accounts["income1"].Id),
+                        new ArInvoiceLineRequest("Revenue two", 1m, 100m, taxCodeId, accounts["income2"].Id)
+                    }, accounts["vatOut"].Id);
+                arInvoiceId = invoice.Id;
+                arLine1Id = invoice.Lines.First(x => x.GlAccountId == accounts["income1"].Id).Id;
+                arLine2Id = invoice.Lines.First(x => x.GlAccountId == accounts["income2"].Id).Id;
+                await ar.PostInvoiceAsync(company, invoice.Id, accounts["ar"].Id, accounts["vatOut"].Id);
+            }
+
+            Guid apInvoiceId;
+            Guid apLine1Id;
+            Guid apLine2Id;
+            await using (var ctx = db.NewContext(company))
+            {
+                var ap = new ApService(ctx, Gl(ctx));
+                var invoice = await ap.CreateInvoiceAsync(company, supplierId, Oct15, "USD", 1m,
+                    new[]
+                    {
+                        new ApInvoiceLineRequest("Expense one", 1m, 100m, taxCodeId, accounts["expense1"].Id),
+                        new ApInvoiceLineRequest("Expense two", 1m, 100m, taxCodeId, accounts["expense2"].Id)
+                    });
+                apInvoiceId = invoice.Id;
+                apLine1Id = invoice.Lines.First(x => x.GlAccountId == accounts["expense1"].Id).Id;
+                apLine2Id = invoice.Lines.First(x => x.GlAccountId == accounts["expense2"].Id).Id;
+                Assert.Equal(20m, invoice.WhtAmount);
+                Assert.Equal(210m, invoice.Outstanding);
+                await ap.PostInvoiceAsync(company, invoice.Id, accounts["ap"].Id, accounts["vatIn"].Id, accounts["wht"].Id);
+            }
+
+            Guid arVat1;
+            Guid arVat2;
+            Guid apVat1;
+            Guid apVat2;
+            Guid apWht;
+            await using (var verify = db.NewContext(company))
+            {
+                var arTaxes = await verify.InvoiceTaxComponents.Where(x => x.InvoiceKind == "AR" && x.InvoiceId == arInvoiceId).ToListAsync();
+                var apTaxes = await verify.InvoiceTaxComponents.Where(x => x.InvoiceKind == "AP" && x.InvoiceId == apInvoiceId).ToListAsync();
+                arVat1 = arTaxes.Single(x => x.InvoiceLineId == arLine1Id).Id;
+                arVat2 = arTaxes.Single(x => x.InvoiceLineId == arLine2Id).Id;
+                apVat1 = apTaxes.Single(x => x.InvoiceLineId == apLine1Id && x.TaxType == TaxType.VAT).Id;
+                apVat2 = apTaxes.Single(x => x.InvoiceLineId == apLine2Id && x.TaxType == TaxType.VAT).Id;
+                apWht = apTaxes.Single(x => x.TaxType == TaxType.WHT).Id;
+            }
+
+            await using (var ctx = db.NewContext(company))
+            {
+                var ar = new ArService(ctx, Gl(ctx));
+                var noEvidence = new Dictionary<Guid, decimal> { [arInvoiceId] = 115m };
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    ar.ReceiveAndAllocateAsync(company, customerId, Oct15, "USD", 115m,
+                        PaymentMethod.BankTransfer, "AR-TAX-PARTIAL-MISSING", accounts["bank"].Id,
+                        accounts["ar"].Id, noEvidence));
+            }
+            await using (var ctx = db.NewContext(company))
+            {
+                var ar = new ArService(ctx, Gl(ctx));
+                var allocations = new Dictionary<Guid, decimal> { [arInvoiceId] = 115m };
+                var components = new[]
+                {
+                    new SettlementComponentInput(arInvoiceId, arLine1Id, null, 50m),
+                    new SettlementComponentInput(arInvoiceId, null, arVat1, 7.5m),
+                    new SettlementComponentInput(arInvoiceId, arLine2Id, null, 50m),
+                    new SettlementComponentInput(arInvoiceId, null, arVat2, 7.5m)
+                };
+                await ar.ReceiveAndAllocateAsync(company, customerId, Oct15, "USD", 115m,
+                    PaymentMethod.BankTransfer, "AR-TAX-PARTIAL-001", accounts["bank"].Id,
+                    accounts["ar"].Id, allocations, componentAllocations: components);
+            }
+
+            await using (var ctx = db.NewContext(company))
+            {
+                var ap = new ApService(ctx, Gl(ctx));
+                var noEvidence = new Dictionary<Guid, decimal> { [apInvoiceId] = 105m };
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    ap.PayAndAllocateAsync(company, supplierId, Oct15, "USD", 105m,
+                        PaymentMethod.BankTransfer, accounts["bank"].Id, accounts["ap"].Id, noEvidence));
+            }
+            await using (var ctx = db.NewContext(company))
+            {
+                var ap = new ApService(ctx, Gl(ctx));
+                var allocations = new Dictionary<Guid, decimal> { [apInvoiceId] = 105m };
+                var components = new[]
+                {
+                    new SettlementComponentInput(apInvoiceId, apLine1Id, null, 50m),
+                    new SettlementComponentInput(apInvoiceId, null, apVat1, 7.5m),
+                    new SettlementComponentInput(apInvoiceId, apLine2Id, null, 40m),
+                    new SettlementComponentInput(apInvoiceId, null, apVat2, 7.5m)
+                };
+                await ap.PayAndAllocateAsync(company, supplierId, Oct15, "USD", 105m,
+                    PaymentMethod.BankTransfer, accounts["bank"].Id, accounts["ap"].Id,
+                    allocations, componentAllocations: components);
+            }
+
+            await using (var verify = db.NewContext(company))
+            {
+                var arAllocation = await verify.ArReceiptAllocations.SingleAsync(x => x.ArInvoiceId == arInvoiceId);
+                var arComponents = await verify.SettlementComponentAllocations.Where(x =>
+                    x.CompanyId == company && x.SettlementKind == "AR" &&
+                    x.SettlementAllocationId == arAllocation.Id).ToListAsync();
+                Assert.Equal(115m, arComponents.Sum(x => x.AmountApplied));
+                Assert.Equal(2, arComponents.Count(x => x.ComponentKind == SettlementComponentKind.InvoiceLine));
+                Assert.Equal(2, arComponents.Count(x => x.ComponentKind == SettlementComponentKind.TaxComponent));
+
+                var apAllocation = await verify.ApPaymentAllocations.SingleAsync(x => x.ApInvoiceId == apInvoiceId);
+                var apComponents = await verify.SettlementComponentAllocations.Where(x =>
+                    x.CompanyId == company && x.SettlementKind == "AP" &&
+                    x.SettlementAllocationId == apAllocation.Id).ToListAsync();
+                Assert.Equal(105m, apComponents.Sum(x => x.AmountApplied));
+                Assert.Equal(2, apComponents.Count(x => x.ComponentKind == SettlementComponentKind.InvoiceLine));
+                Assert.Equal(2, apComponents.Count(x => x.ComponentKind == SettlementComponentKind.TaxComponent));
+                Assert.DoesNotContain(apComponents, x => x.TaxComponentId == apWht);
+            }
+        }
+
+        [PostgresFact]
         public async Task AR_VAT_posting_rejects_wrong_type_or_foreign_company_tax_accounts()
         {
             await using var db = await TestDb.CreateAsync();
