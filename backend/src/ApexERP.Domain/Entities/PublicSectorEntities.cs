@@ -39,6 +39,7 @@ namespace ApexERP.Domain.Entities
         public DateTime PeriodEnd { get; set; }
         public string AuthorityReference { get; set; } = string.Empty;
         public string? AmendmentReason { get; set; }
+        public PublicSectorBudgetAmendmentNature? AmendmentNature { get; set; }
         public Guid? ApprovalWorkflowId { get; set; }
         public Guid? ApprovedBy { get; set; }
         public DateTime? ApprovedAt { get; set; }
