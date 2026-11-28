@@ -1038,15 +1038,26 @@ namespace ApexERP.Application.Services
                 var source = population.Records[group.Key];
                 if (source.Amount <= 0m || source.EffectiveDate < submission.PeriodStart ||
                     source.EffectiveDate >= submission.PeriodEnd ||
-                    !string.Equals(source.Currency, submission.Currency, StringComparison.OrdinalIgnoreCase) ||
-                    !source.JournalEntryId.HasValue ||
-                    (expected.SourceKind == "BankAccount" && !source.IsReconciled) ||
-                    !await _db.JournalEntries.AnyAsync(j => j.Id == source.JournalEntryId.Value &&
-                        j.CompanyId == companyId && j.Status == JournalStatus.Posted, ct))
+                    !string.Equals(source.Currency, submission.Currency, StringComparison.OrdinalIgnoreCase))
                     return false;
 
                 if (group.Any(line => line.SourceAmount != source.Amount ||
                     !string.Equals(line.SourceReference, source.Reference, StringComparison.Ordinal)))
+                    return false;
+
+                if (source.IsExternalStatementExclusion)
+                {
+                    if (group.Count() != 1 || group.Any(line => !line.IsExcluded ||
+                        line.BudgetExecutionActualId.HasValue || line.AllocatedAmount != 0m ||
+                        string.IsNullOrWhiteSpace(line.ExclusionReason)))
+                        return false;
+                    continue;
+                }
+
+                if (!source.JournalEntryId.HasValue ||
+                    (expected.SourceKind == "BankAccount" && !source.IsReconciled) ||
+                    !await _db.JournalEntries.AnyAsync(j => j.Id == source.JournalEntryId.Value &&
+                        j.CompanyId == companyId && j.Status == JournalStatus.Posted, ct))
                     return false;
 
                 if (group.Any(line => line.IsExcluded))
