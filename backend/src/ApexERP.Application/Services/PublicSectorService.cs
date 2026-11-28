@@ -2098,14 +2098,25 @@ namespace ApexERP.Application.Services
                     foreach (var expected in expectedSources)
                     {
                         var submission = sourceSubmissions.Single(x => x.ExpectedCashSourceId == expected.Id);
-                        var population = await GetExpectedCashSourcePopulationAsync(companyId, expected,
-                            submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
-                        if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
-                            population.ControlTotal != submission.ControlTotal ||
-                            (population.NetMovement.HasValue &&
-                                submission.OpeningBalance + population.NetMovement.Value != submission.ClosingBalance) ||
-                            !await IsCurrentCashSourceReconciliationAsync(companyId, expected, submission, population, ct))
+                        try
                         {
+                            var population = await GetExpectedCashSourcePopulationAsync(companyId, expected,
+                                submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
+                            if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
+                                population.ControlTotal != submission.ControlTotal ||
+                                (population.NetMovement.HasValue &&
+                                    submission.OpeningBalance + population.NetMovement.Value != submission.ClosingBalance) ||
+                                !await IsCurrentCashSourceReconciliationAsync(companyId, expected, submission, population, ct))
+                            {
+                                liveSourcePopulationsComplete = false;
+                                break;
+                            }
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // A changed or incomplete live source population blocks comparability;
+                            // report generation must return a non-comparable result rather than
+                            // throwing an API error or presenting stale certified actuals.
                             liveSourcePopulationsComplete = false;
                             break;
                         }
