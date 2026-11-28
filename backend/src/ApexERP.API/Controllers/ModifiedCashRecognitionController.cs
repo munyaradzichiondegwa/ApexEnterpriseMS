@@ -16,7 +16,8 @@ public sealed record CreateModifiedCashPolicyRequest(
     DateTime ReportingPeriodStart, DateTime ReportingPeriodEnd, int PostPeriodRecognitionWindowDays,
     ModifiedCashBudgetTreatment Treatment, IReadOnlyCollection<ModifiedCashMappingInput> Mappings);
 public sealed record CreateModifiedCashRecognitionRequest(Guid CommitmentId, Guid GoodsReceiptLineId, string EvidenceReference);
-public sealed record CreateModifiedCashReversalRequest(string EvidenceReference);\npublic sealed record CreateModifiedCashLiquidationRequest(Guid ApPaymentAllocationId, string EvidenceReference);
+public sealed record CreateModifiedCashReversalRequest(string EvidenceReference);
+public sealed record CreateModifiedCashLiquidationRequest(Guid ApPaymentAllocationId, string EvidenceReference);
 
 [Route("api/v1/public-sector/modified-cash")]
 public sealed class ModifiedCashRecognitionController : ApiControllerBase
