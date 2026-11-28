@@ -643,6 +643,30 @@ namespace ApexERP.Tests
             revised.ApprovedAt = DateTime.UtcNow;
             await ctx.SaveChangesAsync();
 
+            var preparerId = Guid.NewGuid();
+            var approverId = Guid.NewGuid();
+            var reconciliation = await service.CreateBudgetReconciliationAsync(companyId, 2026,
+                PublicSectorBudgetReconciliationType.Basis, "Modified cash commitments not yet paid",
+                "Operating", 5m, -2m, 0m, "Reconciliation workpaper WP-IPSAS24-01", preparerId);
+            var workflowId = Guid.NewGuid();
+            ctx.WorkflowRequests.Add(new WorkflowRequest
+            {
+                Id = workflowId, CompanyId = companyId, RequestType = "PublicSectorBudgetReconciliation",
+                ReferenceId = reconciliation.Id, ReferenceTable = "PublicSectorBudgetReconciliation",
+                SubmittedBy = preparerId, Amount = 7m, Status = WorkflowStatus.Pending
+            });
+            await ctx.SaveChangesAsync();
+            await service.MarkBudgetReconciliationPendingAsync(companyId, reconciliation.Id, workflowId);
+            var workflow = await ctx.WorkflowRequests.SingleAsync(x => x.Id == workflowId);
+            workflow.Status = WorkflowStatus.Approved;
+            ctx.WorkflowApprovals.Add(new WorkflowApproval
+            {
+                CompanyId = companyId, WorkflowRequestId = workflowId, Tier = 1,
+                ApproverId = approverId, Approved = true, DecidedAt = DateTime.UtcNow
+            });
+            await ctx.SaveChangesAsync();
+            await service.FinaliseBudgetReconciliationApprovalAsync(companyId, reconciliation.Id, approverId);
+
             var report = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.Equal(original.Id, report.OriginalBudgetVersionId);
             Assert.Equal(revised.Id, report.FinalBudgetVersionId);
@@ -660,6 +684,10 @@ namespace ApexERP.Tests
             Assert.Equal(0m, added.OriginalBudget);
             Assert.Equal(30m, added.FinalBudget);
             Assert.Equal(10m, added.ActualOnComparableBasis);
+            var approvedRecon = Assert.Single(report.Reconciliations);
+            Assert.Equal(PublicSectorBudgetReconciliationStatus.Approved, approvedRecon.Status);
+            Assert.Equal(5m, approvedRecon.OperatingAmount);
+            Assert.Equal(-2m, approvedRecon.InvestingAmount);
         }
 
         [PostgresFact]
