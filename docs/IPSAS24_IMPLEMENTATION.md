@@ -210,3 +210,12 @@ Not yet verified / remaining in this slice:
 - The Public Sector UI includes nil-return creation, submission and independent certification controls, plus observed bank/AR/AP source counts and attestation status.
 - The first completeness rule is intentionally strict: any in-period bank transaction, AR receipt or AP payment means the period is not zero-activity. Non-zero source population reconciliation still needs a general source-to-actual completeness ledger. Current coverage checks bank movements against captured bank transactions or AR/AP settlement journal IDs, but does not yet prove every AR/AP source population is fully mapped to approved actual allocations.
 - A zero-activity attestation is not, by itself, a completed Statement of Cash Flows reconciliation or statutory statement-issuance approval. The UI exposes the declaration workflow; source counts are revalidated by the service at creation, submission, certification and comparison time.
+
+
+## Regression verification — omitted posted settlement sources
+
+The PostgreSQL integration suite now includes a non-zero-period regression case in which the approved cash budget has valid certified AR/AP actuals, but a further posted AR receipt and AP payment are deliberately left uncaptured. The comparison must become non-comparable and report both missing source populations. This protects against a false-completeness result caused by capturing only some settlements.
+
+Verification: GitHub Actions run [#694](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46120594919) completed successfully for commit `d55aa2cf90a0816863d95224eb43a59af707f960` (backend build and PostgreSQL integration tests, frontend checks, migration drift, clean install, database hardening, least-privilege runtime, backup/restore and RLS rollback).
+
+This test verifies the currently implemented posted AR/AP settlement coverage gate. It does **not** verify the not-yet-implemented expected-source register, source submission/control-total workflow, or independent source-period close. Those remain separate acceptance requirements.
