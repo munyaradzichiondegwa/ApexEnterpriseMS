@@ -23,7 +23,7 @@ export default function PublicSectorPage() {
   const [registerAttestation, setRegisterAttestation] = useState<any | null>(null);
   const [registerAttestationEvidence, setRegisterAttestationEvidence] = useState("");
   const [expectedSourceDraft, setExpectedSourceDraft] = useState({ sourceKind: "BankAccount", sourceCode: "", sourceName: "", sourceIdentifier: "", isRequired: true });
-  const [sourceSubmissionDraft, setSourceSubmissionDraft] = useState({ expectedCashSourceId: "", recordCount: 0, controlTotal: 0, openingBalance: 0, closingBalance: 0, currency: "USD", evidenceReference: "" });
+  const [sourceSubmissionDraft, setSourceSubmissionDraft] = useState({ expectedCashSourceId: "", recordCount: 0, controlTotal: 0, openingBalance: 0, closingBalance: 0, currency: "USD", evidenceReference: "", revisionReason: "" });
   const [recordLineDraft, setRecordLineDraft] = useState({ submissionId: "", sourceRecordId: "", sourceReference: "", budgetExecutionActualId: "", isExcluded: false, exclusionReason: "" });
   const [reconciliationLines, setReconciliationLines] = useState<any[]>([]);
   const [zeroActivityEvidence, setZeroActivityEvidence] = useState("");
@@ -342,15 +342,21 @@ export default function PublicSectorPage() {
   async function createSourceSubmission(e: React.FormEvent) {
     e.preventDefault();
     try {
+      const priorSubmission = cashSourceSubmissions
+        .filter((item: any) => item.expectedCashSourceId === sourceSubmissionDraft.expectedCashSourceId)
+        .sort((a: any, b: any) => (b.submissionRevision ?? 1) - (a.submissionRevision ?? 1))[0];
       await api.post("/public-sector/cash-source-submissions", {
         ...sourceSubmissionDraft,
         recordCount: Number(sourceSubmissionDraft.recordCount),
         controlTotal: Number(sourceSubmissionDraft.controlTotal),
         openingBalance: Number(sourceSubmissionDraft.openingBalance),
         closingBalance: Number(sourceSubmissionDraft.closingBalance),
+        revisionReason: priorSubmission ? sourceSubmissionDraft.revisionReason : null,
       });
-      setMsg("Source control submission created. Submit it for independent review.");
-      setSourceSubmissionDraft({ ...sourceSubmissionDraft, expectedCashSourceId: "", recordCount: 0, controlTotal: 0, evidenceReference: "" });
+      setMsg(priorSubmission
+        ? "Replacement source submission created as a new revision. The previous reviewed record remains immutable; submit the new revision for independent review."
+        : "Source control submission created. Submit it for independent review.");
+      setSourceSubmissionDraft({ ...sourceSubmissionDraft, expectedCashSourceId: "", recordCount: 0, controlTotal: 0, evidenceReference: "", revisionReason: "" });
       await loadCashActuals();
     } catch (err) { setError(extractErrorMessage(err)); }
   }
@@ -658,9 +664,8 @@ export default function PublicSectorPage() {
               </div>
               <form onSubmit={createSourceSubmission} className="grid grid-cols-1 md:grid-cols-4 gap-2 border-t pt-3">
                 <select className="input md:col-span-2" required value={sourceSubmissionDraft.expectedCashSourceId} onChange={(e) => {
-                  const source = expectedCashSources.find((x: any) => x.id === e.target.value);
                   const version = approvedBudgetVersions[0];
-                  setSourceSubmissionDraft({ ...sourceSubmissionDraft, expectedCashSourceId: e.target.value, currency: version?.currency ?? "USD" });
+                  setSourceSubmissionDraft({ ...sourceSubmissionDraft, expectedCashSourceId: e.target.value, currency: version?.currency ?? "USD", revisionReason: "" });
                 }}>
                   <option value="">Select approved expected source</option>
                   {expectedCashSources.filter((x: any) => x.status === "Approved").map((source: any) => <option key={source.id} value={source.id}>{source.sourceCode} — {source.sourceName}</option>)}
@@ -671,7 +676,20 @@ export default function PublicSectorPage() {
                 <input className="input" type="number" step="0.01" required placeholder="Closing balance" value={sourceSubmissionDraft.closingBalance} onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, closingBalance: Number(e.target.value) })} />
                 <input className="input" required maxLength={3} placeholder="Currency" value={sourceSubmissionDraft.currency} onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, currency: e.target.value.toUpperCase() })} />
                 <input className="input" required placeholder="Evidence reference" value={sourceSubmissionDraft.evidenceReference} onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, evidenceReference: e.target.value })} />
-                <button className="btn-secondary md:col-span-4" disabled={!expectedCashSources.some((x: any) => x.id === sourceSubmissionDraft.expectedCashSourceId && x.status === "Approved")}>Create source control submission</button>
+                {(() => {
+                  const prior = cashSourceSubmissions
+                    .filter((item: any) => item.expectedCashSourceId === sourceSubmissionDraft.expectedCashSourceId)
+                    .sort((a: any, b: any) => (b.submissionRevision ?? 1) - (a.submissionRevision ?? 1))[0];
+                  const canRevise = !prior || prior.status === "Rejected" || prior.recordLevelStatus === "Rejected" ||
+                    (prior.status === "Reviewed" && prior.recordLevelStatus !== "PendingReview");
+                  return prior ? <>
+                    <input className="input md:col-span-3" required placeholder="Reason for replacing the prior source submission"
+                      value={sourceSubmissionDraft.revisionReason}
+                      onChange={(e) => setSourceSubmissionDraft({ ...sourceSubmissionDraft, revisionReason: e.target.value })} />
+                    <p className="md:col-span-4 text-xs text-slate-500">Latest submission: revision {prior.submissionRevision ?? 1} ({prior.status} / {prior.recordLevelStatus}). A replacement revision preserves the prior record and requires a reason plus new independent control and record-level review.</p>
+                    <button className="btn-secondary md:col-span-4" disabled={!canRevise || !sourceSubmissionDraft.revisionReason.trim()}>Create replacement source revision</button>
+                  </> : <button className="btn-secondary md:col-span-4" disabled={!sourceSubmissionDraft.expectedCashSourceId}>Create source control submission</button>;
+                })()}
               </form>
               <div className="overflow-x-auto">
                 <table className="table-base">
