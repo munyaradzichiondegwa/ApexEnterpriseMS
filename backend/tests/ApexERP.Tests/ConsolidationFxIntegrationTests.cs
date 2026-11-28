@@ -60,7 +60,7 @@ public sealed class ConsolidationFxIntegrationTests
                 new AccountingPeriod
                 {
                     Id = periodId, CompanyId = subsidiaryId, Year = 2026, PeriodNo = 1,
-                    StartDate = new DateTime(2025, 12, 1), EndDate = new DateTime(2026, 1, 31),
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 1, 31),
                     Status = PeriodStatus.Open
                 });
             var journal = new JournalEntry
@@ -136,8 +136,8 @@ public sealed class ConsolidationFxIntegrationTests
         Assert.True(parentPeriodEvidence.IsGroupPeriodAligned);
         var subsidiaryPeriodEvidence = Assert.Single(result.PeriodEvidence, x => x.CompanyId == subsidiaryId);
         Assert.True(subsidiaryPeriodEvidence.IsPeriodEndAligned);
-        Assert.False(subsidiaryPeriodEvidence.IsGroupPeriodAligned);
-        Assert.Contains("differs from parent", subsidiaryPeriodEvidence.Status);
+        Assert.True(subsidiaryPeriodEvidence.IsGroupPeriodAligned);
+        Assert.Equal("Period end aligned", subsidiaryPeriodEvidence.Status);
     }
     [PostgresFact]
     public async Task Consolidation_calculates_indirect_non_controlling_interest_across_the_full_ownership_chain()
@@ -245,7 +245,7 @@ public sealed class ConsolidationFxIntegrationTests
     }
 
     [PostgresFact]
-    public async Task Consolidation_reports_each_company_period_end_alignment_for_the_reporting_date()
+    public async Task Consolidation_blocks_and_identifies_a_company_whose_period_end_falls_after_the_reporting_date()
     {
         await using var db = await TestDb.CreateAsync();
         var tenantId = Guid.NewGuid();
@@ -288,17 +288,11 @@ public sealed class ConsolidationFxIntegrationTests
 
         await using var ctx = db.NewContext(parentId, tenantId: tenantId);
         var service = new ConsolidationService(ctx, new ReportingService(ctx), new GroupScopeService(ctx));
-        var result = await service.ConsolidateAsync(parentId, new DateTime(2026, 1, 31));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ConsolidateAsync(parentId, new DateTime(2026, 1, 31)));
 
-        var parentPeriod = Assert.Single(result.PeriodEvidence, x => x.CompanyId == parentId);
-        Assert.True(parentPeriod.IsPeriodEndAligned);
-        Assert.True(parentPeriod.IsGroupPeriodAligned);
-        Assert.Equal("Period end aligned", parentPeriod.Status);
-        var subsidiaryPeriod = Assert.Single(result.PeriodEvidence, x => x.CompanyId == subsidiaryId);
-        Assert.False(subsidiaryPeriod.IsPeriodEndAligned);
-        Assert.False(subsidiaryPeriod.IsGroupPeriodAligned);
-        Assert.Equal(new DateTime(2026, 2, 28), subsidiaryPeriod.PeriodEnd);
-        Assert.Equal("Reporting date falls before the period end", subsidiaryPeriod.Status);
+        Assert.Contains("group reporting-period policy", error.Message);
+        Assert.Contains("Period Subsidiary: Reporting date falls before the period end", error.Message);
     }
 
 }
