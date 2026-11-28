@@ -3377,6 +3377,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<string>("SourceReference")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -3722,6 +3728,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<string>("ExchangeRateSource").HasMaxLength(100).HasColumnType("character varying(100)");
                     b.Property<string>("ExchangeRateSourceReference").HasMaxLength(500).HasColumnType("character varying(500)");
                     b.Property<bool>("ExchangeRateIsInverse").HasColumnType("boolean");
+                    b.Property<Guid?>("ExchangeRateApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ExchangeRateApprovedAt").HasColumnType("timestamp with time zone");
                     b.Property<int>("CashFlowSection").HasColumnType("integer");
                     b.Property<int>("Status").HasColumnType("integer");
                     b.Property<Guid?>("ReversalOfId").HasColumnType("uuid");
