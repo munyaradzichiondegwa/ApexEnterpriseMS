@@ -39,6 +39,8 @@ export default function PublicSectorPage() {
   const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", treasuryClassificationCode: "", noteReference: "", amount: 0 }]);
   const [varianceDraft, setVarianceDraft] = useState({ budgetVersionLineId: "", explanation: "", evidenceReference: "", commentReference: "" });
   const [budgetReconciliations, setBudgetReconciliations] = useState<any[]>([]);
+  const [budgetStatementIssues, setBudgetStatementIssues] = useState<any[]>([]);
+  const [statementIssueDraft, setStatementIssueDraft] = useState({ templateAuthorityReference: "", templateVersion: "", issueReference: "" });
   const [budgetReconciliationDraft, setBudgetReconciliationDraft] = useState({
     type: "Basis", description: "", statementSection: "Operating",
     revenueAmount: 0, expenseAmount: 0, operatingAmount: 0,
@@ -223,14 +225,16 @@ export default function PublicSectorPage() {
       const comparisonParams = new URLSearchParams({ year: String(year) });
       if (statementPeriodStart) comparisonParams.set("statementPeriodStart", `${statementPeriodStart}T00:00:00.000Z`);
       if (statementPeriodEnd) comparisonParams.set("statementPeriodEnd", `${statementPeriodEnd}T00:00:00.000Z`);
-      const [response, reconciliations] = await Promise.all([
+      const [response, reconciliations, issues] = await Promise.all([
         api.get(`/public-sector/budget-versions/comparison?${comparisonParams.toString()}`),
         api.get(`/public-sector/budget-reconciliations?year=${year}`),
+        api.get("/public-sector/budget-statements/issues"),
       ]);
       setBudgetComparison(response.data);
       setStatementPeriodStart(String(response.data.statementPeriodStart ?? "").slice(0, 10));
       setStatementPeriodEnd(String(response.data.statementPeriodEnd ?? "").slice(0, 10));
       setBudgetReconciliations(reconciliations.data);
+      setBudgetStatementIssues(issues.data);
     } catch (err) {
       setBudgetComparison(null);
       setError(extractErrorMessage(err));
@@ -261,6 +265,37 @@ export default function PublicSectorPage() {
       setBudgetReconciliationDraft((current) => ({ ...current, supportingReference: "" }));
       setMsg(`System-calculated ${section.toLowerCase()} cash-flow reconciliation created. Submit it for independent approval.`);
       await Promise.all([loadBudgetComparison(), loadCashActuals()]);
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function createBudgetStatementIssue(e: React.FormEvent) {
+    e.preventDefault();
+    if (!budgetComparison) return;
+    setError(null);
+    try {
+      await api.post("/public-sector/budget-statements/issues", {
+        financialYear: year,
+        statementPeriodStart: budgetComparison.statementPeriodStart,
+        statementPeriodEnd: budgetComparison.statementPeriodEnd,
+        statementEntityScope: budgetComparison.financialStatementEntityScope,
+        templateAuthorityReference: statementIssueDraft.templateAuthorityReference,
+        templateVersion: statementIssueDraft.templateVersion,
+        issueReference: statementIssueDraft.issueReference || null,
+      });
+      setStatementIssueDraft({ templateAuthorityReference: "", templateVersion: "", issueReference: "" });
+      setMsg("Statement issue draft created with a source-fingerprinted snapshot. Independent review, approval and publication are still required.");
+      await loadBudgetComparison();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function budgetStatementIssueAction(id: string, action: "review" | "approve" | "publish") {
+    setError(null);
+    try {
+      await api.post(`/public-sector/budget-statements/issues/${id}/${action}`);
+      setMsg(action === "publish"
+        ? "IPSAS 24 statement issued. The source snapshot was revalidated at publication."
+        : `IPSAS 24 statement ${action} recorded. The next independent role must complete its stage.`);
+      await loadBudgetComparison();
     } catch (err) { setError(extractErrorMessage(err)); }
   }
 
@@ -1197,6 +1232,57 @@ export default function PublicSectorPage() {
                   </table>
                 </div>
                 <p className="text-xs text-slate-500">For pending rows, complete the independent approval in the Approvals workspace first, then finalise it here. Draft and pending rows are not included in the published comparison.</p>
+              </div>
+              <div className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className="font-semibold">Controlled statement issue</h3>
+                  <span className="text-xs text-slate-500">Draft → independent review → independent approval → issue</span>
+                </div>
+                <p className="text-xs text-slate-500">The issue snapshot is re-calculated and hash-checked at review, approval and publication. The template reference is recorded as user-supplied and is not independently verified as an official Treasury form by ApexERP.</p>
+                <form onSubmit={createBudgetStatementIssue} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <input className="input" required placeholder="Template authority / source reference"
+                    value={statementIssueDraft.templateAuthorityReference}
+                    onChange={(e) => setStatementIssueDraft({ ...statementIssueDraft, templateAuthorityReference: e.target.value })} />
+                  <input className="input" required placeholder="Template version / effective year"
+                    value={statementIssueDraft.templateVersion}
+                    onChange={(e) => setStatementIssueDraft({ ...statementIssueDraft, templateVersion: e.target.value })} />
+                  <input className="input" placeholder="Issue reference (optional)"
+                    value={statementIssueDraft.issueReference}
+                    onChange={(e) => setStatementIssueDraft({ ...statementIssueDraft, issueReference: e.target.value })} />
+                  <button className="btn-secondary md:col-span-3"
+                    disabled={!budgetComparison.comparableActualsAvailable ||
+                      !budgetComparison.financialStatementReconciliation?.complete ||
+                      !budgetComparison.varianceExplanationsComplete ||
+                      !budgetComparison.originalToFinalExplanationsComplete ||
+                      (budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled) ||
+                      !statementIssueDraft.templateAuthorityReference.trim() || !statementIssueDraft.templateVersion.trim()}
+                    title={!budgetComparison.comparableActualsAvailable ? "Comparable actuals are incomplete." :
+                      !budgetComparison.financialStatementReconciliation?.complete ? "Approve every calculated reconciliation candidate." :
+                      !budgetComparison.varianceExplanationsComplete ? "Approve all material variance explanations." :
+                      !budgetComparison.originalToFinalExplanationsComplete ? "Explain original-to-final budget amendments." :
+                      budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled ? "Complete the cash-flow bridge." :
+                      "Prepare an immutable, source-fingerprinted issue snapshot."}>Prepare statement issue</button>
+                </form>
+                <div className="overflow-x-auto">
+                  <table className="table-base">
+                    <thead><tr><th>Issue reference</th><th>Financial year</th><th>Template reference</th><th>Prepared</th><th>Status</th><th>Action</th></tr></thead>
+                    <tbody>{budgetStatementIssues.filter((item: any) => item.financialYear === year).map((item: any) => (
+                      <tr key={item.id}>
+                        <td>{item.issueReference}</td><td>{item.financialYear}</td>
+                        <td>{item.templateAuthorityReference} · {item.templateVersion}<div className="text-xs text-amber-700">{item.templateReferenceStatus}</div></td>
+                        <td>{new Date(item.preparedAt).toLocaleString()}</td><td>{item.status}</td>
+                        <td>{item.status === "Draft"
+                          ? <button type="button" className="btn-secondary" onClick={() => budgetStatementIssueAction(item.id, "review")}>Review</button>
+                          : item.status === "Reviewed"
+                            ? <button type="button" className="btn-secondary" onClick={() => budgetStatementIssueAction(item.id, "approve")}>Approve</button>
+                            : item.status === "Approved"
+                              ? <button type="button" className="btn-secondary" onClick={() => budgetStatementIssueAction(item.id, "publish")}>Issue</button>
+                              : item.status}</td>
+                      </tr>
+                    ))}
+                    {!budgetStatementIssues.some((item: any) => item.financialYear === year) && <tr><td colSpan={6} className="text-center text-slate-500">No statement issue records for this financial year.</td></tr>}</tbody>
+                  </table>
+                </div>
               </div>
               {budgetComparison.reconciliations?.length > 0 && (
                 <div>
