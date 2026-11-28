@@ -685,6 +685,8 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
                 .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_RecordCount", "\"RecordCount\" >= 0");
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Currency", "char_length(\"Currency\") = 3");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
                 .HasOne<PublicSectorExpectedCashSource>().WithMany().HasForeignKey(x => x.ExpectedCashSourceId)
                 .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_CashSourceSubmission_ExpectedSource");
             modelBuilder.Entity<PublicSectorCashSourceSubmission>()
