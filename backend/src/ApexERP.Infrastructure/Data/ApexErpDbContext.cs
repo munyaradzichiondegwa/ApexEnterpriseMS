@@ -175,6 +175,7 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<PublicSectorBudgetVersion> PublicSectorBudgetVersions => Set<PublicSectorBudgetVersion>();
         public DbSet<PublicSectorBudgetVersionLine> PublicSectorBudgetVersionLines => Set<PublicSectorBudgetVersionLine>();
         public DbSet<PublicSectorBudgetReconciliation> PublicSectorBudgetReconciliations => Set<PublicSectorBudgetReconciliation>();
+        public DbSet<PublicSectorBudgetExecutionActual> PublicSectorBudgetExecutionActuals => Set<PublicSectorBudgetExecutionActual>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
