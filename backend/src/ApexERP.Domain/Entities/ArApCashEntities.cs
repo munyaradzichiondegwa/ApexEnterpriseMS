@@ -42,6 +42,8 @@ namespace ApexERP.Domain.Entities
         public decimal Outstanding { get; set; }
         public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
         public Guid? JournalEntryId { get; set; }
+        /// <summary>Public-sector vote dimension required to map cash receipts to an approved budget line.</summary>
+        public Guid? FundCentreId { get; set; }
 
         /// <summary>Grants & NGO (Module 15): tags this sale/reimbursement to a specific grant.</summary>
         public Guid? GrantId { get; set; }
