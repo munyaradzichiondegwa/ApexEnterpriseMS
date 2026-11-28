@@ -89,6 +89,7 @@ public sealed class AddIpsas24ModifiedCashRecognition : Migration
                 OriginalEventId = table.Column<Guid>(type: "uuid", nullable: true),
                 Amount = table.Column<decimal>(type: "numeric(20,6)", nullable: false),
                 EventDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                EvidenceAcceptedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                 EvidenceReference = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: false),
                 Status = table.Column<int>(type: "integer", nullable: false),
                 PreparedBy = table.Column<Guid>(type: "uuid", nullable: false),
