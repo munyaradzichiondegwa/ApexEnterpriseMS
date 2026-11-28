@@ -43,5 +43,7 @@ public sealed class ZimbabweDswtWithholdingRecord : TenantEntity
     public DateTime? RemittedToZimraAt { get; set; }
     public string? EvidenceReference { get; set; }
     public Guid? ApPaymentId { get; set; }
+    public Guid? BankStatementTransactionId { get; set; }
+    public DateTime? BankReconciledAt { get; set; }
     public ZimbabweDswtRecordStatus Status { get; set; } = ZimbabweDswtRecordStatus.Recorded;
 }
