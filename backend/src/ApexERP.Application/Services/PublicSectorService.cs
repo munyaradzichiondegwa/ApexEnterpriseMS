@@ -407,7 +407,7 @@ namespace ApexERP.Application.Services
         };
 
         private sealed record ExpectedCashSourcePopulation(
-            HashSet<Guid> RecordIds, decimal ControlTotal, bool CurrencyMatches);
+            HashSet<Guid> RecordIds, decimal ControlTotal, bool CurrencyMatches, decimal? NetMovement);
 
         // Re-read the live source population rather than trusting a previously submitted count.
         // SourceIdentifier is the internal BankAccount ID or the AR/AP control GL account ID.
@@ -432,7 +432,8 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException($"Bank source {expected.SourceCode} contains a transaction with invalid debit/credit amounts.");
                 return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
                     rows.Sum(x => Math.Max(x.Debit, x.Credit)),
-                    string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase),
+                    rows.Sum(x => x.Credit - x.Debit));
             }
 
             if (expected.SourceKind == "ReceivablesControl")
@@ -447,7 +448,7 @@ namespace ApexERP.Application.Services
                     .Select(x => new { x.Id, x.Amount, x.Currency }).ToListAsync(ct);
                 return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
                     rows.Sum(x => x.Amount),
-                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)));
+                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)), null);
             }
 
             if (expected.SourceKind == "PayablesControl")
@@ -462,7 +463,7 @@ namespace ApexERP.Application.Services
                     .Select(x => new { x.Id, x.Amount, x.Currency }).ToListAsync(ct);
                 return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
                     rows.Sum(x => x.Amount),
-                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)));
+                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)), null);
             }
 
             throw new InvalidOperationException($"Source kind {expected.SourceKind} has no configured source adapter.");
@@ -512,6 +513,8 @@ namespace ApexERP.Application.Services
                         .Select(x => x.SourceRecordId).Distinct().ToListAsync(ct);
                     if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
                         population.ControlTotal != submission.ControlTotal ||
+                        (population.NetMovement.HasValue &&
+                            submission.OpeningBalance + population.NetMovement.Value != submission.ClosingBalance) ||
                         !population.RecordIds.SetEquals(mappedIds)) return false;
                 }
                 catch (InvalidOperationException)
@@ -642,8 +645,9 @@ namespace ApexERP.Application.Services
             var population = await GetExpectedCashSourcePopulationAsync(companyId, source,
                 source.EffectiveFrom, source.EffectiveTo, normalisedCurrency, ct);
             if (population.RecordIds.Count != recordCount || population.ControlTotal != controlTotal ||
-                !population.CurrencyMatches)
-                throw new InvalidOperationException("The submitted record count, control total or currency does not agree with the live registered source population.");
+                !population.CurrencyMatches ||
+                (population.NetMovement.HasValue && openingBalance + population.NetMovement.Value != closingBalance))
+                throw new InvalidOperationException("The submitted record count, control total, currency or opening-to-closing balance movement does not agree with the live registered source population.");
 
             var item = new PublicSectorCashSourceSubmission
             {
@@ -701,8 +705,10 @@ namespace ApexERP.Application.Services
                 var population = await GetExpectedCashSourcePopulationAsync(companyId, expected,
                     item.PeriodStart, item.PeriodEnd, item.Currency, ct);
                 if (population.RecordIds.Count != item.RecordCount ||
-                    population.ControlTotal != item.ControlTotal || !population.CurrencyMatches)
-                    throw new InvalidOperationException("The live source population no longer agrees with the submitted record count, control total or currency.");
+                    population.ControlTotal != item.ControlTotal || !population.CurrencyMatches ||
+                    (population.NetMovement.HasValue &&
+                        item.OpeningBalance + population.NetMovement.Value != item.ClosingBalance))
+                    throw new InvalidOperationException("The live source population no longer agrees with the submitted record count, control total, currency or opening-to-closing balance movement.");
             }
 
             item.Status = accepted ? "Reviewed" : "Rejected";
@@ -875,6 +881,8 @@ namespace ApexERP.Application.Services
                 submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
             if (!livePopulation.CurrencyMatches || livePopulation.RecordIds.Count != submission.RecordCount ||
                 livePopulation.ControlTotal != submission.ControlTotal ||
+                (livePopulation.NetMovement.HasValue &&
+                    submission.OpeningBalance + livePopulation.NetMovement.Value != submission.ClosingBalance) ||
                 !livePopulation.RecordIds.SetEquals(groups.Select(x => x.Key)))
                 throw new InvalidOperationException("The record-level mapping does not match the current source-system record population and currency.");
             if (groups.Count != submission.RecordCount)
@@ -921,6 +929,8 @@ namespace ApexERP.Application.Services
                     x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId).ToListAsync(ct);
                 if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
                     population.ControlTotal != submission.ControlTotal ||
+                    (population.NetMovement.HasValue &&
+                        submission.OpeningBalance + population.NetMovement.Value != submission.ClosingBalance) ||
                     !population.RecordIds.SetEquals(lines.Select(x => x.SourceRecordId).Distinct()))
                     throw new InvalidOperationException("The live source population changed after submission; record-level reconciliation cannot be approved.");
             }
@@ -1044,6 +1054,8 @@ namespace ApexERP.Application.Services
                             .Select(x => x.SourceRecordId).Distinct().ToListAsync(token);
                         if (!population.CurrencyMatches || population.RecordIds.Count != submission.RecordCount ||
                             population.ControlTotal != submission.ControlTotal ||
+                            (population.NetMovement.HasValue &&
+                                submission.OpeningBalance + population.NetMovement.Value != submission.ClosingBalance) ||
                             !population.RecordIds.SetEquals(lines))
                             throw new InvalidOperationException($"The live source population for {expected.SourceCode} changed or does not match its reviewed control totals and record-level reconciliation.");
                     }
