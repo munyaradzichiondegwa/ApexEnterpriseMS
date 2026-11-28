@@ -829,6 +829,14 @@ namespace ApexERP.Tests
             Assert.Equal(100m, line.FinalBudget);
             Assert.Equal(40m, line.ActualOnComparableBasis);
             Assert.Equal(60m, line.Variance);
+
+            var postedActual = await ctx.JournalLines.SingleAsync(x => x.GlAccountId == accountId);
+            postedActual.FundCentreId = null;
+            await ctx.SaveChangesAsync();
+            var blocked = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.False(blocked.ComparableActualsAvailable);
+            Assert.Contains("missing or unmatched Fund Centre/cost-centre dimensions", blocked.ComparabilityMessage,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         [PostgresFact]
