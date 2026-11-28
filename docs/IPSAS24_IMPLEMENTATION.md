@@ -29,6 +29,16 @@
 - A separate expected-source-register completeness attestation records entity scope, declared source count and evidence. It requires independent certification and freezes later additions to the certified register. This is a management attestation supported by evidence, not automated discovery of undisclosed bank accounts or source systems.
 - The cash-budget comparison and cash-flow bridge fail closed when the register, source submissions, record mappings, source populations or certifications are missing, unreviewed, stale or inconsistent. CSV export is withheld until comparable actuals, original-to-final explanations and non-zero variance explanations are complete.
 
+### Latest branch verification — 28 November 2026
+
+Commit `b8686380dac6800f0012f680dff10d4c0eed3c86`, GitHub Actions run [#46129204537](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46129204537), passed all three CI jobs:
+
+- Backend build and **336/336 unit and PostgreSQL integration tests**.
+- Frontend type-check, tests and production build.
+- EF Core migration drift check, clean PostgreSQL installation, database hardening, RLS runtime boot and migration checks.
+
+The backend suite includes regression coverage for reviewed source-submission replacement revisions, reuse of certified actuals in the latest revision, immutable historical submissions, changed source-reference invalidation, zero-activity certification, cash actual source coverage, variance controls and register-completeness controls. This is CI verification of the feature branch, not a production migration or statutory approval.
+
 ### Remaining boundaries — do not mark statutory IPSAS 24 release complete
 
 1. **Modified-cash budgets:** not enabled. There is no approved entity-specific recognition policy for commitments/obligations, no approved commitment-to-budget-line mapping, and no controlled liquidation/reversal treatment. A purchase order or encumbrance is not a cash flow.
