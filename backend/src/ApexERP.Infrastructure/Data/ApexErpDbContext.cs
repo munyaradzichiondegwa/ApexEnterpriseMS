@@ -436,7 +436,7 @@ namespace ApexERP.Infrastructure.Data
             });
             modelBuilder.Entity<SettlementComponentAllocation>().ToTable(t =>
             {
-                t.HasCheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP')");
+                t.HasCheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP','TX')");
             });
             modelBuilder.Entity<PublicSectorBudgetVarianceExplanation>()
                  .HasIndex(x => new { x.CompanyId, x.BudgetVersionLineId })
