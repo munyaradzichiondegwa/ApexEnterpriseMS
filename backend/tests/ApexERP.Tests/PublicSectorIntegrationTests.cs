@@ -1274,11 +1274,15 @@ namespace ApexERP.Tests
 
             await using var ctx = db.NewContext(companyId);
             var service = new PublicSectorService(ctx, new AuditService(ctx));
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                service.CreateBudgetReconciliationAsync(companyId, 2026,
-                    PublicSectorBudgetReconciliationType.Basis, "Invalid accrual totals on cash budget",
-                    "Revenue", 0m, 0m, 0m, "WP-IPSAS24-CASH-01", preparerId,
-                    default, 5m, 0m));
+            // Cash-basis budget actuals are reconciled to accrual financial-statement
+            // revenue/expense through an independently approved basis reconciliation.
+            // The old assertion incorrectly treated every cash-budget reconciliation as invalid.
+            var cashBasisReconciliation = await service.CreateBudgetReconciliationAsync(companyId, 2026,
+                PublicSectorBudgetReconciliationType.Basis, "Cash-to-accrual revenue reconciliation",
+                "Revenue", 0m, 0m, 0m, "WP-IPSAS24-CASH-01", preparerId,
+                default, 5m, 0m);
+            Assert.Equal(PublicSectorBudgetReconciliationStatus.Draft, cashBasisReconciliation.Status);
+            Assert.Equal(5m, cashBasisReconciliation.RevenueAmount);
             var actual = await service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
                 budgetLineId, PublicSectorBudgetActualEventKind.CashPayment,
                 PublicSectorBudgetActualSourceKind.BankTransaction, bankTransactionId,
