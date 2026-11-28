@@ -182,7 +182,7 @@ export default function PublicSectorPage() {
         sourceKind: cashActualDraft.sourceKind,
         effectiveDate: `${cashActualDraft.effectiveDate}T00:00:00.000Z`,
       });
-      setMsg("Cash actual captured as a draft. Submit it for independent certification.");
+      setMsg("Cash allocation captured as a draft. For split AR/AP sources, capture every matching budget-line allocation so the total equals the source amount before submitting allocations for independent certification.");
       await loadCashActuals();
     } catch (err) { setError(extractErrorMessage(err)); }
   }
@@ -340,7 +340,7 @@ export default function PublicSectorPage() {
           <div className="border rounded-lg p-4 space-y-3">
             <div>
               <h3 className="font-semibold">Cash-basis budget execution actuals</h3>
-              <p className="text-xs text-slate-500">Supported sources: reconciled bank movements, fully settled single-invoice AR receipts, and independently authorised single-invoice AP payments. AR/AP capture requires one tax-free invoice line, an explicit matching Fund Centre and GL classification, one fully applied settlement allocation, and posted source journals. Multi-line, partial, split, tax, withholding and cost-centre allocations remain blocked. Modified-cash commitments are not enabled.</p>
+              <p className="text-xs text-slate-500">Supported sources: reconciled bank movements, fully settled AR receipts and independently authorised AP payments. AR/AP sources can be allocated across multiple fully settled, tax-free invoices and invoice GL lines by selecting the same source against each matching budget line. Capture every allocation so the amounts reconcile exactly to the receipt/payment before submitting any allocation for independent certification. Partial settlements, VAT, withholding-tax and cost-centre allocations remain blocked pending explicit line-level mapping. Modified-cash commitments are not enabled.</p>
             </div>
             <form onSubmit={createCashActual} className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
