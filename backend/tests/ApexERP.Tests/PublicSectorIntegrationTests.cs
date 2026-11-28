@@ -1278,7 +1278,7 @@ namespace ApexERP.Tests
             // revenue/expense through an independently approved basis reconciliation.
             // The old assertion incorrectly treated every cash-budget reconciliation as invalid.
             var cashBasisReconciliation = await service.CreateBudgetReconciliationAsync(companyId, 2026,
-                PublicSectorBudgetReconciliationType.Basis, "Cash-to-accrual revenue reconciliation",
+                PublicSectorBudgetReconciliationType.Basis, "Cash-to-accrual revenue reconciliation regression",
                 "Revenue", 0m, 0m, 0m, "WP-IPSAS24-CASH-01", preparerId,
                 default, 5m, 0m);
             Assert.Equal(PublicSectorBudgetReconciliationStatus.Draft, cashBasisReconciliation.Status);
