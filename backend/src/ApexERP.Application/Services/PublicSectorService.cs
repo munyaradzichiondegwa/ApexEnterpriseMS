@@ -487,9 +487,9 @@ namespace ApexERP.Application.Services
                 .Append(cashFlow.NetCashFromFinancing).Append('|')
                 .Append(cashFlow.CashAtStart).Append('|').Append(cashFlow.CashAtEnd).Append('|')
                 .Append(cashFlow.ReconciliationDifference).Append('|')
-                .AppendJoin(';', cashFlow.OperatingAdjustments.Select(x => $"{x.Label}:{x.Amount}")).Append('|')
-                .AppendJoin(';', cashFlow.InvestingActivities.Select(x => $"{x.Label}:{x.Amount}")).Append('|')
-                .AppendJoin(';', cashFlow.FinancingActivities.Select(x => $"{x.Label}:{x.Amount}")).Append('|')
+                .AppendJoin(';', cashFlow.OperatingAdjustments.OrderBy(x => x.Label, StringComparer.Ordinal).Select(x => $"{x.Label}:{x.Amount}")).Append('|')
+                .AppendJoin(';', cashFlow.InvestingActivities.OrderBy(x => x.Label, StringComparer.Ordinal).Select(x => $"{x.Label}:{x.Amount}")).Append('|')
+                .AppendJoin(';', cashFlow.FinancingActivities.OrderBy(x => x.Label, StringComparer.Ordinal).Select(x => $"{x.Label}:{x.Amount}")).Append('|')
                 .AppendJoin(';', expectedSources.Select(x =>
                     $"{x.Id:N}:{x.SourceKind}:{x.SourceCode}:{x.SourceName}:{x.SourceIdentifier}:{x.IsRequired}:{x.EffectiveFrom:O}:{x.EffectiveTo:O}:{x.Status}")).Append('|')
                 .AppendJoin(';', latestSubmissions.Select(x =>
