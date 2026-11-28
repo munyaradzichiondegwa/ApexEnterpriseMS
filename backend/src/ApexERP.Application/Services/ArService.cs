@@ -290,7 +290,7 @@ namespace ApexERP.Application.Services
             {
                 if (invoice.VatAmount != 0m)
                     throw new InvalidOperationException("VAT-bearing AR receipts require explicit settlement allocations to invoice lines and their tax components.");
-                if (appliedAmount < invoice.Total && invoiceLines.Select(x => (x.GlAccountId, x.CostCentreId)).Distinct().Count() > 1)
+                if (appliedAmount < invoice.Total && invoiceLines.Count > 1)
                     throw new InvalidOperationException("A partial AR settlement across multiple dimensions requires explicit settlement component allocations.");
                 if (invoiceLines.Count == 0 || invoiceLines.Sum(x => x.LineSubtotal) != invoice.Total)
                     throw new InvalidOperationException("Tax-free AR invoice lines must reconcile to the invoice total before automatic settlement allocation.");
