@@ -3387,7 +3387,12 @@ namespace ApexERP.Application.Services
             if (policy.Treatment == TaxBudgetTreatment.SeparateClassification)
                 return (policy.BudgetGlAccountId!.Value, policy.FundCentreId!.Value, policy.CostCentreId, true);
             if (settlementKind == "TX")
-                return (component.GlAccountId, invoiceFundCentreId, null, true);
+            {
+                var whtInvoiceLines = await _db.ApInvoiceLines.Where(x => x.ApInvoiceId == invoiceId).ToListAsync(ct);
+                if (whtInvoiceLines.Count != 1)
+                    throw new InvalidOperationException("WHT IncludeInBudgetActual requires a single AP invoice line; multi-line WHT must use an approved separate classification or exclusion, not inferred proration.");
+                return (whtInvoiceLines[0].GlAccountId, invoiceFundCentreId, whtInvoiceLines[0].CostCentreId, true);
+            }
             if (!component.InvoiceLineId.HasValue)
                 throw new InvalidOperationException("An included VAT component must retain its originating invoice line.");
             if (settlementKind == "AR")
