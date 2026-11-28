@@ -1165,6 +1165,14 @@ namespace ApexERP.Tests
             var bankTransactionId = Guid.NewGuid();
             var unmappedBankTransactionId = Guid.NewGuid();
             var lateBankTransactionId = Guid.NewGuid();
+            var statementBatchId = Guid.NewGuid();
+            var statementLineId = Guid.NewGuid();
+            var excludedStatementLineId = Guid.NewGuid();
+            var bankUploaderId = Guid.NewGuid();
+            var bankAuthenticatorId = Guid.NewGuid();
+            var bankCompletenessCertifierId = Guid.NewGuid();
+            var statementPeriodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var statementPeriodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var budgetVersionId = Guid.NewGuid();
             var budgetLineId = Guid.NewGuid();
             var preparerId = Guid.NewGuid();
@@ -1219,7 +1227,8 @@ namespace ApexERP.Tests
                     Id = bankTransactionId, CompanyId = companyId, BankAccountId = bankAccountId,
                     TransactionDate = effectiveDate, Description = "Verified supplier payment",
                     Debit = 75m, Credit = 0m, Reference = "BANK-REF-001",
-                    IsReconciled = true, JournalEntryId = journalId
+                    IsReconciled = true, JournalEntryId = journalId,
+                    MatchedStatementLineHash = statementLineId
                 });
                 seed.BankTransactions.Add(new BankTransaction
                 {
@@ -1227,13 +1236,61 @@ namespace ApexERP.Tests
                     TransactionDate = effectiveDate,
                     Description = "Bank charge excluded from budget actual allocation",
                     Debit = 25m, Credit = 0m, Reference = "BANK-REF-002",
-                    IsReconciled = true, JournalEntryId = excludedJournalId
+                    IsReconciled = true, JournalEntryId = excludedJournalId,
+                    MatchedStatementLineHash = excludedStatementLineId
                 });
                 seed.JournalLines.Add(new JournalLine
                 {
                     JournalEntryId = journalId, GlAccountId = accountId, FundCentreId = fundCentreId,
                     Debit = 75m, Credit = 0m, BaseDebit = 75m, BaseCredit = 0m
                 });
+                // The bank population is now backed by a retained, independently authenticated
+                // statement. Both statement rows are matched to the bank ledger; the separate
+                // budget-source reconciliation below excludes the bank charge from budget actuals.
+                seed.BankStatementImportBatches.Add(new BankStatementImportBatch
+                {
+                    Id = statementBatchId, CompanyId = companyId, BankAccountId = bankAccountId,
+                    SourceInstitution = "Test Bank", SourceAccountReference = "TEST-001",
+                    StatementReference = "TEST-STATEMENT-2026",
+                    PeriodStart = statementPeriodStart, PeriodEnd = statementPeriodEnd,
+                    OpeningBalance = 1000m, ClosingBalance = 900m,
+                    TotalDebits = 100m, TotalCredits = 0m, TransactionCount = 2,
+                    OriginalFileName = "statement-2026.csv", MediaType = "text/csv",
+                    ParserVersion = BankStatementCsvParser.ParserVersion,
+                    Sha256 = new string('a', 64), ByteLength = 32,
+                    OriginalBytes = System.Text.Encoding.UTF8.GetBytes("authenticated-test-statement"),
+                    UploadedBy = bankUploaderId, UploadedAt = DateTime.UtcNow,
+                    AuthenticationMethod = BankStatementOriginAuthenticationMethod.IndependentBankConfirmation,
+                    AuthenticationEvidenceReference = "BANK-CONFIRM-TEST-2026",
+                    AuthenticatedBy = bankAuthenticatorId, AuthenticatedAt = DateTime.UtcNow,
+                    Status = BankStatementImportStatus.Certified,
+                    CompletenessCertifiedBy = bankCompletenessCertifierId,
+                    CompletenessCertifiedAt = DateTime.UtcNow,
+                    CreatedBy = bankUploaderId
+                });
+                seed.BankStatementImportedTransactions.AddRange(
+                    new BankStatementImportedTransaction
+                    {
+                        Id = statementLineId, CompanyId = companyId, ImportBatchId = statementBatchId,
+                        BankAccountId = bankAccountId, ExternalTransactionId = "EXT-TXN-001",
+                        TransactionDate = effectiveDate, Description = "Verified supplier payment",
+                        Reference = "BANK-REF-001", Debit = 75m, Credit = 0m, Currency = "USD",
+                        SourceLineNumber = 2, TransactionFingerprint = new string('b', 64),
+                        Status = BankStatementImportedTransactionStatus.Matched,
+                        MatchedBankTransactionId = bankTransactionId, MatchedBy = bankAuthenticatorId,
+                        MatchedAt = DateTime.UtcNow, CreatedBy = bankUploaderId
+                    },
+                    new BankStatementImportedTransaction
+                    {
+                        Id = excludedStatementLineId, CompanyId = companyId, ImportBatchId = statementBatchId,
+                        BankAccountId = bankAccountId, ExternalTransactionId = "EXT-TXN-002",
+                        TransactionDate = effectiveDate, Description = "Separately identified bank charge",
+                        Reference = "BANK-REF-002", Debit = 25m, Credit = 0m, Currency = "USD",
+                        SourceLineNumber = 3, TransactionFingerprint = new string('c', 64),
+                        Status = BankStatementImportedTransactionStatus.Matched,
+                        MatchedBankTransactionId = unmappedBankTransactionId, MatchedBy = bankAuthenticatorId,
+                        MatchedAt = DateTime.UtcNow, CreatedBy = bankUploaderId
+                    });
                 var version = new PublicSectorBudgetVersion
                 {
                     Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
