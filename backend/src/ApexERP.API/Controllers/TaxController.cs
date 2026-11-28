@@ -8,6 +8,7 @@ namespace ApexERP.API.Controllers
 {
     public sealed record ZimbabweDswtCertificateRequest(string CertificateNumber, DateTime IssuedAt);
     public sealed record ZimbabweDswtRemittanceRequest(DateTime RemittedAt, string EvidenceReference);
+    public sealed record ZimbabweDswtApPaymentReconciliationRequest(Guid ApPaymentId);
 
     [Route("api/v1/tax")]
     public class TaxController : ApiControllerBase
@@ -64,6 +65,13 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> GetDswtMonthlyRegister([FromQuery] int year, [FromQuery] int month)
         {
             return Ok(await _dswt.GenerateMonthlyRegisterAsync(CompanyId, year, month));
+        }
+
+
+        [HttpPut("dswt/withholdings/{id:guid}/ap-payment-reconciliation")]
+        public async Task<IActionResult> ReconcileDswtToApPayment(Guid id, [FromBody] ZimbabweDswtApPaymentReconciliationRequest request)
+        {
+            return Ok(await _dswt.ReconcileToApPaymentAsync(CompanyId, id, request.ApPaymentId));
         }
 
         [HttpPut("dswt/withholdings/{id:guid}/certificate")]
