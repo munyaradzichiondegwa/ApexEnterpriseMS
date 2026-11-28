@@ -657,15 +657,21 @@ namespace ApexERP.Tests
             var service = new PublicSectorService(ctx, new AuditService(ctx));
             var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateBudgetVersionAsync(companyId, 2026,
+                PublicSectorBudgetVersionKind.Original, "USD", AccountingBasis.Accrual,
+                "ZFRM Appendix 5", "IPSAS 24 MDA", periodStart, periodEnd, "Appropriation Act 2026", null,
+                new[] { new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null,
+                    "Operating Expense", "EC-01", 100m) }, Guid.NewGuid()));
+
             var original = await service.CreateBudgetVersionAsync(companyId, 2026,
                 PublicSectorBudgetVersionKind.Original, "USD", AccountingBasis.Accrual,
-                "Tenant approved programme/economic classification", "IPSAS 24 MDA",
+                "ZFRM Appendix 5", "IPSAS 24 MDA",
                 periodStart, periodEnd, "Appropriation Act 2026", null,
                 new[]
                 {
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 100m),
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 50m),
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, removedExpenseId, null, "Removed Programme Expense", "EC-03", 20m)
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 100m, null, "Use of Goods and services"),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 50m, null, "Sales of goods and services"),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, removedExpenseId, null, "Removed Programme Expense", "EC-03", 20m, null, "Compensation of Employees")
                 }, Guid.NewGuid());
             original.Status = PublicSectorBudgetVersionStatus.Approved;
             original.ApprovedBy = Guid.NewGuid();
@@ -674,14 +680,14 @@ namespace ApexERP.Tests
 
             var revised = await service.CreateBudgetVersionAsync(companyId, 2026,
                 PublicSectorBudgetVersionKind.Revised, "USD", AccountingBasis.Accrual,
-                "Tenant approved programme/economic classification", "IPSAS 24 MDA",
+                "ZFRM Appendix 5", "IPSAS 24 MDA",
                 periodStart, periodEnd, "Supplementary Appropriation 2026",
                 "Supplementary funding and reprioritisation approved.",
                 new[]
                 {
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 120m, "Note 12"),
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 70m, "Note 13"),
-                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, addedExpenseId, null, "New Programme Expense", "EC-02", 30m, "Note 14")
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 120m, "Note 12", "Use of Goods and services"),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 70m, "Note 13", "Sales of goods and services"),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, addedExpenseId, null, "New Programme Expense", "EC-02", 30m, "Note 14", "Grants")
                 }, Guid.NewGuid(), default, PublicSectorBudgetAmendmentNature.Mixed);
             revised.Status = PublicSectorBudgetVersionStatus.Approved;
             revised.ApprovedBy = Guid.NewGuid();
@@ -728,6 +734,8 @@ namespace ApexERP.Tests
             Assert.Equal(60m, expense.ActualOnComparableBasis);
             Assert.Equal(60m, expense.Variance);
             Assert.Equal("Note 12", expense.NoteReference);
+            Assert.Equal("Use of Goods and services", expense.TreasuryClassificationCode);
+            Assert.Equal("Expense", expense.AccountType);
             var income = Assert.Single(report.Lines, x => x.AccountCode == "4100");
             Assert.Equal(20m, income.ActualOnComparableBasis);
             var added = Assert.Single(report.Lines, x => x.AccountCode == "5200");
