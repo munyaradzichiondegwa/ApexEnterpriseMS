@@ -3835,8 +3835,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
                     b.HasIndex("BudgetVersionId").HasDatabaseName("IX_ExpectedCashSourceRegisterAttestations_BudgetVersionId");
-                    b.HasIndex("CompanyId", "BudgetVersionId").IsUnique()
-                        .HasDatabaseName("UX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
+                    b.HasIndex("CompanyId", "BudgetVersionId")
+                        .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
                     b.ToTable("PublicSectorExpectedCashSourceRegisterAttestations", t =>
                         {
                             t.HasCheckConstraint("CK_ExpectedCashSourceRegisterAttestation_Count", "\"ExpectedSourceCount\" > 0");
