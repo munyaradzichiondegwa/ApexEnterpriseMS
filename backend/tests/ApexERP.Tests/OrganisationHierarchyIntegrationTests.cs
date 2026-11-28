@@ -187,4 +187,27 @@ public sealed class OrganisationHierarchyIntegrationTests
         var costCentreDeactivated = await api.DeactivateCostCentre(company.Id, centre.Id, CancellationToken.None);
         Assert.IsType<OkObjectResult>(costCentreDeactivated);
     }
+
+
+    [PostgresFact]
+    public async Task Zimbabwe_tax_profile_update_writes_masked_before_and_after_values_to_audit_log()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var seeded = await SeedCompanyAsync(db);
+        var userId = Guid.NewGuid();
+        await using var ctx = db.NewContext(seeded.Company.Id, userId, seeded.TenantId);
+        var controller = Controller(ctx, seeded.Company.Id, seeded.TenantId);
+
+        var result = await controller.UpdateZimbabweTaxProfile(
+            seeded.Company.Id, new UpdateZimbabweTaxProfileRequest("1234567890"), CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        var audit = await ctx.AuditLogs.SingleAsync(x =>
+            x.CompanyId == seeded.Company.Id &&
+            x.Action == "Company.ZimbabweTaxProfileUpdated" &&
+            x.EntityId == seeded.Company.Id);
+        Assert.Contains("***7890", audit.AfterValueJson);
+        Assert.DoesNotContain("1234567890", audit.AfterValueJson);
+        Assert.DoesNotContain("1234567890", audit.BeforeValueJson);
+    }
 }
