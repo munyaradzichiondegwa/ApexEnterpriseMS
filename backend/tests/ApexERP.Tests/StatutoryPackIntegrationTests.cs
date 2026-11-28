@@ -184,4 +184,58 @@ public sealed class StatutoryPackIntegrationTests
         Assert.Equal(next.Version, (await service.GetApplicableAsync(companyId, "ZW", new DateTime(2027, 1, 1))).Version);
     }
 
+    [PostgresFact]
+    public async Task Unsupported_jurisdiction_cannot_publish_through_the_Zimbabwe_tax_activation_mapper()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var companyId = Guid.NewGuid();
+        await using (var seed = db.NewContext(companyId))
+        {
+            seed.Companies.Add(new Company
+            {
+                Id = companyId, Name = "Unsupported Jurisdiction Activation",
+                BaseCurrency = "USD", FunctionalCurrency = "USD"
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var ctx = db.NewContext(companyId);
+        var packs = new StatutoryPackService(ctx, new AuditService(ctx));
+        var sources = new List<StatutoryPackSource>
+        {
+            new("ZIMRA", "Test tax source", "https://example.gov/tax", null, new DateTime(2026, 1, 1)),
+            new("NSSA", "Test social security source", "https://example.gov/social-security", null, new DateTime(2026, 1, 1))
+        };
+        const string rules = """
+        {
+          "coverage": "complete",
+          "paye": {
+            "aidsLevyRate": 0.03,
+            "USD": { "monthly": [ { "from": 0, "to": null, "rate": 0.20, "deduction": 0 } ] },
+            "ZWG": { "monthly": [ { "from": 0, "to": null, "rate": 0.10, "deduction": 0 } ] }
+          },
+          "nssa": {
+            "USD": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 700 },
+            "ZWG": { "employeeRate": 0.045, "employerRate": 0.045, "ceiling": 7000 }
+          },
+          "corporateIncomeTax": { "standardCompanyOrTrustRate": 0.25 },
+          "vat": { "standardRate": 0.155, "zeroRatedSupplies": [], "exemptSupplies": [] }
+        }
+        """;
+
+        await packs.CreateDraftAsync(companyId, "US", "United States", 1,
+            new DateTime(2026, 1, 1), new DateTime(2026, 12, 31), rules, sources, Guid.NewGuid());
+        await packs.ReviewAsync(companyId, "US", 1, Guid.NewGuid());
+        await packs.ApproveAsync(companyId, "US", 1, Guid.NewGuid());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            packs.PublishAsync(companyId, "US", 1, Guid.NewGuid()));
+
+        var stored = Assert.Single(await packs.ListAsync(companyId, "US"));
+        Assert.Equal("Approved", stored.Status);
+        Assert.Empty(await ctx.PayeTaxBands.Where(x => x.CompanyId == companyId).ToListAsync());
+        Assert.Empty(await ctx.StatutoryRates.Where(x => x.CompanyId == companyId).ToListAsync());
+        Assert.Empty(await ctx.TaxCodes.Where(x => x.CompanyId == companyId).ToListAsync());
+    }
+
 }
