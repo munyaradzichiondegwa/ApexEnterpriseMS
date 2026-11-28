@@ -616,7 +616,7 @@ namespace ApexERP.API.Controllers
 
         private const string BudgetStatementIssueKeyPrefix = "ipsas24.statement.issue:";
 
-        private async Task<(BudgetComparisonReport Report, string SnapshotJson, string SnapshotSha256)>
+        private async Task<(PublicSectorService.BudgetComparisonReport Report, string SnapshotJson, string SnapshotSha256)>
             BuildBudgetStatementIssueSnapshotAsync(Guid companyId, int financialYear,
                 DateTime? statementPeriodStart, DateTime? statementPeriodEnd, string? statementEntityScope,
                 string templateAuthorityReference, string templateVersion, CancellationToken ct)
