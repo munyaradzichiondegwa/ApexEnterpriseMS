@@ -854,40 +854,59 @@ namespace ApexERP.Application.Services
 
                 var statementBatches = await _db.BankStatementImportBatches.Where(x =>
                     x.CompanyId == companyId && x.BankAccountId == sourceId &&
-                    x.PeriodStart == periodStart && x.PeriodEnd == periodEnd).ToListAsync(ct);
+                    x.PeriodStart >= periodStart && x.PeriodEnd <= periodEnd)
+                    .OrderBy(x => x.PeriodStart).ToListAsync(ct);
                 if (rows.Count > 0)
                 {
-                    if (statementBatches.Count != 1 ||
-                        statementBatches[0].Status != BankStatementImportStatus.Certified ||
-                        statementBatches[0].AuthenticationMethod != BankStatementOriginAuthenticationMethod.IndependentBankConfirmation ||
-                        !statementBatches[0].AuthenticatedBy.HasValue ||
-                        !statementBatches[0].CompletenessCertifiedBy.HasValue ||
-                        statementBatches[0].UploadedBy == statementBatches[0].AuthenticatedBy ||
-                        statementBatches[0].UploadedBy == statementBatches[0].CompletenessCertifiedBy ||
-                        statementBatches[0].AuthenticatedBy == statementBatches[0].CompletenessCertifiedBy)
-                        throw new InvalidOperationException($"Bank source {expected.SourceCode} requires one independently authenticated and completeness-certified original statement for the exact reporting period.");
-                    var batch = statementBatches[0];
+                    if (statementBatches.Count == 0)
+                        throw new InvalidOperationException($"Bank source {expected.SourceCode} requires authenticated external statement evidence for the reporting period.");
+                    var coveredUntil = periodStart;
+                    decimal statementDebits = 0m, statementCredits = 0m;
+                    foreach (var batch in statementBatches)
+                    {
+                        if (batch.PeriodStart != coveredUntil || batch.PeriodEnd <= batch.PeriodStart ||
+                            batch.Status != BankStatementImportStatus.Certified ||
+                            batch.AuthenticationMethod != BankStatementOriginAuthenticationMethod.IndependentBankConfirmation ||
+                            !batch.AuthenticatedBy.HasValue || !batch.AuthenticatedAt.HasValue ||
+                            !batch.CompletenessCertifiedBy.HasValue || !batch.CompletenessCertifiedAt.HasValue ||
+                            batch.UploadedBy == batch.AuthenticatedBy ||
+                            batch.UploadedBy == batch.CompletenessCertifiedBy ||
+                            batch.AuthenticatedBy == batch.CompletenessCertifiedBy ||
+                            batch.ByteLength != batch.OriginalBytes.LongLength ||
+                            batch.Sha256.Length != 64 || !batch.Sha256.All(Uri.IsHexDigit) ||
+                            batch.OpeningBalance + batch.TotalCredits - batch.TotalDebits != batch.ClosingBalance ||
+                            !string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException($"Bank source {expected.SourceCode} has an unauthenticated, incomplete, discontinuous or invalid statement batch.");
+                        coveredUntil = batch.PeriodEnd;
+                        statementDebits += batch.TotalDebits;
+                        statementCredits += batch.TotalCredits;
+                    }
+                    if (coveredUntil != periodEnd)
+                        throw new InvalidOperationException($"Bank source {expected.SourceCode} statements do not cover the complete reporting period without gaps.");
+                    for (var i = 1; i < statementBatches.Count; i++)
+                    {
+                        if (statementBatches[i - 1].ClosingBalance != statementBatches[i].OpeningBalance)
+                            throw new InvalidOperationException($"Bank source {expected.SourceCode} consecutive statement opening and closing balances do not agree.");
+                    }
+
+                    var batchIds = statementBatches.Select(x => x.Id).ToArray();
                     var statementRows = await _db.BankStatementImportedTransactions.Where(x =>
-                        x.CompanyId == companyId && x.ImportBatchId == batch.Id).ToListAsync(ct);
-                    if (statementRows.Count != batch.TransactionCount ||
+                        x.CompanyId == companyId && batchIds.Contains(x.ImportBatchId)).ToListAsync(ct);
+                    if (statementRows.Count != statementBatches.Sum(x => x.TransactionCount) ||
                         statementRows.Any(x => x.Status != BankStatementImportedTransactionStatus.Matched ||
                             !x.MatchedBankTransactionId.HasValue))
-                        throw new InvalidOperationException($"Bank source {expected.SourceCode} contains unmatched or excluded statement rows; complete source-register exclusion review before certification.");
+                        throw new InvalidOperationException($"Bank source {expected.SourceCode} contains unmatched or excluded statement rows; complete independent source-register exclusion review before certification.");
                     var matched = statementRows.ToDictionary(x => x.Id, x => x.MatchedBankTransactionId!.Value);
                     if (rows.Any(x => !x.IsReconciled || !x.MatchedStatementLineHash.HasValue ||
                         !matched.TryGetValue(x.MatchedStatementLineHash.Value, out var bankTransactionId) ||
                         bankTransactionId != x.Id) || matched.Count != rows.Count)
                         throw new InvalidOperationException($"Bank source {expected.SourceCode} statement rows do not match the complete live bank-transaction population.");
-                    if (batch.TotalDebits != rows.Sum(x => x.Debit) ||
-                        batch.TotalCredits != rows.Sum(x => x.Credit) ||
-                        batch.TransactionCount != rows.Count ||
-                        !string.Equals(batch.Sha256, batch.Sha256.Trim(), StringComparison.Ordinal) ||
-                        !string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException($"Bank source {expected.SourceCode} statement totals, transaction count or currency no longer agree with the live bank population.");
+                    if (statementDebits != rows.Sum(x => x.Debit) ||
+                        statementCredits != rows.Sum(x => x.Credit))
+                        throw new InvalidOperationException($"Bank source {expected.SourceCode} statement totals no longer agree with the live bank population.");
                 }
-                else if (statementBatches.Any(x => x.Status != BankStatementImportStatus.Certified ||
-                    x.TransactionCount != 0))
-                    throw new InvalidOperationException($"Bank source {expected.SourceCode} has an incomplete statement batch despite having no matched bank transactions.");
+                else if (statementBatches.Count > 0)
+                    throw new InvalidOperationException($"Bank source {expected.SourceCode} has external statement transactions but no matching live bank transaction population.");
                 var records = rows.ToDictionary(x => x.Id, x => new ExpectedCashSourceRecord(
                     Math.Max(x.Debit, x.Credit),
                     string.IsNullOrWhiteSpace(x.Reference) ? x.Id.ToString("N") : x.Reference!,
