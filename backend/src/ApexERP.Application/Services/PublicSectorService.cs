@@ -43,10 +43,10 @@ namespace ApexERP.Application.Services
 
 
         public sealed record BudgetVersionLineInput(Guid FundCentreId, Guid GlAccountId, Guid? CostCentreId,
-            string Description, string ClassificationCode, decimal Amount);
+            string Description, string ClassificationCode, decimal Amount, string? NoteReference = null);
         public sealed record BudgetComparisonLine(int LineNumber, string Description, string FundCentreCode,
             string FundCentreName, string FundCentreLevel, string CostCentreCode, string CostCentreName,
-            string AccountCode, string AccountName, string ClassificationCode,
+            string AccountCode, string AccountName, string ClassificationCode, string? NoteReference,
             decimal OriginalBudget, decimal? FinalBudget, decimal? ActualOnComparableBasis,
             decimal? Variance, decimal? VariancePercent, string? OriginalToFinalExplanation,
             Guid BudgetVersionLineId);
@@ -134,7 +134,9 @@ namespace ApexERP.Application.Services
                 {
                     CompanyId = companyId, FundCentreId = line.FundCentreId, GlAccountId = line.GlAccountId,
                     CostCentreId = line.CostCentreId, LineNumber = index + 1, Description = line.Description.Trim(),
-                    ClassificationCode = line.ClassificationCode.Trim(), Amount = line.Amount, CreatedBy = actorId
+                    ClassificationCode = line.ClassificationCode.Trim(),
+                    NoteReference = string.IsNullOrWhiteSpace(line.NoteReference) ? null : line.NoteReference.Trim(),
+                    Amount = line.Amount, CreatedBy = actorId
                 }).ToList()
             };
             _db.PublicSectorBudgetVersions.Add(version);
@@ -1609,6 +1611,7 @@ namespace ApexERP.Application.Services
                     line.Description, fund.Code, fund.Name, fund.Level.ToString(),
                     costCentre?.Code ?? string.Empty, costCentre?.Name ?? string.Empty,
                     account.Code, account.Name, line.ClassificationCode,
+                    dimension.FinalLine?.NoteReference ?? dimension.OriginalLine?.NoteReference,
                     originalAmount, finalAmount, actual, variance,
                     actual.HasValue && finalAmount != 0m
                         ? Math.Round(variance!.Value / finalAmount * 100m, 2) : null,
@@ -1657,7 +1660,8 @@ namespace ApexERP.Application.Services
 
         public async Task<PublicSectorBudgetVarianceExplanation> CreateBudgetVarianceExplanationAsync(
             Guid companyId, Guid budgetVersionId, Guid budgetVersionLineId,
-            string explanation, string evidenceReference, Guid actorId, CancellationToken ct = default)
+            string explanation, string evidenceReference, Guid actorId, CancellationToken ct = default,
+            string? commentReference = null)
         {
             if (string.IsNullOrWhiteSpace(explanation) || string.IsNullOrWhiteSpace(evidenceReference))
                 throw new InvalidOperationException("A variance explanation and supporting evidence reference are required.");
@@ -1673,13 +1677,15 @@ namespace ApexERP.Application.Services
                 CompanyId = companyId, BudgetVersionId = budgetVersionId,
                 BudgetVersionLineId = budgetVersionLineId, VarianceAmount = line.Variance.Value,
                 Explanation = explanation.Trim(), EvidenceReference = evidenceReference.Trim(),
+                CommentReference = string.IsNullOrWhiteSpace(commentReference)
+                    ? evidenceReference.Trim() : commentReference.Trim(),
                 Status = "Draft", CreatedBy = actorId
             };
             _db.PublicSectorBudgetVarianceExplanations.Add(item);
             _audit.Record(companyId, actorId, "PublicSectorBudgetVarianceExplanation.Created", "PublicSector",
                 nameof(PublicSectorBudgetVarianceExplanation), item.Id, null,
                 new { item.BudgetVersionId, item.BudgetVersionLineId, item.VarianceAmount,
-                    item.Explanation, item.EvidenceReference });
+                    item.Explanation, item.EvidenceReference, item.CommentReference });
             await _db.SaveChangesAsync(ct);
             return item;
         }
