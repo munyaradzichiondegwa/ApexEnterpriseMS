@@ -93,9 +93,9 @@ No modified-cash rule should be enabled by default. Each entity must configure a
 Implemented on the feature branch:
 
 - Added tenant-scoped `PublicSectorBudgetExecutionActual` persistence and migration `20261128040000_AddIpsas24BudgetExecutionActuals`.
-- Added source kinds for bank transactions, AR receipts and AP payments; event direction for cash receipts/payments; budget-line, Fund Centre, GL and cash-flow section mappings; source date/reference; effective date; currency; and certification metadata.
+- Added a bank-transaction source kind; event direction for cash receipts/payments; budget-line, Fund Centre, GL and cash-flow section mappings; source date/reference; effective date; currency; and certification metadata.
 - Capture is restricted to approved cash-basis budget versions. Modified-cash capture remains disabled until entity-specific rules are formally configured.
-- Bank transaction capture requires a reconciled transaction linked to a posted journal and an available company bank account. AR receipt capture requires a posted journal. AP payment capture requires independent payment authorisation and a posted journal.
+- Bank transaction capture requires a reconciled transaction linked to a posted journal and an available company bank account. The posted journal must contain an exact matching amount against the selected income/expense GL account, Fund Centre and cost centre. AR/AP settlement capture is deliberately rejected until invoice-allocation mapping is implemented.
 - Source amount, currency, date and reference are derived from the source record rather than trusted from the API request. Source currency must equal the budget currency; FX conversion is not silently approximated.
 - A company/source-kind/source-record unique index prevents duplicate capture. Company query filtering is applied to the new entity.
 - Added draft → pending certification → certified lifecycle. The certifier must differ from the creator. PostgreSQL trigger prevents deletion, evidence edits and mutation of certification metadata after certification.
@@ -105,7 +105,7 @@ Implemented on the feature branch:
 ### Still not implemented / not verified
 
 - Budget actuals are not yet included in the IPSAS 24 comparison statement; statement comparability remains blocked for cash budgets until a period-coverage certification and reconciliation bridge are implemented.
-- No frontend cash-actual capture/review screen yet.
+- No frontend cash-actual capture/review screen yet. AR/AP settlement allocation mapping is also outstanding; only directly mapped reconciled bank journal movements are accepted.
 - Modified-cash commitments, source snapshot hashing, compensating reversal workflow, foreign-currency source conversion and source completeness attestations remain disabled/outstanding.
 - Automated reconciliation to the three Statement of Cash Flows sections is not yet implemented.
 - The new migration, EF snapshot and PostgreSQL tests have not yet been executed in CI or against a live PostgreSQL instance in this work session.
