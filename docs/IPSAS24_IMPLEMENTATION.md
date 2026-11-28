@@ -19,6 +19,31 @@
 - Accrual GL actuals are labelled comparable only when the budget basis is accrual, the reporting period/classification/entity metadata agree across versions, the entity scope exactly matches the registered company name, the budget currency matches the company's functional currency, and each budget classification code matches the mapped GL account SubType. Cash-basis budgets do not reuse accrual GL amounts as if they were comparable.
 - Added tenant-scoped reconciliation records for basis, timing, entity and presentation adjustments, with preparer capture, independent approval workflow, supporting reference and statement cash-flow section amounts. The statement displays approved reconciliation rows only.
 
+## Phase 3 — modified-cash commitment recognition
+
+**Status: not enabled; policy and classification controls are still required.**
+
+IPSAS 24 permits an approved budget to include commitments and changes in commitments, but the entity must disclose its budgetary basis and reconcile modified-cash actuals to the statement of cash flows. Unliquidated obligations are not cash flows and must be identified as a basis difference. The system must not treat an operational encumbrance as a cash payment or as an IPSAS financial-statement expense.
+
+The existing procurement commitment register is an operational budget-control mechanism:
+- An approved purchase order creates a commitment against a Fund Centre.
+- Posted AP invoices realise the commitment, including partial realisation.
+- Cancellation/release reduces or closes the encumbrance.
+- The commitment record currently has no approved GL budget-line mapping or commitment-specific classification evidence. Purchase-order lines also do not carry the complete Fund Centre/GL/cost-centre/tax classification needed for IPSAS 24 budget actuals.
+
+Accordingly, the system must not yet add Commitment.Amount or Commitment.RealisedAmount to IPSAS 24 actuals. Doing so would risk duplicate recognition when the related AP invoice/payment is captured and would not establish the correct budget-line classification.
+
+The implementation contract for this phase is:
+1. Add a distinct ModifiedCash budget basis without changing the persisted numeric values of existing Accrual and Cash enum members.
+2. Require an entity-specific, independently approved modified-cash policy reference on the approved budget version. The policy must state which obligation stages qualify (approved PO/contract, goods/services received, verified invoice, or another legally approved trigger), the recognition date, treatment of amendments/cancellations and the relationship to cash disbursements.
+3. Add a tenant-scoped, independently approved mapping from the commitment/obligation source to one or more approved budget lines. The mapping must carry Fund Centre, GL classification, optional cost centre, currency, period and evidence references, and must reconcile exactly to the eligible source amount.
+4. Keep commitment-basis actuals distinct from cash receipts/payments. Do not count a disbursement and its underlying commitment twice; maintain a source relationship and a controlled liquidation/reversal allocation.
+5. Revalidate the commitment, purchase order, approval, status, amount, currency and source mapping at certification and statement generation. Reject cancelled, released, over-realised, unapproved or cross-company sources.
+6. Reconcile unliquidated obligations and other modified-cash adjustments to the independently reviewed Statement of Cash Flows. A commitment register total is not itself a cash-flow amount.
+7. Do not enable the basis for a Zimbabwe public-sector entity until the applicable Treasury/Accounting Officer policy and classification instructions are formally supplied and approved. The available Zimbabwe transitional IPSAS guidance does not itself define a universal modified-cash commitment recognition rule.
+
+Acceptance tests must cover independent approval, approved-PO eligibility, commitment amendments, partial invoice realisation, cancellation, payment liquidation without double-counting, period cut-off, source changes after approval, duplicate mapping, exact allocation totals, tenant isolation/RLS and the cash-flow reconciliation bridge.
+
 ## Explicit remaining controls
 
 1. For cash/modified-cash budgets, comparable actuals must be sourced from the budgetary ledger/cash and commitment records, independently certified and reconciled to the statement of cash flows. Accrual GL postings are deliberately not substituted.
