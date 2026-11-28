@@ -398,6 +398,99 @@ namespace ApexERP.Application.Services
             return item;
         }
 
+        private static readonly HashSet<string> ExpectedCashSourceKinds = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "BankAccount", "ReceivablesControl", "PayablesControl", "Cashbook"
+        };
+
+        public async Task<IReadOnlyList<PublicSectorExpectedCashSource>> GetExpectedCashSourcesAsync(
+            Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
+        {
+            return await _db.PublicSectorExpectedCashSources
+                .Where(x => x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId)
+                .OrderBy(x => x.SourceKind).ThenBy(x => x.SourceCode).ToListAsync(ct);
+        }
+
+        public async Task<PublicSectorExpectedCashSource> CreateExpectedCashSourceAsync(
+            Guid companyId, Guid budgetVersionId, string sourceKind, string sourceCode,
+            string sourceName, string? sourceIdentifier, bool isRequired,
+            DateTime effectiveFrom, DateTime effectiveTo, Guid actorId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(sourceKind) || !ExpectedCashSourceKinds.Contains(sourceKind.Trim()) ||
+                string.IsNullOrWhiteSpace(sourceCode) || string.IsNullOrWhiteSpace(sourceName) ||
+                effectiveFrom >= effectiveTo)
+                throw new InvalidOperationException("A supported source kind, source code, source name and valid effective period are required.");
+
+            var version = await _db.PublicSectorBudgetVersions.FirstOrDefaultAsync(x =>
+                x.Id == budgetVersionId && x.CompanyId == companyId &&
+                x.Status == PublicSectorBudgetVersionStatus.Approved &&
+                x.AccountingBasis == AccountingBasis.Cash, ct)
+                ?? throw new InvalidOperationException("An approved cash-basis budget version is required for the expected-source register.");
+            if (effectiveFrom < version.PeriodStart || effectiveTo > version.PeriodEnd)
+                throw new InvalidOperationException("The expected source effective period must be contained within the approved budget reporting period.");
+
+            var kind = sourceKind.Trim();
+            var code = sourceCode.Trim();
+            if (await _db.PublicSectorExpectedCashSources.AnyAsync(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId &&
+                x.SourceKind == kind && x.SourceCode == code, ct))
+                throw new InvalidOperationException("An expected source with this kind and code is already registered for the budget version.");
+
+            var item = new PublicSectorExpectedCashSource
+            {
+                CompanyId = companyId, BudgetVersionId = budgetVersionId,
+                SourceKind = kind, SourceCode = code, SourceName = sourceName.Trim(),
+                SourceIdentifier = string.IsNullOrWhiteSpace(sourceIdentifier) ? null : sourceIdentifier.Trim(),
+                IsRequired = isRequired, EffectiveFrom = effectiveFrom, EffectiveTo = effectiveTo,
+                Status = "Draft", CreatedBy = actorId
+            };
+            _db.PublicSectorExpectedCashSources.Add(item);
+            _audit.Record(companyId, actorId, "PublicSectorExpectedCashSource.Created", "PublicSector",
+                nameof(PublicSectorExpectedCashSource), item.Id, null,
+                new { item.BudgetVersionId, item.SourceKind, item.SourceCode, item.SourceName,
+                    item.SourceIdentifier, item.IsRequired, item.EffectiveFrom, item.EffectiveTo });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorExpectedCashSource> SubmitExpectedCashSourceAsync(
+            Guid companyId, Guid sourceId, Guid actorId, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorExpectedCashSources.FirstOrDefaultAsync(x =>
+                x.Id == sourceId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Expected cash source not found.");
+            if (item.Status != "Draft" || item.CreatedBy != actorId)
+                throw new InvalidOperationException("Only the preparer may submit a draft expected cash source.");
+            item.Status = "PendingApproval";
+            item.SubmittedBy = actorId;
+            item.SubmittedAt = DateTime.UtcNow;
+            _audit.Record(companyId, actorId, "PublicSectorExpectedCashSource.Submitted", "PublicSector",
+                nameof(PublicSectorExpectedCashSource), item.Id, new { Status = "Draft" },
+                new { item.Status, item.SubmittedBy, item.SubmittedAt });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorExpectedCashSource> ApproveExpectedCashSourceAsync(
+            Guid companyId, Guid sourceId, Guid approverId, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorExpectedCashSources.FirstOrDefaultAsync(x =>
+                x.Id == sourceId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Expected cash source not found.");
+            if (item.Status != "PendingApproval")
+                throw new InvalidOperationException("Only a pending expected cash source can be approved.");
+            if (item.CreatedBy == approverId || item.SubmittedBy == approverId)
+                throw new InvalidOperationException("The preparer or submitter cannot approve their own expected cash source.");
+            item.Status = "Approved";
+            item.ApprovedBy = approverId;
+            item.ApprovedAt = DateTime.UtcNow;
+            _audit.Record(companyId, approverId, "PublicSectorExpectedCashSource.Approved", "PublicSector",
+                nameof(PublicSectorExpectedCashSource), item.Id, new { Status = "PendingApproval" },
+                new { item.Status, item.ApprovedBy, item.ApprovedAt });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
         public async Task<BudgetComparisonReport> GetBudgetComparisonAsync(Guid companyId, int financialYear,
             CancellationToken ct = default)
         {
