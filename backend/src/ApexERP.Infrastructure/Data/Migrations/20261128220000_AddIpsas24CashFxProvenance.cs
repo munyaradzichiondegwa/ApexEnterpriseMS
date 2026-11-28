@@ -46,6 +46,10 @@ public sealed class AddIpsas24CashFxProvenance : Migration
             nullable: false,
             defaultValue: false);
 
+        // Existing certified actuals are immutable at runtime. This one-time schema
+        // backfill runs under the migration owner while the table's user triggers are disabled.
+        migrationBuilder.Sql("ALTER TABLE \"PublicSectorBudgetExecutionActuals\" DISABLE TRIGGER USER;");
+
         migrationBuilder.Sql("""
             UPDATE "PublicSectorBudgetExecutionActuals"
             SET "SourceAmount" = "Amount",
@@ -53,6 +57,8 @@ public sealed class AddIpsas24CashFxProvenance : Migration
                 "ExchangeRateSource" = 'IDENTITY',
                 "ExchangeRateSourceReference" = 'Historical same-currency capture'
             """);
+
+        migrationBuilder.Sql("ALTER TABLE \"PublicSectorBudgetExecutionActuals\" ENABLE TRIGGER USER;");
 
         migrationBuilder.AlterColumn<decimal>(
             name: "SourceAmount",
