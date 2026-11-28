@@ -1391,6 +1391,10 @@ namespace ApexERP.Tests
                 arBudgetLineId, PublicSectorBudgetActualEventKind.CashReceipt,
                 PublicSectorBudgetActualSourceKind.ArReceipt, arReceiptId,
                 effectiveDate, CashFlowCategory.Operating, preparerId);
+            await service.SubmitBudgetExecutionActualAsync(companyId, arActual.Id, preparerId);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CertifyBudgetExecutionActualAsync(companyId, arActual.Id, certifierId));
+
             var arActual2 = await service.CreateBudgetExecutionActualAsync(companyId, budgetVersionId,
                 arBudgetLine2Id, PublicSectorBudgetActualEventKind.CashReceipt,
                 PublicSectorBudgetActualSourceKind.ArReceipt, arReceiptId,
@@ -1414,7 +1418,7 @@ namespace ApexERP.Tests
             Assert.Equal(PublicSectorBudgetActualStatus.Draft, arActual.Status);
             Assert.Equal(PublicSectorBudgetActualStatus.Draft, apActual.Status);
 
-            foreach (var item in new[] { arActual, arActual2, apActual, apActual2 })
+            foreach (var item in new[] { arActual2, apActual, apActual2 })
                 await service.SubmitBudgetExecutionActualAsync(companyId, item.Id, preparerId);
             foreach (var item in new[] { arActual, arActual2, apActual, apActual2 })
                 await service.CertifyBudgetExecutionActualAsync(companyId, item.Id, certifierId);
