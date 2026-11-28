@@ -98,7 +98,7 @@ export default function PublicSectorPage() {
       { header: "Final", value: (row: any) => row.finalBudget },
       { header: "Actual Amounts on Comparable Basis", value: (row: any) => row.actualOnComparableBasis },
       { header: "Difference between final budget and actual", value: (row: any) => row.variance },
-      { header: "Comment Ref", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId)?.evidenceReference ?? "" },
+      { header: "Comment Ref", value: (row: any) => budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.evidenceReference ?? "" },
       // Supporting dimensions and audit references.
       { header: "Treasury Classification", value: (row: any) => row.classificationCode },
       { header: "Fund Centre Code", value: (row: any) => row.fundCentreCode },
@@ -889,9 +889,9 @@ export default function PublicSectorPage() {
                         <td className="text-right">{line.finalBudget == null ? "—" : fmt(line.finalBudget)}</td>
                         <td className="text-right">{line.actualOnComparableBasis == null ? "—" : fmt(line.actualOnComparableBasis)}</td>
                         <td className="text-right">{line.variance == null ? "—" : fmt(line.variance)}</td>
-                        <td>{budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId)?.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId)?.evidenceReference ?? "—"}</td>
+                        <td>{budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId && x.varianceAmount === line.variance && x.status === "Approved")?.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId && x.varianceAmount === line.variance && x.status === "Approved")?.evidenceReference ?? "—"}</td>
                         <td>{line.originalToFinalExplanation ?? "—"}</td>
-                        <td>{budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId)?.explanation ?? (line.variance ? "Explanation required" : "—")}</td>
+                        <td>{budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === line.budgetVersionLineId && x.varianceAmount === line.variance && x.status === "Approved")?.explanation ?? (line.variance ? "Explanation required" : "—")}</td>
                       </tr>
                     ))}
                     {budgetComparison.lines.length === 0 && <tr><td colSpan={12} className="text-center text-slate-500">No budget lines are available.</td></tr>}
@@ -914,7 +914,7 @@ export default function PublicSectorPage() {
                   <select className="input" required value={varianceDraft.budgetVersionLineId} onChange={(e) => setVarianceDraft({ ...varianceDraft, budgetVersionLineId: e.target.value })}>
                     <option value="">Select unexplained variance</option>
                     {budgetComparison.lines.filter((line: any) => line.variance != null && Number(line.variance) !== 0 &&
-                      !budgetComparison.varianceExplanations?.some((x: any) => x.budgetVersionLineId === line.budgetVersionLineId)).map((line: any) => (
+                      !budgetComparison.varianceExplanations?.some((x: any) => x.budgetVersionLineId === line.budgetVersionLineId && x.varianceAmount === line.variance && x.status !== "Rejected")).map((line: any) => (
                       <option key={line.budgetVersionLineId} value={line.budgetVersionLineId}>{line.accountCode} · {line.fundCentreCode} · {fmt(line.variance)}</option>
                     ))}
                   </select>
