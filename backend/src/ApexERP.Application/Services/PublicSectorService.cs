@@ -1925,9 +1925,17 @@ namespace ApexERP.Application.Services
                         (!captured.Policy.EffectiveTo.HasValue || ledger.EventDate < captured.Policy.EffectiveTo.Value) &&
                         ledger.EvidenceAcceptedAt <= captured.Policy.ReportingPeriodEnd.AddDays(
                             captured.Policy.PostPeriodRecognitionWindowDays);
+                    var commitmentNetRecognised = commitment == null ? decimal.MaxValue :
+                        await _db.ModifiedCashRecognitionLedgerEvents.Where(x =>
+                            x.CompanyId == companyId && x.CommitmentId == commitment.Id &&
+                            x.Status == ModifiedCashLedgerEventStatus.Certified)
+                            .SumAsync(x => x.EventKind == ModifiedCashLedgerEventKind.Recognition
+                                ? x.Amount : -x.Amount, ct);
+                    var commitmentBalanceValid = commitment != null &&
+                        commitmentNetRecognised >= 0m && commitmentNetRecognised <= commitment.Amount;
                     var valid = false;
                     if (ledger.EventKind == ModifiedCashLedgerEventKind.Recognition)
-                        valid = sourceValid && policyPeriodValid && mappingValid;
+                        valid = sourceValid && policyPeriodValid && mappingValid && commitmentBalanceValid;
                     else if (ledger.EventKind == ModifiedCashLedgerEventKind.Reversal &&
                         ledger.OriginalEventId.HasValue)
                     {
@@ -1941,7 +1949,11 @@ namespace ApexERP.Application.Services
                             (x.Status == InvoiceStatus.Posted || x.Status == InvoiceStatus.Paid ||
                              x.Status == InvoiceStatus.Partial), ct);
                         valid = sourceValid && policyPeriodValid && mappingValid &&
-                            originalRecognition != null && commitment != null && !postedInvoiceExists &&
+                            originalRecognition != null && commitment != null && !postedInvoiceExists && commitmentBalanceValid &&
+                            !await _db.ModifiedCashRecognitionLedgerEvents.AnyAsync(x =>
+                                x.CompanyId == companyId && x.OriginalEventId == originalRecognition.Id &&
+                                x.EventKind == ModifiedCashLedgerEventKind.Liquidation &&
+                                x.Status != ModifiedCashLedgerEventStatus.Rejected, ct) &&
                             originalRecognition.PolicyId == ledger.PolicyId &&
                             originalRecognition.CommitmentId == ledger.CommitmentId &&
                             originalRecognition.SourceEventId == ledger.SourceEventId &&
@@ -1957,7 +1969,7 @@ namespace ApexERP.Application.Services
                             !x.OriginalEventId.HasValue, ct);
                         var settlement = await ModifiedCashApSettlementEvidenceValidator.ValidateAsync(
                             _db, companyId, ledger.SourceEventId, ledger.CommitmentId, ct);
-                        valid = policyPeriodValid && mappingValid && originalRecognition != null &&
+                        valid = policyPeriodValid && mappingValid && commitmentBalanceValid && originalRecognition != null &&
                             settlement != null && originalRecognition.PolicyId == ledger.PolicyId &&
                             originalRecognition.CommitmentId == ledger.CommitmentId &&
                             originalRecognition.SourceEventKind == ledger.SourceEventKind &&
