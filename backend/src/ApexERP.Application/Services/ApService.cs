@@ -337,6 +337,11 @@ namespace ApexERP.Application.Services
             if (allocations.Values.Sum() > amount)
                 throw new InvalidOperationException("Total allocated amount exceeds the payment amount.");
 
+            // Lock every affected invoice in deterministic order so concurrent partial payments
+            // cannot consume the same remaining line/tax-component balance.
+            foreach (var invoiceId in allocations.Keys.OrderBy(x => x))
+                await _db.TryAcquireTransactionLockAsync($"ap-settlement:{companyId:N}:{invoiceId:N}", ct);
+
             var paymentNo = await GenerateNoAsync(companyId, "PAY", ct);
             var payment = new ApPayment
             {
