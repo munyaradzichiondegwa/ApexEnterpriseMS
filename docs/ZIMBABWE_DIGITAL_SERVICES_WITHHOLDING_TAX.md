@@ -53,7 +53,8 @@ This is not a blanket accounting conclusion for every contractual arrangement. I
 - A company-scoped DSWT register stores intermediary payment reference, supplier/intermediary identity, country, currency, gross amount, rate, withheld amount, net supplier remittance, service classification, VAT status, tax period, certificate, remittance date and evidence reference.
 - The register has a unique `(CompanyId, PaymentReference)` key and uses the existing fail-closed company query filter and PostgreSQL RLS pattern.
 - The register service validates the tax decision and evidence, supports certificate issuance and ZIMRA remittance status, and produces a monthly company-scoped register.
-- AP reconciliation links a DSWT record to a posted AP payment only when supplier, currency, gross amount and originating bank account agree. The link is unique per company/AP payment.
+- AP reconciliation links a DSWT record to a posted AP payment only when supplier, currency, gross amount, originating bank account and AP allocation total agree. The link is unique per company/AP payment.
+- Bank-backed AP payments create a book-side bank transaction linked to the posted AP journal. DSWT bank reconciliation then requires an authenticated statement row already matched one-to-one to that exact bank transaction; it verifies gross debit, currency, bank account and AP journal before storing the statement-row link.
 - This register is not yet a GL posting, an AP payment automation, a TaRMS filing integration or a ZIMRA-approved return. No journal is posted by this service.
 
 ## Accounting design decisions
