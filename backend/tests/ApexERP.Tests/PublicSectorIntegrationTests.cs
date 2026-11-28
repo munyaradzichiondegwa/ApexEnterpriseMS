@@ -695,6 +695,7 @@ namespace ApexERP.Tests
             await ctx.SaveChangesAsync();
 
             var preparerId = Guid.NewGuid();
+            var approverId = Guid.NewGuid();
             var reconciliation = await service.CreateBudgetReconciliationAsync(companyId, 2026,
                 PublicSectorBudgetReconciliationType.Basis, "Manual cash-flow adjustment without a calculated source fingerprint",
                 "Operating", 5m, -2m, 0m, "Reconciliation workpaper WP-IPSAS24-01",
