@@ -860,7 +860,7 @@ namespace ApexERP.Application.Services
                         x.Id, x.PeriodStart, x.PeriodEnd, x.Status, x.AuthenticationMethod,
                         x.AuthenticatedBy, x.AuthenticatedAt, x.CompletenessCertifiedBy,
                         x.CompletenessCertifiedAt, x.UploadedBy, x.ByteLength, x.Sha256,
-                        x.OpeningBalance, x.ClosingBalance, x.TotalDebits, x.TotalCredits,
+                        x.OriginalBytes, x.OpeningBalance, x.ClosingBalance, x.TotalDebits, x.TotalCredits,
                         x.TransactionCount
                     }).ToListAsync(ct);
                 if (statementBatches.Count == 0)
@@ -877,8 +877,8 @@ namespace ApexERP.Application.Services
                             batch.UploadedBy == batch.AuthenticatedBy ||
                             batch.UploadedBy == batch.CompletenessCertifiedBy ||
                             batch.AuthenticatedBy == batch.CompletenessCertifiedBy ||
-                            batch.ByteLength <= 0 ||
-                            batch.Sha256.Length != 64 || !batch.Sha256.All(Uri.IsHexDigit) ||
+                            !BankStatementEvidenceValidator.ValidateStoredBytes(
+                                batch.OriginalBytes, batch.Sha256, batch.ByteLength).IsValid ||
                             batch.OpeningBalance + batch.TotalCredits - batch.TotalDebits != batch.ClosingBalance ||
                             !string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase))
                             throw new InvalidOperationException($"Bank source {expected.SourceCode} has an unauthenticated, incomplete, discontinuous or invalid statement batch.");
