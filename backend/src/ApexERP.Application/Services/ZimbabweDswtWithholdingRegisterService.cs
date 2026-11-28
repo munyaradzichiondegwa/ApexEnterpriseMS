@@ -589,8 +589,8 @@ public sealed class ZimbabweDswtFilingWorkflowService
         _db.ZimbabweDswtFilings.AsNoTracking().FirstOrDefaultAsync(
             x => x.CompanyId == companyId && x.Id == filingId, ct);
 
-    private Task<ZimbabweDswtFiling> FindAsync(Guid companyId, Guid filingId, CancellationToken ct) =>
-        _db.ZimbabweDswtFilings.FirstOrDefaultAsync(
+    private async Task<ZimbabweDswtFiling> FindAsync(Guid companyId, Guid filingId, CancellationToken ct) =>
+        await _db.ZimbabweDswtFilings.FirstOrDefaultAsync(
             x => x.CompanyId == companyId && x.Id == filingId, ct)
         ?? throw new InvalidOperationException("DSWT filing was not found in this company.");
 
