@@ -396,12 +396,12 @@ namespace ApexERP.Application.Services
                 var unexpended = utilisation.Available;
                 var beforeClose = new
                 {
-                    fundCentre.Code,
-                    fundCentre.Name,
-                    fundCentre.Level,
-                    fundCentre.FinancialYear,
-                    fundCentre.AppropriationAmount,
-                    fundCentre.CarriedForwardAmount,
+                    fc.Code,
+                    fc.Name,
+                    fc.Level,
+                    fc.FinancialYear,
+                    fc.AppropriationAmount,
+                    fc.CarriedForwardAmount,
                     utilisation.Commitments,
                     utilisation.Actuals,
                     utilisation.Available,
