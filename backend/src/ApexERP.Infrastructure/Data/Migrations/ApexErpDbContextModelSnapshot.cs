@@ -3843,6 +3843,36 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVarianceExplanation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionLineId").HasColumnType("uuid");
+                    b.Property<decimal>("VarianceAmount").HasColumnType("numeric(20,6)");
+                    b.Property<string>("Explanation").IsRequired().HasColumnType("text");
+                    b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ReviewedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ReviewedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ReviewNote").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId").HasDatabaseName("IX_PublicSectorBudgetVarianceExplanations_BudgetVersionId");
+                    b.HasIndex("BudgetVersionLineId").HasDatabaseName("IX_PublicSectorBudgetVarianceExplanations_BudgetVersionLineId");
+                    b.HasIndex("CompanyId", "BudgetVersionLineId").IsUnique()
+                        .HasDatabaseName("UX_PublicSectorBudgetVarianceExplanation_Line");
+                    b.ToTable("PublicSectorBudgetVarianceExplanations", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVarianceExplanation_Amount", "\"VarianceAmount\" <> 0");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
@@ -3945,6 +3975,22 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("BudgetVersionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_ExpectedCashSourceRegisterAttestation_BudgetVersion")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVarianceExplanation", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PublicSectorBudgetVarianceExplanation_BudgetVersion")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PublicSectorBudgetVarianceExplanation_BudgetLine")
                         .IsRequired();
                 });
 
