@@ -77,6 +77,7 @@ builder.Services.AddScoped<FixedAssetService>();
 builder.Services.AddScoped<PayrollService>();
 builder.Services.AddScoped<TaxComplianceService>();
 builder.Services.AddScoped<ZimbabweDswtWithholdingRegisterService>();
+builder.Services.AddScoped<ZimbabweDswtFilingWorkflowService>();
 builder.Services.AddScoped<ReportingService>();
 builder.Services.AddScoped<ManufacturingService>();
 builder.Services.AddScoped<SupplyChainService>();
