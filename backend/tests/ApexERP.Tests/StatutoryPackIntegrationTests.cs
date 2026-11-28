@@ -251,4 +251,67 @@ public sealed class StatutoryPackIntegrationTests
         Assert.Empty(await ctx.TaxCodes.Where(x => x.CompanyId == companyId).ToListAsync());
     }
 
+
+    [PostgresFact]
+    public async Task Registered_jurisdiction_adapter_owns_validation_and_activation_dispatch()
+    {
+        await using var db = await TestDb.CreateAsync();
+        var companyId = Guid.NewGuid();
+        await using (var seed = db.NewContext(companyId))
+        {
+            seed.Companies.Add(new Company
+            {
+                Id = companyId, Name = "Jurisdiction Adapter Dispatch",
+                BaseCurrency = "USD", FunctionalCurrency = "USD"
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var ctx = db.NewContext(companyId);
+        var adapter = new TestJurisdictionAdapter("US");
+        var service = new StatutoryPackService(ctx, new AuditService(ctx), new[] { adapter });
+        var sources = new List<StatutoryPackSource>
+        {
+            new("Test authority", "Test statutory source", "https://example.gov/statutes", null, new DateTime(2026, 1, 1))
+        };
+        const string rules = """{ "coverage": "complete", "countrySpecificSchedule": { "version": 1 } }""";
+        await service.CreateDraftAsync(companyId, "US", "United States", 1,
+            new DateTime(2026, 1, 1), null, rules, sources, Guid.NewGuid());
+        await service.ReviewAsync(companyId, "US", 1, Guid.NewGuid());
+        await service.ApproveAsync(companyId, "US", 1, Guid.NewGuid());
+
+        var published = await service.PublishAsync(companyId, "US", 1, Guid.NewGuid());
+
+        Assert.Equal("Published", published.Status);
+        Assert.True(adapter.ValidationCalled);
+        Assert.True(adapter.ActivationCalled);
+        Assert.Empty(await ctx.PayeTaxBands.Where(x => x.CompanyId == companyId).ToListAsync());
+        Assert.Empty(await ctx.StatutoryRates.Where(x => x.CompanyId == companyId).ToListAsync());
+        Assert.Empty(await ctx.TaxCodes.Where(x => x.CompanyId == companyId).ToListAsync());
+    }
+
+    private sealed class TestJurisdictionAdapter : IStatutoryPackActivationAdapter
+    {
+        public TestJurisdictionAdapter(string jurisdictionCode) => JurisdictionCode = jurisdictionCode;
+        public string JurisdictionCode { get; }
+        public bool ValidationCalled { get; private set; }
+        public bool ActivationCalled { get; private set; }
+
+        public void Validate(StatutoryPackDocument document)
+        {
+            Assert.Equal(JurisdictionCode, document.JurisdictionCode);
+            using var rules = JsonDocument.Parse(document.RulesJson);
+            Assert.Equal("complete", rules.RootElement.GetProperty("coverage").GetString());
+            ValidationCalled = true;
+        }
+
+        public Task ActivateAsync(Guid companyId, StatutoryPackDocument document, CancellationToken ct)
+        {
+            Assert.NotEqual(Guid.Empty, companyId);
+            Assert.Equal(JurisdictionCode, document.JurisdictionCode);
+            ActivationCalled = true;
+            return Task.CompletedTask;
+        }
+    }
+
 }
