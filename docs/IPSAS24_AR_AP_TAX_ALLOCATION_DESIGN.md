@@ -1,6 +1,6 @@
 # IPSAS 24 AR/AP tax allocation controls
 
-**Status:** implementation added; final CI verification is pending for the current branch head.  
+**Status:** implemented on the feature branch; backend CI verification for the tax/remittance changes and subsequent cash-flow bridge hardening is pending. Migration/model and frontend checks passed in the previously recorded run, but that is not a complete backend acceptance result.  
 **Scope:** tax-bearing cash actuals from posted AR receipts, AP supplier payments and separate WHT remittances.
 
 ## Accounting rules enforced
@@ -43,7 +43,7 @@ Tax mappings and budget policies are created as drafts, submitted through the co
 
 ## Acceptance evidence
 
-The PostgreSQL integration suite verifies AR/AP tax posting and exact tax journal-line provenance, the IPSAS 24 cash actual settlement fixture now uses explicit invoice-line allocation evidence, and the CI migration gate checks the new schema on a clean database. The latest complete run before the newest tax-policy/remittance hardening passed backend, frontend and migration checks; the current branch head is still undergoing its own CI verification.
+The PostgreSQL integration suite contains coverage for AR/AP tax posting, exact tax journal-line provenance, explicit settlement allocation evidence, tax policy resolution and WHT remittance allocation. The migration/model and frontend jobs passed in the recorded workflow, but backend verification for the tax/remittance changes and later cash-flow bridge hardening must pass on the current PR head before this package is marked verified.
 
 ## Release rule
 
