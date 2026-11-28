@@ -5,11 +5,11 @@ import AppShell from "@/components/AppShell";
 import { api, extractErrorMessage } from "@/lib/api";
 
 export default function PublicSectorPage() {
-  const [tab, setTab] = useState<"funds" | "tenders" | "assets">("funds");
+  const [tab, setTab] = useState<"funds" | "tenders" | "assets" | "ipsas24">("funds");
   const [fundCentres, setFundCentres] = useState<any[]>([]);
   const [utilization, setUtilization] = useState<any[]>([]);
   const [tenders, setTenders] = useState<any[]>([]);
-  const [batches, setBatches] = useState<any[]>([]);
+  const [batches, setBatches] = useState<any[]>([]);\n  const [budgetComparison, setBudgetComparison] = useState<any | null>(null);\n  const [budgetComparisonLoading, setBudgetComparisonLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [year] = useState(new Date().getFullYear());
@@ -31,6 +31,20 @@ export default function PublicSectorPage() {
       setMsg("Fund centre created.");
       load();
     } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function loadBudgetComparison() {
+    setBudgetComparisonLoading(true);
+    setError(null);
+    try {
+      const response = await api.get(`/public-sector/budget-versions/comparison?year=${year}`);
+      setBudgetComparison(response.data);
+    } catch (err) {
+      setBudgetComparison(null);
+      setError(extractErrorMessage(err));
+    } finally {
+      setBudgetComparisonLoading(false);
+    }
   }
 
   async function createTender(e: React.FormEvent) {
@@ -55,6 +69,7 @@ export default function PublicSectorPage() {
         <button className={tab === "funds" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("funds")}>Fund Centres & Budget</button>
         <button className={tab === "tenders" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("tenders")}>E-Tendering</button>
         <button className={tab === "assets" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("assets")}>Asset Verification</button>
+        <button className={tab === "ipsas24" ? "btn-primary" : "btn-secondary"} onClick={() => { setTab("ipsas24"); loadBudgetComparison(); }}>IPSAS 24 Budget Statement</button>
       </div>
 
       {tab === "funds" && (
@@ -108,6 +123,72 @@ export default function PublicSectorPage() {
             <p className="text-xs text-slate-400">Bids submitted after the deadline are rejected automatically by the server clock.</p>
           </form>
         </div>
+      )}
+
+      {tab === "ipsas24" && (
+        <section className="card space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="font-semibold text-lg">Statement of Comparison of Budget and Actual Amounts</h2>
+              <p className="text-xs text-slate-500">IPSAS 24 · Financial year {year}</p>
+            </div>
+            <button className="btn-secondary" onClick={loadBudgetComparison} disabled={budgetComparisonLoading}>
+              {budgetComparisonLoading ? "Loading…" : "Refresh statement"}
+            </button>
+          </div>
+          {budgetComparisonLoading && <p className="text-sm text-slate-500">Loading approved budget versions and ledger actuals…</p>}
+          {!budgetComparisonLoading && !budgetComparison && (
+            <p className="text-sm text-slate-500">No comparison is available. An approved original budget version is required before the statement can be generated.</p>
+          )}
+          {budgetComparison && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                <div><span className="text-slate-500">Currency</span><p className="font-medium">{budgetComparison.currency}</p></div>
+                <div><span className="text-slate-500">Budget basis</span><p className="font-medium">{budgetComparison.accountingBasis}</p></div>
+                <div><span className="text-slate-500">Classification basis</span><p className="font-medium">{budgetComparison.classificationBasis}</p></div>
+                <div><span className="text-slate-500">Entity scope</span><p className="font-medium">{budgetComparison.entityScope}</p></div>
+                <div><span className="text-slate-500">Original budget</span><p className="font-medium">{budgetComparison.originalBudgetVersionId}</p></div>
+                <div><span className="text-slate-500">Final budget</span><p className="font-medium">{budgetComparison.finalBudgetAvailable ? budgetComparison.finalBudgetVersionId : "Not approved"}</p></div>
+              </div>
+              {!budgetComparison.comparableActualsAvailable && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                  {budgetComparison.comparabilityMessage}
+                </div>
+              )}
+              <div className="overflow-x-auto">
+                <table className="table-base min-w-[900px]">
+                  <thead><tr><th>Classification</th><th>Fund centre</th><th>Account</th><th className="text-right">Original</th><th className="text-right">Final</th><th className="text-right">Actual (comparable)</th><th className="text-right">Variance</th><th>Explanation</th></tr></thead>
+                  <tbody>
+                    {budgetComparison.lines.map((line: any, index: number) => (
+                      <tr key={`${line.accountCode}-${line.fundCentreCode}-${index}`}>
+                        <td>{line.classificationCode}</td>
+                        <td><span className="font-mono">{line.fundCentreCode}</span><br />{line.fundCentreName}</td>
+                        <td><span className="font-mono">{line.accountCode}</span><br />{line.accountName}</td>
+                        <td className="text-right">{fmt(line.originalBudget)}</td>
+                        <td className="text-right">{line.finalBudget == null ? "—" : fmt(line.finalBudget)}</td>
+                        <td className="text-right">{line.actualOnComparableBasis == null ? "—" : fmt(line.actualOnComparableBasis)}</td>
+                        <td className="text-right">{line.variance == null ? "—" : fmt(line.variance)}</td>
+                        <td>{line.originalToFinalExplanation ?? "—"}</td>
+                      </tr>
+                    ))}
+                    {budgetComparison.lines.length === 0 && <tr><td colSpan={8} className="text-center text-slate-500">No budget lines are available.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              {budgetComparison.reconciliations?.length > 0 && (
+                <div>
+                  <h3 className="font-semibold mb-2">Reconciliation to financial statements</h3>
+                  <table className="table-base">
+                    <thead><tr><th>Difference type</th><th>Description</th><th>Statement section</th><th className="text-right">Operating</th><th className="text-right">Investing</th><th className="text-right">Financing</th></tr></thead>
+                    <tbody>{budgetComparison.reconciliations.map((item: any) => (
+                      <tr key={item.id}><td>{item.type}</td><td>{item.description}</td><td>{item.statementSection}</td><td className="text-right">{fmt(item.operatingAmount)}</td><td className="text-right">{fmt(item.investingAmount)}</td><td className="text-right">{fmt(item.financingAmount)}</td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </section>
       )}
 
       {tab === "assets" && (
