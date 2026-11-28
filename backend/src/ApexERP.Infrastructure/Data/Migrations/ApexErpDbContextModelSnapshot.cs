@@ -1085,6 +1085,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
 
+                    b.HasIndex("CostCentreId");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ApInvoiceId");
@@ -1684,6 +1686,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
+
+                    b.HasIndex("CostCentreId");
 
                     b.HasKey("Id");
 
@@ -7443,6 +7447,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("ApInvoiceId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.CostCentre", null)
+                        .WithMany()
+                        .HasForeignKey("CostCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.ApPaymentAllocation", b =>
@@ -7495,6 +7504,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("ArInvoiceId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.CostCentre", null)
+                        .WithMany()
+                        .HasForeignKey("CostCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.ArReceiptAllocation", b =>
