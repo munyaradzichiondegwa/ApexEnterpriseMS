@@ -403,8 +403,70 @@ namespace ApexERP.Application.Services
 
         private static readonly HashSet<string> ExpectedCashSourceKinds = new(StringComparer.OrdinalIgnoreCase)
         {
-            "BankAccount", "ReceivablesControl", "PayablesControl", "Cashbook"
+            "BankAccount", "ReceivablesControl", "PayablesControl"
         };
+
+        private sealed record ExpectedCashSourcePopulation(
+            HashSet<Guid> RecordIds, decimal ControlTotal, bool CurrencyMatches);
+
+        // Re-read the live source population rather than trusting a previously submitted count.
+        // SourceIdentifier is the internal BankAccount ID or the AR/AP control GL account ID.
+        private async Task<ExpectedCashSourcePopulation> GetExpectedCashSourcePopulationAsync(
+            Guid companyId, PublicSectorExpectedCashSource expected, DateTime periodStart,
+            DateTime periodEnd, string currency, CancellationToken ct)
+        {
+            if (!Guid.TryParse(expected.SourceIdentifier, out var sourceId))
+                throw new InvalidOperationException($"Expected source {expected.SourceCode} has no valid internal source identifier.");
+
+            if (expected.SourceKind == "BankAccount")
+            {
+                var account = await _db.BankAccounts.FirstOrDefaultAsync(x =>
+                    x.Id == sourceId && x.CompanyId == companyId, ct)
+                    ?? throw new InvalidOperationException($"Registered bank account {expected.SourceCode} no longer exists in this company.");
+                var rows = await _db.BankTransactions.Where(x =>
+                    x.CompanyId == companyId && x.BankAccountId == sourceId &&
+                    x.TransactionDate >= periodStart && x.TransactionDate < periodEnd)
+                    .Select(x => new { x.Id, x.Debit, x.Credit }).ToListAsync(ct);
+                if (rows.Any(x => x.Debit < 0m || x.Credit < 0m ||
+                    (x.Debit > 0m && x.Credit > 0m) || Math.Max(x.Debit, x.Credit) <= 0m))
+                    throw new InvalidOperationException($"Bank source {expected.SourceCode} contains a transaction with invalid debit/credit amounts.");
+                return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
+                    rows.Sum(x => Math.Max(x.Debit, x.Credit)),
+                    string.Equals(account.Currency, currency, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (expected.SourceKind == "ReceivablesControl")
+            {
+                if (!await _db.GlAccounts.AnyAsync(x => x.Id == sourceId && x.CompanyId == companyId &&
+                    x.Type == GlAccountType.Asset, ct))
+                    throw new InvalidOperationException($"Receivables control account for {expected.SourceCode} is not a valid asset account in this company.");
+                var rows = await _db.ArReceipts.Where(x => x.CompanyId == companyId &&
+                    x.ReceiptDate >= periodStart && x.ReceiptDate < periodEnd &&
+                    _db.Customers.Any(c => c.Id == x.CustomerId && c.CompanyId == companyId &&
+                        c.ArAccountId == sourceId))
+                    .Select(x => new { x.Id, x.Amount, x.Currency }).ToListAsync(ct);
+                return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
+                    rows.Sum(x => x.Amount),
+                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            if (expected.SourceKind == "PayablesControl")
+            {
+                if (!await _db.GlAccounts.AnyAsync(x => x.Id == sourceId && x.CompanyId == companyId &&
+                    x.Type == GlAccountType.Liability, ct))
+                    throw new InvalidOperationException($"Payables control account for {expected.SourceCode} is not a valid liability account in this company.");
+                var rows = await _db.ApPayments.Where(x => x.CompanyId == companyId &&
+                    x.PaymentDate >= periodStart && x.PaymentDate < periodEnd &&
+                    _db.Suppliers.Any(s => s.Id == x.SupplierId && s.CompanyId == companyId &&
+                        s.ApAccountId == sourceId))
+                    .Select(x => new { x.Id, x.Amount, x.Currency }).ToListAsync(ct);
+                return new ExpectedCashSourcePopulation(rows.Select(x => x.Id).ToHashSet(),
+                    rows.Sum(x => x.Amount),
+                    rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            throw new InvalidOperationException($"Source kind {expected.SourceKind} has no configured source adapter.");
+        }
 
         public async Task<IReadOnlyList<PublicSectorExpectedCashSource>> GetExpectedCashSourcesAsync(
             Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
@@ -433,6 +495,8 @@ namespace ApexERP.Application.Services
                 throw new InvalidOperationException("The expected source effective period must be contained within the approved budget reporting period.");
 
             var kind = ExpectedCashSourceKinds.Single(x => string.Equals(x, sourceKind.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (!Guid.TryParse(sourceIdentifier, out _))
+                throw new InvalidOperationException("Bank, receivables-control and payables-control sources require an internal BankAccount or control GL account identifier.");
             var code = sourceCode.Trim();
             if (await _db.PublicSectorExpectedCashSources.AnyAsync(x =>
                 x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId &&
@@ -518,12 +582,21 @@ namespace ApexERP.Application.Services
                 x.CompanyId == companyId && x.ExpectedCashSourceId == source.Id, ct))
                 throw new InvalidOperationException("A period submission already exists for this expected source.");
 
+            if (controlTotal < 0m)
+                throw new InvalidOperationException("A source activity control total cannot be negative.");
+            var normalisedCurrency = currency.Trim().ToUpperInvariant();
+            var population = await GetExpectedCashSourcePopulationAsync(companyId, source,
+                source.EffectiveFrom, source.EffectiveTo, normalisedCurrency, ct);
+            if (population.RecordIds.Count != recordCount || population.ControlTotal != controlTotal ||
+                !population.CurrencyMatches)
+                throw new InvalidOperationException("The submitted record count, control total or currency does not agree with the live registered source population.");
+
             var item = new PublicSectorCashSourceSubmission
             {
                 CompanyId = companyId, ExpectedCashSourceId = source.Id, BudgetVersionId = source.BudgetVersionId,
                 PeriodStart = source.EffectiveFrom, PeriodEnd = source.EffectiveTo, RecordCount = recordCount,
                 ControlTotal = controlTotal, OpeningBalance = openingBalance, ClosingBalance = closingBalance,
-                Currency = currency.Trim().ToUpperInvariant(), EvidenceReference = evidenceReference.Trim(),
+                Currency = normalisedCurrency, EvidenceReference = evidenceReference.Trim(),
                 Status = "Draft", CreatedBy = actorId
             };
             _db.PublicSectorCashSourceSubmissions.Add(item);
@@ -567,6 +640,16 @@ namespace ApexERP.Application.Services
                 throw new InvalidOperationException("The preparer or submitter cannot independently review their own cash source submission.");
             if (!accepted && string.IsNullOrWhiteSpace(reviewNote))
                 throw new InvalidOperationException("A reason is required when rejecting a cash source submission.");
+            if (accepted)
+            {
+                var expected = await _db.PublicSectorExpectedCashSources.FirstAsync(x =>
+                    x.Id == item.ExpectedCashSourceId && x.CompanyId == companyId, ct);
+                var population = await GetExpectedCashSourcePopulationAsync(companyId, expected,
+                    item.PeriodStart, item.PeriodEnd, item.Currency, ct);
+                if (population.RecordIds.Count != item.RecordCount ||
+                    population.ControlTotal != item.ControlTotal || !population.CurrencyMatches)
+                    throw new InvalidOperationException("The live source population no longer agrees with the submitted record count, control total or currency.");
+            }
 
             item.Status = accepted ? "Reviewed" : "Rejected";
             item.ReviewedBy = reviewerId;
@@ -627,14 +710,18 @@ namespace ApexERP.Application.Services
                     ?? throw new InvalidOperationException("The bank account currency is unavailable.");
                 if (source.Debit > 0m && source.Credit > 0m || sourceAmount <= 0m)
                     throw new InvalidOperationException("The bank transaction must contain one positive debit or credit amount.");
-                if (Guid.TryParse(expected.SourceIdentifier, out var bankAccountId) && source.BankAccountId != bankAccountId)
-                    throw new InvalidOperationException("The bank transaction belongs to a different bank account than the registered expected source.");
+                if (!Guid.TryParse(expected.SourceIdentifier, out var bankAccountId) || source.BankAccountId != bankAccountId)
+                    throw new InvalidOperationException("The bank transaction does not belong to the registered expected bank account.");
             }
             else if (sourceKind == PublicSectorBudgetActualSourceKind.ArReceipt)
             {
                 var source = await _db.ArReceipts.FirstOrDefaultAsync(x =>
                     x.Id == sourceRecordId && x.CompanyId == companyId, ct)
                     ?? throw new InvalidOperationException("The AR receipt does not exist in this company.");
+                if (!Guid.TryParse(expected.SourceIdentifier, out var receivablesControlId) ||
+                    !await _db.Customers.AnyAsync(x => x.Id == source.CustomerId && x.CompanyId == companyId &&
+                        x.ArAccountId == receivablesControlId, ct))
+                    throw new InvalidOperationException("The AR receipt does not belong to the registered receivables control account.");
                 sourceAmount = source.Amount;
                 sourceDate = source.ReceiptDate;
                 sourceCurrency = source.Currency;
@@ -644,6 +731,10 @@ namespace ApexERP.Application.Services
                 var source = await _db.ApPayments.FirstOrDefaultAsync(x =>
                     x.Id == sourceRecordId && x.CompanyId == companyId, ct)
                     ?? throw new InvalidOperationException("The AP payment does not exist in this company.");
+                if (!Guid.TryParse(expected.SourceIdentifier, out var payablesControlId) ||
+                    !await _db.Suppliers.AnyAsync(x => x.Id == source.SupplierId && x.CompanyId == companyId &&
+                        x.ApAccountId == payablesControlId, ct))
+                    throw new InvalidOperationException("The AP payment does not belong to the registered payables control account.");
                 sourceAmount = source.Amount;
                 sourceDate = source.PaymentDate;
                 sourceCurrency = source.Currency;
@@ -724,6 +815,12 @@ namespace ApexERP.Application.Services
             var lines = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
                 x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId).ToListAsync(ct);
             var groups = lines.GroupBy(x => x.SourceRecordId).ToList();
+            var expected = await _db.PublicSectorExpectedCashSources.FirstAsync(x =>
+                x.Id == submission.ExpectedCashSourceId && x.CompanyId == companyId, ct);
+            var livePopulation = await GetExpectedCashSourcePopulationAsync(companyId, expected,
+                submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
+            if (!livePopulation.CurrencyMatches || !livePopulation.RecordIds.SetEquals(groups.Select(x => x.Key)))
+                throw new InvalidOperationException("The record-level mapping does not match the current source-system record population and currency.");
             if (groups.Count != submission.RecordCount)
                 throw new InvalidOperationException($"Record-level reconciliation has {groups.Count} distinct source records; the submitted control count is {submission.RecordCount}.");
             if (groups.Any(g => g.Select(x => x.SourceAmount).Distinct().Count() != 1 ||
@@ -758,6 +855,18 @@ namespace ApexERP.Application.Services
                 throw new InvalidOperationException("Record-level reconciliation requires a reviewer independent of the source preparer, source reviewer and reconciliation submitter.");
             if (!accepted && string.IsNullOrWhiteSpace(reviewNote))
                 throw new InvalidOperationException("A reason is required when rejecting record-level reconciliation.");
+            if (accepted)
+            {
+                var expected = await _db.PublicSectorExpectedCashSources.FirstAsync(x =>
+                    x.Id == submission.ExpectedCashSourceId && x.CompanyId == companyId, ct);
+                var population = await GetExpectedCashSourcePopulationAsync(companyId, expected,
+                    submission.PeriodStart, submission.PeriodEnd, submission.Currency, ct);
+                var lines = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
+                    x.CompanyId == companyId && x.CashSourceSubmissionId == submissionId).ToListAsync(ct);
+                if (!population.CurrencyMatches ||
+                    !population.RecordIds.SetEquals(lines.Select(x => x.SourceRecordId).Distinct()))
+                    throw new InvalidOperationException("The live source population changed after submission; record-level reconciliation cannot be approved.");
+            }
             submission.RecordLevelStatus = accepted ? "Reviewed" : "Rejected";
             submission.RecordLevelReviewedBy = reviewerId;
             submission.RecordLevelReviewedAt = DateTime.UtcNow;
