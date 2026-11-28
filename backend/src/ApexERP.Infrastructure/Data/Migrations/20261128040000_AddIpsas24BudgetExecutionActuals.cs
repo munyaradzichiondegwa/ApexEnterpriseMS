@@ -69,10 +69,39 @@ public sealed class AddIpsas24BudgetExecutionActuals : Migration
             "PublicSectorBudgetExecutionActuals", new[] { "BudgetVersionId", "EffectiveDate" });
         migrationBuilder.CreateIndex("UX_PublicSectorBudgetExecutionActual_Source",
             "PublicSectorBudgetExecutionActuals", new[] { "CompanyId", "SourceKind", "SourceRecordId" }, unique: true);
+
+        migrationBuilder.Sql("""
+CREATE OR REPLACE FUNCTION apex_guard_budget_execution_actual() RETURNS trigger AS $
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'Budget execution actual evidence is immutable; use a reversal event.' USING ERRCODE = 'restrict_violation';
+    END IF;
+    IF (to_jsonb(NEW) - 'Status' - 'CertifiedBy' - 'CertifiedAt' - 'UpdatedAt' - 'UpdatedBy') IS DISTINCT FROM
+       (to_jsonb(OLD) - 'Status' - 'CertifiedBy' - 'CertifiedAt' - 'UpdatedAt' - 'UpdatedBy') THEN
+        RAISE EXCEPTION 'Budget execution actual source evidence cannot be edited.' USING ERRCODE = 'restrict_violation';
+    END IF;
+    IF NEW."Status" <> OLD."Status" AND NOT (
+        (OLD."Status" = 0 AND NEW."Status" = 1) OR
+        (OLD."Status" = 1 AND NEW."Status" IN (2, 3))
+    ) THEN
+        RAISE EXCEPTION 'Invalid budget actual status transition from % to %.', OLD."Status", NEW."Status" USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_budget_execution_actual_immutable
+    BEFORE UPDATE OR DELETE ON "PublicSectorBudgetExecutionActuals"
+    FOR EACH ROW EXECUTE FUNCTION apex_guard_budget_execution_actual();
+""");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+
+        migrationBuilder.Sql("""
+DROP TRIGGER IF EXISTS trg_budget_execution_actual_immutable ON "PublicSectorBudgetExecutionActuals";
+DROP FUNCTION IF EXISTS apex_guard_budget_execution_actual();
+""");
         migrationBuilder.DropTable(name: "PublicSectorBudgetExecutionActuals");
     }
 }
