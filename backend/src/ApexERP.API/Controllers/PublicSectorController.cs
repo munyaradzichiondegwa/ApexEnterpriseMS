@@ -414,38 +414,35 @@ namespace ApexERP.API.Controllers
             var actuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
                 x.CompanyId == CompanyId && x.BudgetVersionId == version.Id &&
                 x.EffectiveDate >= version.PeriodStart && x.EffectiveDate < version.PeriodEnd).ToListAsync(ct);
-            var capturedSourceIds = actuals.Select(x => x.SourceRecordId).ToArray();
-            // Coverage includes every bank-statement movement, not only those already linked
-            // to a posted journal. Otherwise unlinked/unposted cash movements disappear from
-            // the completeness denominator and the bridge can falsely report full coverage.
+            var capturedBankSourceIds = actuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.BankTransaction)
+                .Select(x => x.SourceRecordId).Distinct().ToArray();
+            var arReceiptIds = actuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ArReceipt)
+                .Select(x => x.SourceRecordId).Distinct().ToArray();
+            var apPaymentIds = actuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ApPayment)
+                .Select(x => x.SourceRecordId).Distinct().ToArray();
+            var capturedSettlementJournalIds = await _db.ArReceipts
+                .Where(x => x.CompanyId == CompanyId && arReceiptIds.Contains(x.Id) && x.JournalEntryId.HasValue)
+                .Select(x => x.JournalEntryId!.Value)
+                .Concat(_db.ApPayments.Where(x => x.CompanyId == CompanyId &&
+                    apPaymentIds.Contains(x.Id) && x.JournalEntryId.HasValue)
+                    .Select(x => x.JournalEntryId!.Value))
+                .Distinct().ToArrayAsync(ct);
+            // AR/AP actuals cover the same posted bank movement through their settlement journal.
             var periodBankMovements = _db.BankTransactions.Where(x => x.CompanyId == CompanyId &&
                 x.TransactionDate >= version.PeriodStart && x.TransactionDate < version.PeriodEnd);
             var uncapturedPostedMovements = await periodBankMovements.CountAsync(x =>
                 !x.IsReconciled || !x.JournalEntryId.HasValue ||
                 !_db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
                     j.CompanyId == CompanyId && j.Status == JournalStatus.Posted) ||
-                !capturedSourceIds.Contains(x.Id), ct);
+                (!capturedBankSourceIds.Contains(x.Id) && !capturedSettlementJournalIds.Contains(x.JournalEntryId.Value)), ct);
             var pendingActuals = actuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
-            var invalidCertifiedActuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
-                    x.CompanyId == CompanyId && x.BudgetVersionId == version.Id &&
-                    x.Status == PublicSectorBudgetActualStatus.Certified)
-                .CountAsync(actual => !_db.BankTransactions.Any(bank => bank.Id == actual.SourceRecordId &&
-                    bank.CompanyId == CompanyId && bank.IsReconciled && bank.JournalEntryId.HasValue &&
-                    ((actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt &&
-                        bank.Credit == actual.Amount && bank.Debit == 0m) ||
-                     (actual.EventKind == PublicSectorBudgetActualEventKind.CashPayment &&
-                        bank.Debit == actual.Amount && bank.Credit == 0m)) &&
-                    _db.BankAccounts.Any(account => account.Id == bank.BankAccountId &&
-                        account.CompanyId == CompanyId && account.Currency == actual.Currency) &&
-                    _db.JournalEntries.Any(journal => journal.Id == bank.JournalEntryId.Value &&
-                        journal.CompanyId == CompanyId && journal.Status == JournalStatus.Posted) &&
-                    _db.GlAccounts.Any(account => account.Id == actual.GlAccountId &&
-                        account.CompanyId == CompanyId && account.CashFlowCategory == actual.CashFlowSection) &&
-                    _db.JournalLines.Where(line => line.JournalEntryId == bank.JournalEntryId.Value &&
-                        line.GlAccountId == actual.GlAccountId && line.FundCentreId == actual.FundCentreId &&
-                        line.CostCentreId == actual.CostCentreId)
-                        .Sum(line => actual.EventKind == PublicSectorBudgetActualEventKind.CashReceipt
-                            ? line.Credit - line.Debit : line.Debit - line.Credit) == actual.Amount), ct);
+            var certifiedActualsForValidation = actuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
+            var invalidCertifiedActuals = 0;
+            foreach (var actual in certifiedActualsForValidation)
+            {
+                if (!await _publicSector.IsCertifiedCashActualSourceValidAsync(CompanyId, actual, ct))
+                    invalidCertifiedActuals++;
+            }
             var certified = actuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
             decimal Actual(CashFlowCategory section) => certified.Where(x => x.CashFlowSection == section)
                 .Sum(x => x.EventKind == PublicSectorBudgetActualEventKind.CashReceipt ? x.Amount : -x.Amount);
