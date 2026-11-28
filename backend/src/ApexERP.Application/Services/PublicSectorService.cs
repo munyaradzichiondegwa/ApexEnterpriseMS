@@ -1245,14 +1245,14 @@ namespace ApexERP.Application.Services
             foreach (var source in sources)
             {
                 if (!Guid.TryParse(source.SourceIdentifier, out var sourceId)) return false;
-                registered.Add($"{source.SourceKind}:{sourceId:N}");
+                if (source.SourceKind == "ReceivablesControl" || source.SourceKind == "PayablesControl")
+                    registered.Add($"{source.SourceKind}:{sourceId:N}");
             }
 
+            // AR/AP control-account mappings are discoverable from company master data.
+            // Bank-account and external-source completeness remains a separately evidenced
+            // management declaration because ApexERP cannot discover undisclosed external accounts.
             var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var bankIds = await _db.BankAccounts.Where(x => x.CompanyId == companyId)
-                .Select(x => x.Id).ToListAsync(ct);
-            foreach (var id in bankIds) discovered.Add($"BankAccount:{id:N}");
-
             var receivableIds = await _db.Customers.Where(x =>
                 x.CompanyId == companyId && x.ArAccountId.HasValue)
                 .Select(x => x.ArAccountId!.Value).Distinct().ToListAsync(ct);
@@ -1346,7 +1346,7 @@ namespace ApexERP.Application.Services
                     throw new InvalidOperationException("The expected-source register no longer matches the submitted completeness declaration.");
                 if (accepted && !await AreExpectedCashSourceMappingsCompleteAsync(
                     companyId, item.BudgetVersionId, token))
-                    throw new InvalidOperationException("The registered bank accounts and AR/AP control accounts do not cover all company-owned source mappings.");
+                    throw new InvalidOperationException("The registered AR/AP control accounts do not cover all company-owned customer and supplier subledger mappings.");
 
                 var submissions = (await _db.PublicSectorCashSourceSubmissions.Where(x =>
                     x.CompanyId == companyId && x.BudgetVersionId == item.BudgetVersionId).ToListAsync(token))
@@ -1621,7 +1621,7 @@ namespace ApexERP.Application.Services
                 if (!everyExpectedSourceReviewed || !noOrphanOrUnreviewedSubmissions)
                     comparabilityIssues.Add("One or more expected cash sources lack independently reviewed source control totals or record-level reconciliation.");
                 if (!sourceMappingsComplete)
-                    comparabilityIssues.Add("The expected-source register omits a company bank account or an AR/AP control-account mapping discovered from company master data.");
+                    comparabilityIssues.Add("The expected-source register omits an AR/AP control-account mapping discovered from company master data.");
                 if (!registerCompletenessCertified)
                     comparabilityIssues.Add("Independent expected-source register completeness certification is missing, stale or inconsistent with the approved budget scope.");
 
