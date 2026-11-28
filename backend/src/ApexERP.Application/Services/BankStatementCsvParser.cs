@@ -155,7 +155,7 @@ public static class BankStatementCsvParser
 
             if (quoteClosed && ch != ',' && ch != '\r' && ch != '\n' && !char.IsWhiteSpace(ch))
                 throw new InvalidOperationException("Malformed CSV quoting: unexpected character after closing quote.");
-            if (quoteClosed && char.IsWhiteSpace(ch)) continue;
+            if (quoteClosed && ch != '\\r' && ch != '\\n' && char.IsWhiteSpace(ch)) continue;
 
             if (ch == '"')
             {
