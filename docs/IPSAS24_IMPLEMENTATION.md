@@ -253,3 +253,12 @@ The branch now includes a company-scoped expected cash-source register linked to
 - Read, create, submit and approve API routes are available under `/api/v1/public-sector/expected-cash-sources`.
 
 This is a register-management slice, not yet a complete source-close control. It does not yet capture period submissions, source record counts/control totals, opening/closing balances, evidence packages, record-level mapping to budget actuals, approved exclusions or independent period close. Until those controls are implemented, the register must not be used to certify period completeness or unlock nil-return/budget comparison on its own.
+
+
+### Period source submissions: control-total capture and independent review
+
+The next workflow slice adds one period submission for each approved expected source. A submission captures the source's effective period, record count, control total, opening balance, closing balance, three-letter currency code and supporting evidence reference. The preparer submits it for review; a different user must review and accept or reject it, with a reason mandatory for rejection.
+
+The database enforces non-negative record counts, valid periods, three-character currency codes, uniqueness per company/expected source, restricted foreign keys and immutable reviewed/rejected submissions. The API exposes list, create, submit and review operations under `/api/v1/public-sector/cash-source-submissions`.
+
+**Important remaining limitation:** these submissions currently capture source-level control totals; they do not yet reconcile individual bank/AR/AP source record IDs to certified budget actuals or approved exclusions. They also do not yet certify that the expected-source register itself is complete. Consequently, neither a reviewed submission nor the register alone may be treated as proof that every source record has been accounted for, and no period-close or statutory-issuance gate should rely on this slice yet.
