@@ -100,6 +100,7 @@ Implemented on the feature branch:
 - A company/source-kind/source-record unique index prevents duplicate capture. Company query filtering is applied to the new entity.
 - Added draft → pending certification → certified lifecycle. The certifier must differ from the creator. PostgreSQL trigger prevents deletion, evidence edits and mutation of certification metadata after certification.
 - Added API routes under `/api/v1/public-sector/budget-execution-actuals` for capture, listing, submission and certification.
+- Added an approved-budget lookup for the latest cash budget version and a cash-flow bridge endpoint. It totals certified receipts/payments by operating, investing and financing, checks that every posted journal-linked bank movement in the budget period is reconciled and captured, blocks on draft/pending actuals, and compares approved reconciliation adjustments with the difference to the generated Statement of Cash Flows.
 - Added a PostgreSQL integration test for reconciled posted bank evidence, independent certification, self-certification rejection and duplicate source rejection.
 
 ### Still not implemented / not verified
@@ -107,6 +108,6 @@ Implemented on the feature branch:
 - Budget actuals are not yet included in the IPSAS 24 comparison statement; statement comparability remains blocked for cash budgets until a period-coverage certification and reconciliation bridge are implemented.
 - Added a Public Sector screen for selecting an approved cash budget line and reconciled bank transaction, capturing the event, listing actuals, submitting for certification and certifying as a separate user. AR/AP settlement allocation mapping remains outstanding; only directly mapped reconciled bank journal movements are accepted.
 - Modified-cash commitments, source snapshot hashing, compensating reversal workflow, foreign-currency source conversion and source completeness attestations remain disabled/outstanding.
-- Automated reconciliation to the three Statement of Cash Flows sections is not yet implemented.
+- The cash-flow bridge preview is implemented, but it is not yet a statutory statement-issuance gate and cash-basis actuals are not yet populated into the IPSAS 24 comparison statement. The existing CashFlowStatementService itself requires independent review before its totals can be treated as externally certified figures.
 - The new migration, EF snapshot and PostgreSQL tests have not yet been executed in CI or against a live PostgreSQL instance in this work session.
 - After applying the migration in an environment where RLS is enabled, rerun `backend/database/hardening/002_row_level_security.sql` so the newly created company-owned table receives the database policy. Confirm the runtime role remains non-owner and has no `BYPASSRLS`.
