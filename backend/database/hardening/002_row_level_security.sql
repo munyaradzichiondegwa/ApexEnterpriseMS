@@ -76,6 +76,7 @@ BEGIN
         WHERE c.column_name = 'CompanyId'
           AND c.table_schema = current_schema()
           AND c.data_type = 'uuid'
+          AND c.table_name <> 'Users'
     LOOP
         EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY', t.table_schema, t.table_name);
         EXECUTE format('ALTER TABLE %I.%I FORCE ROW LEVEL SECURITY', t.table_schema, t.table_name);
@@ -86,7 +87,7 @@ BEGIN
               AND column_name = 'TenantId' AND data_type = 'uuid'
         ) THEN
             EXECUTE format(
-                'CREATE POLICY apex_tenant_isolation ON %I.%I USING (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid) WITH CHECK (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid)',
+                'CREATE POLICY apex_tenant_isolation ON %I.%I USING (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid)) WITH CHECK (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR (apex_rls_allowed("CompanyId") AND "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid))',
                 t.table_schema, t.table_name);
         ELSE
             EXECUTE format(
@@ -94,11 +95,11 @@ BEGIN
                 t.table_schema, t.table_name);
         END IF;
     END LOOP;
-END $;
+END $$;
 
 -- Tenant-level records without a CompanyId are scoped directly to the signed tenant.
 -- Global catalogues (plans, jurisdictions and deployment profiles) remain readable by design.
-DO $
+DO $$
 DECLARE t record;
 BEGIN
     FOR t IN
@@ -125,32 +126,32 @@ BEGIN
             'CREATE POLICY apex_tenant_isolation ON %I.%I USING (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid) WITH CHECK (coalesce(current_setting(''app.rls_bypass'', true), '''') = ''on'' OR "TenantId" = nullif(current_setting(''app.tenant_id'', true), '''')::uuid)',
             t.table_schema, t.table_name);
     END LOOP;
-END $;
+END $$;
 
 
 -- A user identity remains anchored to its home company, but may be read in another
 -- company only when the signed-in user has an active membership there. The app.user_id
 -- value is stamped from the validated JWT by TenantSession; it is never accepted from a request.
+ALTER TABLE "Users" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "Users" FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS apex_tenant_isolation ON "Users";
 DROP POLICY IF EXISTS apex_user_membership_access ON "Users";
 CREATE POLICY apex_user_membership_access ON "Users"
     USING (
         coalesce(current_setting('app.rls_bypass', true), '') = 'on'
         OR apex_rls_allowed("CompanyId")
-        OR (
-            "Id" = nullif(current_setting('app.user_id', true), '')::uuid
-            AND EXISTS (
-                SELECT 1 FROM "CompanyMemberships" m
-                WHERE m."UserId" = "Users"."Id"
-                  AND m."CompanyId" = nullif(current_setting('app.company_id', true), '')::uuid
-                  AND m."IsActive" = true
-                  AND (m."ValidFrom" IS NULL OR m."ValidFrom" <= now())
-                  AND (m."ValidTo" IS NULL OR m."ValidTo" > now())
-            )
+        OR EXISTS (
+            SELECT 1 FROM "CompanyMemberships" m
+            WHERE m."UserId" = "Users"."Id"
+              AND m."UserId" = nullif(current_setting('app.user_id', true), '')::uuid
+              AND m."CompanyId" = nullif(current_setting('app.company_id', true), '')::uuid
+              AND m."IsActive" = true
+              AND (m."ValidFrom" IS NULL OR m."ValidFrom" <= now())
+              AND (m."ValidTo" IS NULL OR m."ValidTo" > now())
         )
     )
     WITH CHECK (
         coalesce(current_setting('app.rls_bypass', true), '') = 'on'
         OR apex_rls_allowed("CompanyId")
     );
-
 COMMIT;

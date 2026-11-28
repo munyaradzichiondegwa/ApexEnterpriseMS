@@ -4,6 +4,7 @@ import { useState } from "react";
 import AppShell from "@/components/AppShell";
 import { api, extractErrorMessage } from "@/lib/api";
 import FinancialTrendPanel from "@/components/FinancialTrendPanel";
+import { downloadCsv } from "@/lib/exports";
 
 type Tab = "tb" | "is" | "bs" | "equity" | "cashflow" | "notes";
 
@@ -29,6 +30,55 @@ export default function ReportsPage() {
   const [range, setRange] = useState({ from: new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10), to: now.toISOString().slice(0, 10) });
 
   const fmt = (n: number) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  type ExportRow = { section: string; code?: string; name?: string; amount?: number; debit?: number; credit?: number; details?: string };
+
+  function exportCurrentReport() {
+    const rows: ExportRow[] = [];
+    if (tab === "tb" && trialBalance) {
+      trialBalance.lines.forEach((line: any) => rows.push({ section: "Trial Balance", code: line.code, name: line.name, debit: line.debit, credit: line.credit }));
+    } else if (tab === "is" && incomeStatement) {
+      incomeStatement.incomeLines.forEach((line: any) => rows.push({ section: "Income", code: line.code, name: line.name, debit: line.debit, credit: line.credit }));
+      incomeStatement.expenseLines.forEach((line: any) => rows.push({ section: "Expense", code: line.code, name: line.name, debit: line.debit, credit: line.credit }));
+      incomeStatement.ociLines.forEach((line: any) => rows.push({ section: "Other Comprehensive Income", name: line.accountName, amount: line.amount, details: String(line.category) }));
+      rows.push({ section: "Net Profit", amount: incomeStatement.netProfit });
+      rows.push({ section: "Total Comprehensive Income", amount: incomeStatement.totalComprehensiveIncome });
+    } else if (tab === "bs" && balanceSheet) {
+      for (const [section, lines, total] of [["Assets", balanceSheet.assets, balanceSheet.totalAssets], ["Liabilities", balanceSheet.liabilities, balanceSheet.totalLiabilities], ["Equity", balanceSheet.equity, balanceSheet.totalEquity]] as any[]) {
+        lines.forEach((line: any) => rows.push({ section, code: line.code, name: line.name, debit: line.debit, credit: line.credit }));
+        rows.push({ section: section + " Total", amount: total });
+      }
+    } else if (tab === "equity" && equity) {
+      equity.accounts.forEach((line: any) => rows.push({ section: "Changes in Equity", name: line.accountName, amount: line.closingBalance, details: `Opening ${line.openingBalance}; profit ${line.profitForPeriod}; OCI ${line.ociMovement}; dividends ${line.dividendsDeclared}; share capital ${line.shareCapitalMovement}; other ${line.otherMovement}` }));
+    } else if (tab === "cashflow" && cashFlow) {
+      rows.push({ section: "Operating Activities", name: "Net Profit", amount: cashFlow.netProfit });
+      cashFlow.operatingAdjustments.forEach((line: any) => rows.push({ section: "Operating Activities", name: line.label, amount: line.amount }));
+      cashFlow.investingActivities.forEach((line: any) => rows.push({ section: "Investing Activities", name: line.label, amount: line.amount }));
+      cashFlow.financingActivities.forEach((line: any) => rows.push({ section: "Financing Activities", name: line.label, amount: line.amount }));
+      rows.push({ section: "Net Increase in Cash", amount: cashFlow.netIncreaseInCash });
+      rows.push({ section: "Cash at End", amount: cashFlow.cashAtEnd });
+    } else if (tab === "notes" && notes) {
+      rows.push({ section: "Accounting Policies", details: notes.accountingPoliciesNote });
+      notes.propertyPlantEquipment.forEach((line: any) => rows.push({ section: "Property, Plant & Equipment", name: line.categoryName, amount: line.closingNbv, details: `Opening cost ${line.openingCost}; additions ${line.additions}; disposals ${line.disposalsAtCost}; revaluations ${line.revaluations}; depreciation ${line.depreciationCharge}` }));
+      notes.inventory.forEach((line: any) => rows.push({ section: "Inventory", name: line.itemName, amount: line.totalValue, details: `Method ${line.valuationMethod}; quantity ${line.quantityOnHand}; average cost ${line.averageCost}` }));
+      notes.tradeReceivablesAgeing.forEach((line: any) => rows.push({ section: "Trade Receivables Ageing", name: line.customerName, details: `Current ${line.current}; 30d ${line.days30}; 60d ${line.days60}; 90d+ ${line.days90Plus}` }));
+      notes.tradePayablesAgeing.forEach((line: any) => rows.push({ section: "Trade Payables Ageing", name: line.supplierName, details: `Current ${line.current}; 30d ${line.days30}; 60d ${line.days60}; 90d+ ${line.days90Plus}` }));
+    }
+    if (rows.length === 0) return;
+    downloadCsv(`apexerp-${tab}-${range.from}-${range.to}`, rows, [
+      { header: "Section", value: row => row.section },
+      { header: "Code", value: row => row.code },
+      { header: "Name", value: row => row.name },
+      { header: "Amount", value: row => row.amount },
+      { header: "Debit", value: row => row.debit },
+      { header: "Credit", value: row => row.credit },
+      { header: "Details", value: row => row.details }
+    ]);
+  }
+
+  const currentReportLoaded = (tab === "tb" && !!trialBalance) || (tab === "is" && !!incomeStatement) ||
+    (tab === "bs" && !!balanceSheet) || (tab === "equity" && !!equity) ||
+    (tab === "cashflow" && !!cashFlow) || (tab === "notes" && !!notes);
+
 
   async function loadTb() { try { setTrialBalance((await api.get(`/reports/trial-balance?asOf=${range.to}`)).data); } catch (e) { setError(extractErrorMessage(e)); } }
   async function loadIs() { try { setIncomeStatement((await api.get(`/reports/income-statement?from=${range.from}&to=${range.to}`)).data); } catch (e) { setError(extractErrorMessage(e)); } }
@@ -58,6 +108,7 @@ export default function ReportsPage() {
         <div><label className="label">From</label><input className="input" type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></div>
         <div><label className="label">To / As Of</label><input className="input" type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></div>
         <button className="btn-primary" onClick={() => selectTab(tab)}>Refresh</button>
+        <button className="btn-secondary" onClick={exportCurrentReport} disabled={!currentReportLoaded}>Export CSV</button>
       </div>
 
       <FinancialTrendPanel from={range.from} to={range.to} />

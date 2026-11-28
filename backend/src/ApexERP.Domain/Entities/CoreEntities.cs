@@ -29,6 +29,8 @@ namespace ApexERP.Domain.Entities
         public string Name { get; set; } = string.Empty;
         public string? RegistrationNo { get; set; }
         public string? VatNo { get; set; }
+        /// <summary>Zimbabwe Revenue Authority taxpayer identification number used for DSWT declarations.</summary>
+        public string? ZimbabweTaxpayerTin { get; set; }
         public string BaseCurrency { get; set; } = "USD";
         public string FunctionalCurrency { get; set; } = "USD";
         public int FiscalYearStartMonth { get; set; } = 1;
@@ -110,6 +112,9 @@ namespace ApexERP.Domain.Entities
         public Guid ReferenceId { get; set; }
         public string ReferenceTable { get; set; } = string.Empty;
         public Guid SubmittedBy { get; set; }
+        /// <summary>Amount used to select and later validate the approval threshold.</summary>
+        public decimal Amount { get; set; }
+        public Guid? FundCentreId { get; set; }
         public WorkflowStatus Status { get; set; } = WorkflowStatus.Pending;
         public Guid? CurrentApproverId { get; set; }
         public string? Notes { get; set; }
@@ -123,7 +128,7 @@ namespace ApexERP.Domain.Entities
 
     /// <summary>One tier's decision within a multi-tier WorkflowRequest -- preserves full approval
     /// history in the audit trail as required by PRD 16 ("Full approval history in audit log").</summary>
-    public class WorkflowApproval : BaseEntity
+    public class WorkflowApproval : TenantEntity
     {
         public Guid WorkflowRequestId { get; set; }
         public int Tier { get; set; }

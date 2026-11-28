@@ -13,6 +13,10 @@ interface Journal {
   status: JournalStatus; reversalOfId?: string | null; lines?: JournalLine[];
 }
 interface HistoryItem { id: string; action: string; userId?: string | null; timestamp: string; afterValueJson?: string | null }
+interface FxRate {
+  id: string; fromCurrency: string; toCurrency: string; rateDate: string; rate: number;
+  isManualOverride: boolean; rateSource: string; sourceReference?: string | null;
+}
 
 const STATUSES: JournalStatus[] = ["Draft", "Submitted", "Approved", "Posted", "Reversed", "Rejected", "Cancelled"];
 
@@ -34,7 +38,12 @@ export default function GlPage() {
   const { can } = useAuth();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [entries, setEntries] = useState<Journal[]>([]);
-  const [tab, setTab] = useState<"accounts" | "journals">("accounts");
+  const [tab, setTab] = useState<"accounts" | "journals" | "fx-rates">("accounts");
+  const [fxRates, setFxRates] = useState<FxRate[]>([]);
+  const [fxRateDraft, setFxRateDraft] = useState({
+    fromCurrency: "USD", toCurrency: "ZWG", rateDate: new Date().toISOString().slice(0, 10),
+    rate: "", isManualOverride: false, rateSource: "Manual entry", sourceReference: "",
+  });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<JournalStatus | "All">("All");
@@ -50,6 +59,14 @@ export default function GlPage() {
     api.get("/gl/accounts").then((r) => setAccounts(r.data)).catch((e) => setError(extractErrorMessage(e)));
     api.get("/gl/journal-entries").then((r) => setEntries(r.data)).catch((e) => setError(extractErrorMessage(e)));
   }
+
+  function loadFxRates() {
+    api.get("/gl/fx-rates").then((r) => setFxRates(r.data)).catch((e) => setError(extractErrorMessage(e)));
+  }
+
+  useEffect(() => {
+    if (tab === "fx-rates" && can("gl.accounts.read")) loadFxRates();
+  }, [tab, can]);
   useEffect(load, []);
 
   const activeAccounts = useMemo(() => accounts.filter((a) => a.isActive !== false), [accounts]);
@@ -88,6 +105,27 @@ export default function GlPage() {
       setError(extractErrorMessage(err));
     }
   }
+
+  async function saveFxRate(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setNotice(null);
+    try {
+      await api.post("/gl/fx-rates", {
+        ...fxRateDraft,
+        fromCurrency: fxRateDraft.fromCurrency.trim().toUpperCase(),
+        toCurrency: fxRateDraft.toCurrency.trim().toUpperCase(),
+        rate: Number(fxRateDraft.rate),
+        sourceReference: fxRateDraft.sourceReference.trim() || null,
+      });
+      setNotice("Exchange rate and source evidence saved.");
+      loadFxRates();
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    }
+  }
+
+
 
   async function toggleActive(account: any) {
     setError(null);
@@ -185,6 +223,7 @@ export default function GlPage() {
       <div className="flex gap-2 mb-6">
         <button className={tab === "accounts" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("accounts")}>Chart of Accounts</button>
         <button className={tab === "journals" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("journals")}>Journal Entries</button>
+        {can("gl.accounts.read") && <button className={tab === "fx-rates" ? "btn-primary" : "btn-secondary"} onClick={() => setTab("fx-rates")}>FX Rates & Sources</button>}
       </div>
 
       {error && <div className="text-sm text-red-600 mb-4" role="alert">{error}</div>}
@@ -228,6 +267,54 @@ export default function GlPage() {
               </div>
               <div><label className="label">Currency</label><input className="input" value={newAccount.currency} onChange={(e) => setNewAccount({ ...newAccount, currency: e.target.value })} /></div>
               <button className="btn-primary w-full">Add Account</button>
+            </form>
+          )}
+        </div>
+      )}
+
+      {tab === "fx-rates" && (
+        <div className="space-y-6">
+          <div className="card overflow-x-auto">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <div>
+                <h2 className="font-semibold">Effective-dated exchange rates</h2>
+                <p className="text-xs text-slate-500">Each rate retains its source, source reference, date and manual-override status for revaluation and consolidation evidence.</p>
+              </div>
+              <button className="btn-secondary !px-3 !py-1.5 text-sm" onClick={loadFxRates}>Refresh</button>
+            </div>
+            <table className="table-base">
+              <thead><tr><th>Pair</th><th>Date</th><th className="text-right">Rate</th><th>Source</th><th>Reference</th><th>Type</th></tr></thead>
+              <tbody>
+                {fxRates.map((rate) => (
+                  <tr key={rate.id}>
+                    <td className="font-medium">{rate.fromCurrency}/{rate.toCurrency}</td>
+                    <td>{new Date(rate.rateDate).toLocaleDateString()}</td>
+                    <td className="text-right tabular-nums">{Number(rate.rate).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                    <td>{rate.rateSource || "Unspecified"}</td>
+                    <td className="max-w-xs truncate" title={rate.sourceReference || ""}>{rate.sourceReference || "—"}</td>
+                    <td>{rate.isManualOverride ? "Manual override" : "Recorded rate"}</td>
+                  </tr>
+                ))}
+                {fxRates.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No exchange rates recorded for this company.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {can("gl.accounts.manage") && (
+            <form onSubmit={saveFxRate} className="card space-y-3">
+              <h2 className="font-semibold">Record or update an exchange rate</h2>
+              <p className="text-xs text-slate-500">Use the published/contracted source and reference where available. Manual overrides are explicitly labelled and audited.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div><label className="label" htmlFor="fx-from">From currency</label><input id="fx-from" className="input" required maxLength={3} value={fxRateDraft.fromCurrency} onChange={(e) => setFxRateDraft({ ...fxRateDraft, fromCurrency: e.target.value.toUpperCase() })} /></div>
+                <div><label className="label" htmlFor="fx-to">To currency</label><input id="fx-to" className="input" required maxLength={3} value={fxRateDraft.toCurrency} onChange={(e) => setFxRateDraft({ ...fxRateDraft, toCurrency: e.target.value.toUpperCase() })} /></div>
+                <div><label className="label" htmlFor="fx-date">Effective date</label><input id="fx-date" className="input" type="date" required value={fxRateDraft.rateDate} onChange={(e) => setFxRateDraft({ ...fxRateDraft, rateDate: e.target.value })} /></div>
+                <div><label className="label" htmlFor="fx-rate">Rate</label><input id="fx-rate" className="input" type="number" min="0.000001" step="0.000001" required value={fxRateDraft.rate} onChange={(e) => setFxRateDraft({ ...fxRateDraft, rate: e.target.value })} /></div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><label className="label" htmlFor="fx-source">Rate source</label><input id="fx-source" className="input" required maxLength={100} value={fxRateDraft.rateSource} onChange={(e) => setFxRateDraft({ ...fxRateDraft, rateSource: e.target.value })} placeholder="e.g. Reserve Bank of Zimbabwe" /></div>
+                <div><label className="label" htmlFor="fx-reference">Source reference</label><input id="fx-reference" className="input" maxLength={500} value={fxRateDraft.sourceReference} onChange={(e) => setFxRateDraft({ ...fxRateDraft, sourceReference: e.target.value })} placeholder="URL, bulletin number or bank advice reference" /></div>
+              </div>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fxRateDraft.isManualOverride} onChange={(e) => setFxRateDraft({ ...fxRateDraft, isManualOverride: e.target.checked })} /> Manual override (requires appropriate approval under company policy)</label>
+              <button className="btn-primary">Save exchange rate</button>
             </form>
           )}
         </div>

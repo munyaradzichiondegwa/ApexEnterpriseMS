@@ -31,8 +31,28 @@ namespace ApexERP.API.Controllers
         /// <summary>The caller's own pending approvals -- available to every signed-in user.</summary>
         [HttpGet("pending")]
         [AuthenticatedOnly]
-        public async Task<IActionResult> GetPending() =>
-            Ok(await _db.WorkflowRequests.Where(w => w.CompanyId == CompanyId && w.CurrentApproverId == UserId && w.Status == WorkflowStatus.Pending).ToListAsync());
+        public async Task<IActionResult> GetPending()
+        {
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == UserId && u.CompanyId == CompanyId && u.IsActive);
+            if (user == null) return Forbid();
+
+            var roleChainIds = _db.ApprovalChainTiers
+                .Where(t => t.ApproverRoleId == user.RoleId &&
+                    _db.ApprovalChains.Any(chain => chain.Id == t.ApprovalChainId && chain.CompanyId == CompanyId))
+                .Select(t => t.ApprovalChainId);
+
+            var pending = await _db.WorkflowRequests
+                .Where(w => w.CompanyId == CompanyId && w.Status == WorkflowStatus.Pending &&
+                    (w.CurrentApproverId == UserId ||
+                     (w.ApprovalChainId.HasValue && roleChainIds.Contains(w.ApprovalChainId.Value) &&
+                      _db.ApprovalChainTiers.Any(t => t.ApprovalChainId == w.ApprovalChainId.Value &&
+                          t.TierOrder == w.CurrentTier && t.ApproverRoleId == user.RoleId) &&
+                      !_db.WorkflowApprovals.Any(a => a.CompanyId == CompanyId &&
+                          a.WorkflowRequestId == w.Id && a.ApproverId == UserId))))
+                .OrderBy(w => w.CreatedAt)
+                .ToListAsync();
+            return Ok(pending);
+        }
 
         [HttpPost]
         public async Task<IActionResult> Create(CreateWorkflowRequest req)

@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ApexERP.API.Controllers
 {
-    public record RunPayrollRequest(int Month, int Year, Dictionary<Guid, decimal>? Allowances);
+    public record RunPayrollRequest(int Month, int Year, Dictionary<Guid, decimal>? Allowances, string Currency = "USD");
     public record ApprovePayrollRequest(Guid SalariesExpenseAccountId, Guid NssaEmployerExpenseAccountId,
         Guid PayeControlAccountId, Guid NssaControlAccountId, Guid AidsLevyControlAccountId, Guid NetPayControlAccountId);
 
@@ -80,7 +80,7 @@ namespace ApexERP.API.Controllers
         {
             try
             {
-                var result = await _payroll.RunAsync(CompanyId, req.Month, req.Year, req.Allowances);
+                var result = await _payroll.RunAsync(CompanyId, req.Month, req.Year, req.Allowances, req.Currency);
                 return Ok(new { run = result.Run, lines = result.Lines });
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }

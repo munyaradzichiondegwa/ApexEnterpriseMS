@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
 using ApexERP.Application.Security;
+using ApexERP.Application.Services;
 using ApexERP.API.Authorization;
 using ApexERP.API.Services;
 using ApexERP.Domain.Entities;
@@ -14,17 +15,19 @@ namespace ApexERP.API.Controllers;
 
 [Route("api/v1/organisation")]
 [Authorize]
-[AuthenticatedOnly]
 public sealed class OrganisationManagementController : ApiControllerBase
 {
     private readonly ApexErpDbContext _db;
     private readonly IEmailDeliveryService _email;
-    public OrganisationManagementController(ApexErpDbContext db, IEmailDeliveryService email) { _db = db; _email = email; }
+    private readonly AuditService _audit;
+    public OrganisationManagementController(ApexErpDbContext db, IEmailDeliveryService email, AuditService audit)
+    { _db = db; _email = email; _audit = audit; }
 
     private Guid TenantId => Guid.TryParse(User.FindFirst("tenant_id")?.Value, out var id)
         ? id : throw new UnauthorizedAccessException("Missing tenant context.");
 
     private bool CanManage => GrantedPermissions.Contains("*") ||
+        GrantedPermissions.Contains("organisation.write") ||
         GrantedPermissions.Contains("settings.write") ||
         string.Equals(User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value, "Administrator", StringComparison.OrdinalIgnoreCase);
 
@@ -66,6 +69,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
     [HttpPost("subscription/renewal-request")]
     public async Task<IActionResult> RequestSubscriptionRenewal(CancellationToken ct)
     {
+        if (DenyManagement() is { } denied) return denied;
         using var scope = _db.SystemAccessScope("tenant self-service: request subscription renewal");
         var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId)
             .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
@@ -89,7 +93,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             .OrderBy(x => x.Name)
             .Select(x => new { x.Id, x.Name, x.RegistrationNo, x.BaseCurrency, x.FunctionalCurrency,
                 x.FiscalYearStartMonth, x.Timezone, x.Sector, x.ParentCompanyId, x.OwnershipPercentage,
-                x.IsPublicSectorEntity, x.AccountingBasis, x.IsActive })
+                x.IsPublicSectorEntity, x.AccountingBasis, x.ZimbabweTaxpayerTin, x.IsActive })
             .ToListAsync(ct);
         return Ok(rows);
     }
@@ -102,6 +106,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
             return BadRequest(new { error = "A company name and valid fiscal year start month (1-12) are required." });
 
         using var scope = _db.SystemAccessScope("tenant administration: create legal entity");
+        await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
+        await _db.AcquireTenantCapacityLockAsync(TenantId, "company-limit", ct);
         var sub = await _db.TenantSubscriptions.Where(x => x.TenantId == TenantId)
             .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
         if (sub is null || sub.Status is not ("Active" or "Trial") ||
@@ -131,6 +137,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             OwnershipPercentage = request.OwnershipPercentage, IsPublicSectorEntity = request.IsPublicSectorEntity
         };
         _db.Companies.Add(company);
+        await _db.SaveChangesAsync(ct);
         var roleMap = new Dictionary<Guid, Guid>();
         foreach (var oldRole in sourceRoles)
         {
@@ -139,6 +146,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             _db.Roles.Add(newRole);
             roleMap[oldRole.Id] = newRole.Id;
         }
+        await _db.SaveChangesAsync(ct);
         var currentRoleId = Guid.TryParse(User.FindFirst("role_id")?.Value, out var rid) ? rid : sourceRoles.FirstOrDefault(x => x.Name == User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value)?.Id;
         Guid? targetRole = currentRoleId.HasValue && roleMap.TryGetValue(currentRoleId.Value, out var mapped)
             ? mapped : roleMap.Values.Select(x => (Guid?)x).FirstOrDefault();
@@ -149,9 +157,55 @@ public sealed class OrganisationManagementController : ApiControllerBase
             RoleId = targetRole, IsDefault = false, IsActive = true, ValidFrom = DateTime.UtcNow
         });
         await _db.SaveChangesAsync(ct);
+        if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
         return CreatedAtAction(nameof(Companies), new { id = company.Id }, new { company.Id, company.Name });
     }
 
+
+    [HttpGet("companies/{companyId:guid}/tax-profile")]
+    public async Task<IActionResult> GetCompanyTaxProfile(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: view company tax profile");
+        var company = await _db.Companies.IgnoreQueryFilters().AsNoTracking()
+            .Where(x => x.Id == companyId && x.TenantId == TenantId)
+            .Select(x => new { x.Id, x.Name, x.VatNo, x.ZimbabweTaxpayerTin })
+            .SingleOrDefaultAsync(ct);
+        return company is null ? NotFound() : Ok(company);
+    }
+
+    [HttpPut("companies/{companyId:guid}/tax-profile/zimbabwe")]
+    public async Task<IActionResult> UpdateZimbabweTaxProfile(
+        Guid companyId, [FromBody] UpdateZimbabweTaxProfileRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        var tin = request.ZimbabweTaxpayerTin?.Trim();
+        if (!ZimbabweTaxpayerTinValidator.IsValid(tin))
+            return BadRequest(new { error = "A non-empty ZIMRA TIN of no more than 40 characters is required." });
+
+        using var scope = _db.SystemAccessScope("tenant administration: update Zimbabwe tax profile");
+        var company = await _db.Companies.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct);
+        if (company is null) return NotFound();
+
+        var previousTin = company.ZimbabweTaxpayerTin;
+        if (!string.Equals(previousTin, tin, StringComparison.Ordinal))
+        {
+            static string? MaskTin(string? value)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return null;
+                var normalized = value.Trim();
+                var suffix = normalized.Length <= 4 ? normalized : normalized.Substring(normalized.Length - 4);
+                return $"***{suffix}";
+            }
+            company.ZimbabweTaxpayerTin = tin;
+            _audit.Record(company.Id, UserId, "Company.ZimbabweTaxProfileUpdated", "Tax",
+                nameof(Company), company.Id,
+                new { ZimbabweTaxpayerTin = MaskTin(previousTin) },
+                new { ZimbabweTaxpayerTin = MaskTin(tin) });
+        }
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { company.Id, company.Name, company.ZimbabweTaxpayerTin });
+    }
 
     [HttpPut("companies/{companyId:guid}/deactivate")]
     public async Task<IActionResult> DeactivateCompany(Guid companyId, CancellationToken ct)
@@ -171,6 +225,33 @@ public sealed class OrganisationManagementController : ApiControllerBase
         return Ok(new { deactivated = true, companyId });
     }
 
+
+    [HttpGet("companies/{companyId:guid}/roles")]
+    public async Task<IActionResult> CompanyRoles(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: list company roles");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        return Ok(await _db.Roles.IgnoreQueryFilters().AsNoTracking().Where(x => x.CompanyId == companyId)
+            .OrderBy(x => x.Name).Select(x => new { x.Id, x.Name, x.IsSystemRole }).ToListAsync(ct));
+    }
+
+    [HttpGet("jurisdiction-catalogue")]
+    public async Task<IActionResult> JurisdictionCatalogue(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant configuration: list country defaults");
+        return Ok(await _db.JurisdictionProfiles.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.CountryName)
+            .Select(x => new { x.CountryCode, x.CountryName, x.DefaultCurrency, x.DefaultTimeZone, x.DefaultReportingFramework }).ToListAsync(ct));
+    }
+
+    [HttpGet("onboarding")]
+    public async Task<IActionResult> Onboarding(CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant onboarding: read wizard state");
+        var row = await _db.TenantOnboardings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == TenantId, ct);
+        if (row is null) return NotFound();
+        return Ok(new { row.Status, row.CompletedStepsJson, row.DeploymentProfileId, row.CompletedAt, row.BlockedReason });
+    }
+
     [HttpGet("companies/{companyId:guid}/branches")]
     public async Task<IActionResult> Branches(Guid companyId, CancellationToken ct)
     {
@@ -185,16 +266,307 @@ public sealed class OrganisationManagementController : ApiControllerBase
     public async Task<IActionResult> CreateBranch(Guid companyId, [FromBody] CreateBranchRequest request, CancellationToken ct)
     {
         if (DenyManagement() is { } denied) return denied;
-        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name)) return BadRequest();
+        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) ||
+            request.Code.Trim().Length > 40 || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Branch code (maximum 40 characters) and name (maximum 200 characters) are required." });
         using var scope = _db.SystemAccessScope("tenant administration: create branch");
         if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var branchCode = request.Code.Trim().ToUpperInvariant();
+        if (await _db.OrganisationalBranches.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Code == branchCode, ct))
+            return Conflict(new { error = "A branch with this code already exists in the company." });
         if (request.ParentBranchId.HasValue &&
             !await _db.OrganisationalBranches.IgnoreQueryFilters().AnyAsync(x => x.Id == request.ParentBranchId && x.CompanyId == companyId && x.IsActive, ct))
             return BadRequest(new { error = "Parent branch must belong to the same company." });
-        var branch = new OrganisationalBranch { CompanyId = companyId, Code = request.Code.Trim().ToUpperInvariant(), Name = request.Name.Trim(), ParentBranchId = request.ParentBranchId };
+        var branch = new OrganisationalBranch { CompanyId = companyId, Code = branchCode, Name = request.Name.Trim(), ParentBranchId = request.ParentBranchId };
         _db.OrganisationalBranches.Add(branch);
         await _db.SaveChangesAsync(ct);
         return CreatedAtAction(nameof(Branches), new { companyId }, new { branch.Id, branch.Code, branch.Name });
+    }
+
+    [HttpPut("companies/{companyId:guid}/branches/{branchId:guid}")]
+    public async Task<IActionResult> UpdateBranch(Guid companyId, Guid branchId, [FromBody] UpdateBranchRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) ||
+            request.Code.Trim().Length > 40 || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Branch code (maximum 40 characters) and name (maximum 200 characters) are required." });
+        using var scope = _db.SystemAccessScope("tenant administration: update branch");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var branch = await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == branchId && x.CompanyId == companyId, ct);
+        if (branch is null) return NotFound();
+        var code = request.Code.Trim().ToUpperInvariant();
+        if (await _db.OrganisationalBranches.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Id != branchId && x.Code == code, ct))
+            return Conflict(new { error = "A branch with this code already exists in the company." });
+        if (request.ParentBranchId == branchId) return BadRequest(new { error = "A branch cannot be its own parent." });
+        if (request.ParentBranchId.HasValue)
+        {
+            var seen = new HashSet<Guid> { branchId };
+            var cursor = request.ParentBranchId;
+            while (cursor.HasValue)
+            {
+                if (!seen.Add(cursor.Value)) return BadRequest(new { error = "The parent selection would create a circular branch hierarchy." });
+                var parent = await _db.OrganisationalBranches.IgnoreQueryFilters()
+                    .SingleOrDefaultAsync(x => x.Id == cursor.Value && x.CompanyId == companyId && x.IsActive, ct);
+                if (parent is null) return BadRequest(new { error = "Parent branch must be active and belong to the same company." });
+                cursor = parent.ParentBranchId;
+            }
+        }
+        branch.Code = code;
+        branch.Name = request.Name.Trim();
+        branch.ParentBranchId = request.ParentBranchId;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { branch.Id, branch.Code, branch.Name, branch.ParentBranchId, branch.IsActive });
+    }
+
+    [HttpPut("companies/{companyId:guid}/branches/{branchId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateBranch(Guid companyId, Guid branchId, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        using var scope = _db.SystemAccessScope("tenant administration: deactivate branch");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var branch = await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == branchId && x.CompanyId == companyId, ct);
+        if (branch is null) return NotFound();
+        if (!branch.IsActive) return Ok(new { deactivated = true, branchId });
+        var hasChildren = await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.ParentBranchId == branchId && x.IsActive, ct);
+        var hasDepartments = await _db.Departments.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.BranchId == branchId && x.IsActive, ct);
+        var hasCostCentres = await _db.CostCentres.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.BranchId == branchId && x.IsActive, ct);
+        if (hasChildren || hasDepartments || hasCostCentres)
+            return Conflict(new { error = "Reassign or deactivate active child branches, departments and cost centres before deactivating this branch." });
+        branch.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { deactivated = true, branchId });
+    }
+
+    [HttpGet("companies/{companyId:guid}/segments")]
+    public async Task<IActionResult> CompanySegments(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: list company segments");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        return Ok(await _db.Segments.IgnoreQueryFilters().AsNoTracking().Where(x => x.CompanyId == companyId)
+            .OrderBy(x => x.Code).Select(x => new { x.Id, x.Code, x.Name, x.IsActive }).ToListAsync(ct));
+    }
+
+    [HttpGet("companies/{companyId:guid}/employees")]
+    public async Task<IActionResult> CompanyEmployees(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: list company employees");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        return Ok(await _db.Employees.IgnoreQueryFilters().AsNoTracking().Where(x => x.CompanyId == companyId)
+            .OrderBy(x => x.EmployeeNo).Select(x => new { x.Id, x.EmployeeNo, x.FirstName, x.LastName, x.IsActive }).ToListAsync(ct));
+    }
+
+    [HttpGet("companies/{companyId:guid}/departments")]
+    public async Task<IActionResult> Departments(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: list departments");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        var rows = await _db.Departments.IgnoreQueryFilters().AsNoTracking()
+            .Where(x => x.CompanyId == companyId).OrderBy(x => x.Name)
+            .Select(x => new { x.Id, x.Name, x.ManagerId, x.CostCentreId, x.BranchId, x.FundCentreId, x.GrantId, x.IsActive })
+            .ToListAsync(ct);
+        return Ok(rows);
+    }
+
+    [HttpPost("companies/{companyId:guid}/departments")]
+    public async Task<IActionResult> CreateDepartment(Guid companyId, [FromBody] CreateDepartmentRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Department name is required and must not exceed 200 characters." });
+        using var scope = _db.SystemAccessScope("tenant administration: create department");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var name = request.Name.Trim();
+        if (await _db.Departments.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Name.ToLower() == name.ToLower(), ct))
+            return Conflict(new { error = "A department with this name already exists in the company." });
+        if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Branch must be active and belong to the same company." });
+        if (request.CostCentreId.HasValue)
+        {
+            var cc = await _db.CostCentres.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.CostCentreId && x.CompanyId == companyId && x.IsActive, ct);
+            if (cc is null) return BadRequest(new { error = "Cost centre must be active and belong to the same company." });
+            if (cc.BranchId.HasValue && cc.BranchId != request.BranchId)
+                return BadRequest(new { error = "The department branch must match the selected cost centre branch." });
+        }
+        if (request.ManagerId.HasValue && !await _db.Employees.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.ManagerId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Department manager must be an active employee of the same company." });
+        var department = new Department { CompanyId = companyId, Name = name, BranchId = request.BranchId,
+            CostCentreId = request.CostCentreId, ManagerId = request.ManagerId };
+        _db.Departments.Add(department);
+        await _db.SaveChangesAsync(ct);
+        return CreatedAtAction(nameof(Departments), new { companyId }, new { department.Id, department.Name });
+    }
+
+    [HttpPut("companies/{companyId:guid}/departments/{departmentId:guid}")]
+    public async Task<IActionResult> UpdateDepartment(Guid companyId, Guid departmentId, [FromBody] UpdateDepartmentRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Department name is required and must not exceed 200 characters." });
+        using var scope = _db.SystemAccessScope("tenant administration: update department");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var department = await _db.Departments.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == departmentId && x.CompanyId == companyId, ct);
+        if (department is null) return NotFound();
+        var name = request.Name.Trim();
+        if (await _db.Departments.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Id != departmentId && x.Name.ToLower() == name.ToLower(), ct))
+            return Conflict(new { error = "A department with this name already exists in the company." });
+        if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Branch must be active and belong to the same company." });
+        if (request.CostCentreId.HasValue)
+        {
+            var cc = await _db.CostCentres.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.CostCentreId && x.CompanyId == companyId && x.IsActive, ct);
+            if (cc is null) return BadRequest(new { error = "Cost centre must be active and belong to the same company." });
+            if (cc.BranchId.HasValue && cc.BranchId != request.BranchId)
+                return BadRequest(new { error = "The department branch must match the selected cost centre branch." });
+        }
+        if (request.ManagerId.HasValue && !await _db.Employees.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.ManagerId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Department manager must be an active employee of the same company." });
+        department.Name = name;
+        department.BranchId = request.BranchId;
+        department.CostCentreId = request.CostCentreId;
+        department.ManagerId = request.ClearManager ? null : request.ManagerId ?? department.ManagerId;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { department.Id, department.Name, department.BranchId, department.CostCentreId, department.ManagerId, department.IsActive });
+    }
+
+    [HttpPut("companies/{companyId:guid}/departments/{departmentId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateDepartment(Guid companyId, Guid departmentId, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        using var scope = _db.SystemAccessScope("tenant administration: deactivate department");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var department = await _db.Departments.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == departmentId && x.CompanyId == companyId, ct);
+        if (department is null) return NotFound();
+        if (!department.IsActive) return Ok(new { deactivated = true, departmentId });
+        if (await _db.Employees.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.DepartmentId == departmentId && x.IsActive, ct))
+            return Conflict(new { error = "Reassign or deactivate active employees before deactivating this department." });
+        department.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { deactivated = true, departmentId });
+    }
+
+    [HttpGet("companies/{companyId:guid}/cost-centres")]
+    public async Task<IActionResult> CostCentres(Guid companyId, CancellationToken ct)
+    {
+        using var scope = _db.SystemAccessScope("tenant administration: list cost centres");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId, ct)) return NotFound();
+        var rows = await _db.CostCentres.IgnoreQueryFilters().AsNoTracking()
+            .Where(x => x.CompanyId == companyId).OrderBy(x => x.Code)
+            .Select(x => new { x.Id, x.Code, x.Name, x.ParentId, x.BranchId, x.SegmentId, x.IsActive })
+            .ToListAsync(ct);
+        return Ok(rows);
+    }
+
+    [HttpPost("companies/{companyId:guid}/cost-centres")]
+    public async Task<IActionResult> CreateCostCentre(Guid companyId, [FromBody] CreateCostCentreRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) ||
+            request.Code.Trim().Length > 40 || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Cost-centre code (maximum 40 characters) and name (maximum 200 characters) are required." });
+        using var scope = _db.SystemAccessScope("tenant administration: create cost centre");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var code = request.Code.Trim().ToUpperInvariant();
+        if (await _db.CostCentres.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Code == code, ct))
+            return Conflict(new { error = "A cost centre with this code already exists in the company." });
+        if (request.ParentId.HasValue)
+        {
+            var parent = await _db.CostCentres.IgnoreQueryFilters()
+                .SingleOrDefaultAsync(x => x.Id == request.ParentId && x.CompanyId == companyId && x.IsActive, ct);
+            if (parent is null) return BadRequest(new { error = "Parent cost centre must be active and belong to the same company." });
+            if (parent.BranchId.HasValue && parent.BranchId != request.BranchId)
+                return BadRequest(new { error = "A child cost centre must use the same branch as its parent." });
+        }
+        if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Branch must be active and belong to the same company." });
+        if (request.SegmentId.HasValue && !await _db.Segments.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.SegmentId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Segment must be active and belong to the same company." });
+        var costCentre = new CostCentre { CompanyId = companyId, Code = code, Name = request.Name.Trim(),
+            ParentId = request.ParentId, BranchId = request.BranchId, SegmentId = request.SegmentId };
+        _db.CostCentres.Add(costCentre);
+        await _db.SaveChangesAsync(ct);
+        return CreatedAtAction(nameof(CostCentres), new { companyId }, new { costCentre.Id, costCentre.Code, costCentre.Name });
+    }
+
+    [HttpPut("companies/{companyId:guid}/cost-centres/{costCentreId:guid}")]
+    public async Task<IActionResult> UpdateCostCentre(Guid companyId, Guid costCentreId, [FromBody] UpdateCostCentreRequest request, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) ||
+            request.Code.Trim().Length > 40 || request.Name.Trim().Length > 200)
+            return BadRequest(new { error = "Cost-centre code (maximum 40 characters) and name (maximum 200 characters) are required." });
+        using var scope = _db.SystemAccessScope("tenant administration: update cost centre");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var centre = await _db.CostCentres.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == costCentreId && x.CompanyId == companyId, ct);
+        if (centre is null) return NotFound();
+        var code = request.Code.Trim().ToUpperInvariant();
+        if (await _db.CostCentres.IgnoreQueryFilters().AnyAsync(x => x.CompanyId == companyId && x.Id != costCentreId && x.Code == code, ct))
+            return Conflict(new { error = "A cost centre with this code already exists in the company." });
+        if (request.ParentId == costCentreId) return BadRequest(new { error = "A cost centre cannot be its own parent." });
+        if (request.ParentId.HasValue)
+        {
+            var seen = new HashSet<Guid> { costCentreId };
+            var cursor = request.ParentId;
+            while (cursor.HasValue)
+            {
+                if (!seen.Add(cursor.Value)) return BadRequest(new { error = "The parent selection would create a circular cost-centre hierarchy." });
+                var parent = await _db.CostCentres.IgnoreQueryFilters()
+                    .SingleOrDefaultAsync(x => x.Id == cursor.Value && x.CompanyId == companyId && x.IsActive, ct);
+                if (parent is null) return BadRequest(new { error = "Parent cost centre must be active and belong to the same company." });
+                cursor = parent.ParentId;
+            }
+        }
+        if (request.BranchId.HasValue && !await _db.OrganisationalBranches.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.BranchId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Branch must be active and belong to the same company." });
+        if (request.SegmentId.HasValue && !await _db.Segments.IgnoreQueryFilters()
+            .AnyAsync(x => x.Id == request.SegmentId && x.CompanyId == companyId && x.IsActive, ct))
+            return BadRequest(new { error = "Segment must be active and belong to the same company." });
+        if (request.ParentId.HasValue && request.BranchId.HasValue)
+        {
+            var parentBranch = await _db.CostCentres.IgnoreQueryFilters().Where(x => x.Id == request.ParentId && x.CompanyId == companyId)
+                .Select(x => x.BranchId).SingleAsync(ct);
+            if (parentBranch.HasValue && parentBranch != request.BranchId)
+                return BadRequest(new { error = "A child cost centre must use the same branch as its parent." });
+        }
+        centre.Code = code; centre.Name = request.Name.Trim(); centre.ParentId = request.ParentId;
+        centre.BranchId = request.BranchId; centre.SegmentId = request.ClearSegment ? null : request.SegmentId ?? centre.SegmentId;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { centre.Id, centre.Code, centre.Name, centre.ParentId, centre.BranchId, centre.SegmentId, centre.IsActive });
+    }
+
+    [HttpPut("companies/{companyId:guid}/cost-centres/{costCentreId:guid}/deactivate")]
+    public async Task<IActionResult> DeactivateCostCentre(Guid companyId, Guid costCentreId, CancellationToken ct)
+    {
+        if (DenyManagement() is { } denied) return denied;
+        using var scope = _db.SystemAccessScope("tenant administration: deactivate cost centre");
+        if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
+        var centre = await _db.CostCentres.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == costCentreId && x.CompanyId == companyId, ct);
+        if (centre is null) return NotFound();
+        if (!centre.IsActive) return Ok(new { deactivated = true, costCentreId });
+        var hasChildren = await _db.CostCentres.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.ParentId == costCentreId && x.IsActive, ct);
+        var hasDepartments = await _db.Departments.IgnoreQueryFilters()
+            .AnyAsync(x => x.CompanyId == companyId && x.CostCentreId == costCentreId && x.IsActive, ct);
+        if (hasChildren || hasDepartments)
+            return Conflict(new { error = "Reassign or deactivate active child cost centres and departments before deactivating this cost centre." });
+        centre.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { deactivated = true, costCentreId });
     }
 
     [HttpGet("companies/{companyId:guid}/members")]
@@ -214,6 +586,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
     {
         if (DenyManagement() is { } denied) return denied;
         using var scope = _db.SystemAccessScope("tenant administration: add company membership");
+        await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
+        await _db.AcquireTenantCapacityLockAsync(TenantId, "seat-limit", ct);
         if (!await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct)) return NotFound();
         var user = await _db.Users.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == request.UserId && x.IsActive, ct);
         if (user is null) return NotFound(new { error = "User not found." });
@@ -234,7 +608,12 @@ public sealed class OrganisationManagementController : ApiControllerBase
         var seats = await _db.CompanyMemberships.IgnoreQueryFilters().Where(x => x.IsActive)
             .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, c => c.Id, (m,c) => m.UserId)
             .Distinct().CountAsync(ct);
-        if (seats >= seatLimit && !await _db.CompanyMemberships.IgnoreQueryFilters().AnyAsync(x => x.UserId == user.Id && x.IsActive, ct))
+        var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        var pendingAdminSeats = await _db.TenantAdministratorInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        var alreadyHasTenantSeat = await _db.CompanyMemberships.IgnoreQueryFilters().Where(x => x.UserId == user.Id && x.IsActive)
+            .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, c => c.Id, (m,c) => m.Id)
+            .AnyAsync(ct);
+        if (seats + pendingSeats + pendingAdminSeats >= seatLimit && !alreadyHasTenantSeat)
             return Conflict(new { error = "The subscription seat limit has been reached.", seatLimit });
 
         if (existingMembership is null)
@@ -243,6 +622,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         else { existingMembership.MembershipRole = role.Name; existingMembership.RoleId = role.Id;
             existingMembership.IsActive = true; existingMembership.ValidTo = null; existingMembership.ValidFrom = DateTime.UtcNow; }
         await _db.SaveChangesAsync(ct);
+        if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
         return Ok(new { added = true, userId = user.Id, companyId, role = role.Name });
     }
 
@@ -253,6 +633,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
         if (DenyManagement() is { } denied) return denied;
         if (string.IsNullOrWhiteSpace(request.Email)) return BadRequest(new { error = "Email is required." });
         using var scope = _db.SystemAccessScope("tenant administration: invite company user");
+        await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
+        await _db.AcquireTenantCapacityLockAsync(TenantId, "seat-limit", ct);
         var company = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == companyId && x.TenantId == TenantId && x.IsActive, ct);
         if (company is null) return NotFound();
         var email = request.Email.Trim().ToLowerInvariant();
@@ -274,7 +656,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
             .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == TenantId), m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
             .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
         var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
-        if (activeSeats + pendingSeats >= seatLimit) return Conflict(new { error = "The subscription seat limit has been reached.", seatLimit });
+        var pendingAdminSeats = await _db.TenantAdministratorInvitations.CountAsync(x => x.TenantId == TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        if (activeSeats + pendingSeats + pendingAdminSeats >= seatLimit) return Conflict(new { error = "The subscription seat limit has been reached.", seatLimit });
 
         var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken)));
@@ -282,6 +665,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
             Email = email, TokenHash = tokenHash, ExpiresAt = DateTime.UtcNow.AddHours(48), InvitedBy = UserId };
         _db.CompanyUserInvitations.Add(invitation);
         await _db.SaveChangesAsync(ct);
+        if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
         var emailSent = false;
         try
         {
@@ -354,7 +738,8 @@ public sealed class OrganisationManagementController : ApiControllerBase
     {
         if (DenyManagement() is { } denied) return denied;
         if (string.IsNullOrWhiteSpace(request.CountryCode) || request.CountryCode.Length != 2 || request.FiscalYearStartMonth is < 1 or > 12 ||
-            string.IsNullOrWhiteSpace(request.FunctionalCurrency) || request.FunctionalCurrency.Length != 3) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
+            string.IsNullOrWhiteSpace(request.FunctionalCurrency) || request.FunctionalCurrency.Length != 3 ||
+            (request.BaseCurrency is not null && request.BaseCurrency.Length != 3)) return BadRequest(new { error = "Country code, ISO currency and fiscal year are invalid." });
         using var scope = _db.SystemAccessScope("tenant configuration: set jurisdiction");
         var profile = await _db.JurisdictionProfiles.SingleOrDefaultAsync(x => x.CountryCode == request.CountryCode.ToUpperInvariant() && x.IsActive, ct);
         if (profile is null) return BadRequest(new { error = "The jurisdiction is not in the configured country catalogue." });
@@ -370,6 +755,7 @@ public sealed class OrganisationManagementController : ApiControllerBase
         row.IsPrimary = request.IsPrimary;
         row.ConfigurationStatus = "PendingStatutoryReview";
         targetCompany.FunctionalCurrency = row.FunctionalCurrency;
+        targetCompany.BaseCurrency = (request.BaseCurrency ?? profile.DefaultCurrency).ToUpperInvariant();
         targetCompany.FiscalYearStartMonth = row.FiscalYearStartMonth;
         if (!string.IsNullOrWhiteSpace(request.Timezone)) targetCompany.Timezone = request.Timezone;
         if (request.IsPrimary)
@@ -444,8 +830,15 @@ public sealed record CreateLegalCompanyRequest(string Name, string? Registration
     string? Sector = null, Guid? ParentCompanyId = null, decimal? OwnershipPercentage = null, bool IsPublicSectorEntity = false);
 public sealed record CreateBranchRequest(string Code, string Name, Guid? ParentBranchId = null);
 public sealed record AssignBranchRequest(Guid? BranchId);
+public sealed record CreateDepartmentRequest(string Name, Guid? BranchId = null, Guid? CostCentreId = null, Guid? ManagerId = null);
+public sealed record CreateCostCentreRequest(string Code, string Name, Guid? ParentId = null, Guid? BranchId = null, Guid? SegmentId = null);
+public sealed record UpdateBranchRequest(string Code, string Name, Guid? ParentBranchId = null);
+public sealed record UpdateDepartmentRequest(string Name, Guid? BranchId = null, Guid? CostCentreId = null, Guid? ManagerId = null, bool ClearManager = false);
+public sealed record UpdateCostCentreRequest(string Code, string Name, Guid? ParentId = null, Guid? BranchId = null, Guid? SegmentId = null, bool ClearSegment = false);
 public sealed record AddCompanyMemberRequest(Guid UserId, Guid RoleId);
 public sealed record InviteCompanyUserRequest(string Email, Guid RoleId);
 public sealed record ConfigureJurisdictionRequest(string CountryCode, string FunctionalCurrency, int FiscalYearStartMonth,
-    string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null);
+    string ReportingFramework, bool IsPrimary = false, Guid? CompanyId = null, string? Timezone = null, string? BaseCurrency = null);
 public sealed record UpdateOnboardingRequest(string[] CompletedSteps, Guid? DeploymentProfileId = null, bool Completed = false);
+
+public sealed record UpdateZimbabweTaxProfileRequest(string ZimbabweTaxpayerTin);

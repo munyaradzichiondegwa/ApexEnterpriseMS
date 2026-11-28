@@ -1,0 +1,118 @@
+using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using ApexERP.Infrastructure.Data;
+
+#nullable disable
+
+namespace ApexERP.Infrastructure.Data.Migrations;
+
+[DbContext(typeof(ApexErpDbContext))]
+[Migration("20261128040000_AddIpsas24BudgetExecutionActuals")]
+public sealed class AddIpsas24BudgetExecutionActuals : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.CreateTable(
+            name: "PublicSectorBudgetExecutionActuals",
+            columns: table => new
+            {
+                Id = table.Column<Guid>(type: "uuid", nullable: false),
+                CompanyId = table.Column<Guid>(type: "uuid", nullable: false),
+                FinancialYear = table.Column<int>(type: "integer", nullable: false),
+                BudgetVersionId = table.Column<Guid>(type: "uuid", nullable: false),
+                BudgetVersionLineId = table.Column<Guid>(type: "uuid", nullable: false),
+                FundCentreId = table.Column<Guid>(type: "uuid", nullable: false),
+                GlAccountId = table.Column<Guid>(type: "uuid", nullable: false),
+                CostCentreId = table.Column<Guid>(type: "uuid", nullable: true),
+                EventKind = table.Column<int>(type: "integer", nullable: false),
+                SourceKind = table.Column<int>(type: "integer", nullable: false),
+                SourceRecordId = table.Column<Guid>(type: "uuid", nullable: false),
+                SourceReference = table.Column<string>(type: "text", nullable: false),
+                SourceDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                EffectiveDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                Currency = table.Column<string>(type: "text", nullable: false),
+                Amount = table.Column<decimal>(type: "numeric(20,6)", nullable: false),
+                ExchangeRateToBudgetCurrency = table.Column<decimal>(type: "numeric(20,10)", nullable: false),
+                CashFlowSection = table.Column<int>(type: "integer", nullable: false),
+                Status = table.Column<int>(type: "integer", nullable: false),
+                ReversalOfId = table.Column<Guid>(type: "uuid", nullable: true),
+                CertifiedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                CertifiedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                UpdatedBy = table.Column<Guid>(type: "uuid", nullable: true)
+            },
+            constraints: table =>
+            {
+                table.PrimaryKey("PK_PublicSectorBudgetExecutionActuals", x => x.Id);
+                table.CheckConstraint("CK_PublicSectorBudgetExecutionActual_Amount", "\"Amount\" > 0");
+                table.CheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
+                table.ForeignKey("FK_BudgetActual_BudgetVersion",
+                    x => x.BudgetVersionId, "PublicSectorBudgetVersions", "Id", onDelete: ReferentialAction.Restrict);
+                table.ForeignKey("FK_BudgetActual_BudgetLine",
+                    x => x.BudgetVersionLineId, "PublicSectorBudgetVersionLines", "Id", onDelete: ReferentialAction.Restrict);
+                table.ForeignKey("FK_BudgetActual_FundCentre",
+                    x => x.FundCentreId, "FundCentres", "Id", onDelete: ReferentialAction.Restrict);
+                table.ForeignKey("FK_BudgetActual_GlAccount",
+                    x => x.GlAccountId, "GlAccounts", "Id", onDelete: ReferentialAction.Restrict);
+            });
+
+        migrationBuilder.CreateIndex("IX_PublicSectorBudgetExecutionActuals_BudgetVersionLineId",
+            "PublicSectorBudgetExecutionActuals", "BudgetVersionLineId");
+        migrationBuilder.CreateIndex("IX_PublicSectorBudgetExecutionActuals_FundCentreId",
+            "PublicSectorBudgetExecutionActuals", "FundCentreId");
+        migrationBuilder.CreateIndex("IX_PublicSectorBudgetExecutionActuals_GlAccountId",
+            "PublicSectorBudgetExecutionActuals", "GlAccountId");
+        migrationBuilder.CreateIndex("IX_PublicSectorBudgetExecutionActuals_BudgetVersionId_EffectiveDate",
+            "PublicSectorBudgetExecutionActuals", new[] { "BudgetVersionId", "EffectiveDate" });
+        migrationBuilder.CreateIndex("UX_PublicSectorBudgetExecutionActual_Source",
+            "PublicSectorBudgetExecutionActuals", new[] { "CompanyId", "SourceKind", "SourceRecordId" }, unique: true);
+
+        migrationBuilder.Sql("""
+CREATE OR REPLACE FUNCTION apex_guard_budget_execution_actual() RETURNS trigger AS $ipsas_actual$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW."Status" <> 0 OR NEW."CertifiedBy" IS NOT NULL OR NEW."CertifiedAt" IS NOT NULL THEN
+            RAISE EXCEPTION 'Budget execution actuals must be inserted as uncertified drafts.' USING ERRCODE = 'restrict_violation';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'Budget execution actual evidence is immutable; a controlled reversal workflow is required.' USING ERRCODE = 'restrict_violation';
+    END IF;
+    IF NEW."Status" = OLD."Status" THEN
+        IF (to_jsonb(NEW) - 'UpdatedAt' - 'UpdatedBy') IS DISTINCT FROM
+           (to_jsonb(OLD) - 'UpdatedAt' - 'UpdatedBy') THEN
+            RAISE EXCEPTION 'Budget execution actual evidence and certification are immutable.' USING ERRCODE = 'restrict_violation';
+        END IF;
+    ELSE
+        IF (to_jsonb(NEW) - 'Status' - 'CertifiedBy' - 'CertifiedAt' - 'UpdatedAt' - 'UpdatedBy') IS DISTINCT FROM
+           (to_jsonb(OLD) - 'Status' - 'CertifiedBy' - 'CertifiedAt' - 'UpdatedAt' - 'UpdatedBy') THEN
+            RAISE EXCEPTION 'Budget execution actual source evidence cannot be edited.' USING ERRCODE = 'restrict_violation';
+        END IF;
+        IF NOT ((OLD."Status" = 0 AND NEW."Status" = 1) OR
+                (OLD."Status" = 1 AND NEW."Status" IN (2, 3))) THEN
+            RAISE EXCEPTION 'Invalid budget actual status transition from % to %.', OLD."Status", NEW."Status" USING ERRCODE = 'restrict_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$ipsas_actual$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_budget_execution_actual_immutable
+    BEFORE INSERT OR UPDATE OR DELETE ON "PublicSectorBudgetExecutionActuals"
+    FOR EACH ROW EXECUTE FUNCTION apex_guard_budget_execution_actual();
+""");
+    }
+
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+
+        migrationBuilder.Sql("""
+DROP TRIGGER IF EXISTS trg_budget_execution_actual_immutable ON "PublicSectorBudgetExecutionActuals";
+DROP FUNCTION IF EXISTS apex_guard_budget_execution_actual();
+""");
+        migrationBuilder.DropTable(name: "PublicSectorBudgetExecutionActuals");
+    }
+}

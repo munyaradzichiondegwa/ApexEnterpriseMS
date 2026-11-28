@@ -42,6 +42,10 @@ namespace ApexERP.Domain.Entities
         public decimal Outstanding { get; set; }
         public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
         public Guid? JournalEntryId { get; set; }
+        /// <summary>Exact VAT output control account used when the posted invoice journal was created.</summary>
+        public Guid? VatOutputAccountId { get; set; }
+        /// <summary>Public-sector vote dimension required to map cash receipts to an approved budget line.</summary>
+        public Guid? FundCentreId { get; set; }
 
         /// <summary>Grants & NGO (Module 15): tags this sale/reimbursement to a specific grant.</summary>
         public Guid? GrantId { get; set; }
@@ -63,6 +67,7 @@ namespace ApexERP.Domain.Entities
         public decimal LineVat { get; set; }
         public decimal LineTotal { get; set; }
         public Guid GlAccountId { get; set; } // income account (required at posting time)
+        public Guid? CostCentreId { get; set; }
     }
 
     public class ArReceipt : TenantEntity
@@ -130,6 +135,10 @@ namespace ApexERP.Domain.Entities
         public decimal Outstanding { get; set; }
         public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
         public Guid? JournalEntryId { get; set; }
+        /// <summary>Exact VAT input control account used when the posted invoice journal was created.</summary>
+        public Guid? VatInputAccountId { get; set; }
+        /// <summary>Exact WHT payable control account used when the posted invoice journal was created.</summary>
+        public Guid? WhtPayableAccountId { get; set; }
 
         /// <summary>Public Sector (Module 16): fund centre this expenditure is committed/actualised against.</summary>
         public Guid? FundCentreId { get; set; }
@@ -165,6 +174,7 @@ namespace ApexERP.Domain.Entities
         public decimal LineVat { get; set; }
         public decimal LineTotal { get; set; }
         public Guid GlAccountId { get; set; } // expense/asset account being debited
+        public Guid? CostCentreId { get; set; }
     }
 
     public class ApPayment : TenantEntity
@@ -177,6 +187,8 @@ namespace ApexERP.Domain.Entities
         public PaymentMethod PaymentMethod { get; set; }
         public Guid? JournalEntryId { get; set; }
         public Guid? BankAccountId { get; set; }
+        /// <summary>External bank transfer reference used to match the statement row; PaymentNo remains the internal identifier.</summary>
+        public string? BankReference { get; set; }
         /// <summary>Independent payment authorisation (spec 16): the authoriser must differ from the preparer and hold authority for the amount.</summary>
         public Guid? PreparedBy { get; set; }
         public Guid? AuthorisedBy { get; set; }

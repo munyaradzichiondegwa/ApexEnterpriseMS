@@ -12,8 +12,11 @@ namespace ApexERP.Domain.Controls
         public static bool Verify(string secret, string? timestamp, string body, string? signature, DateTime utcNow, TimeSpan? tolerance = null)
         {
             if (string.IsNullOrEmpty(secret) || string.IsNullOrEmpty(timestamp) || string.IsNullOrEmpty(signature)) return false;
-            if (!long.TryParse(timestamp, out var unix)) return false;
-            var sent = DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime;
+            if (!long.TryParse(timestamp, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var unix)) return false;
+            DateTime sent;
+            try { sent = DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime; }
+            catch (ArgumentOutOfRangeException) { return false; }
             if ((utcNow - sent).Duration() > (tolerance ?? TimeSpan.FromMinutes(5))) return false;
             var expected = Encoding.ASCII.GetBytes(Sign(secret, timestamp, body));
             var given = Encoding.ASCII.GetBytes(signature.Trim().ToLowerInvariant());

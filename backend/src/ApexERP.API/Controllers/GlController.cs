@@ -10,7 +10,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ApexERP.API.Controllers
 {
-    public record CreateGlAccountRequest(string Code, string Name, GlAccountType Type, string? SubType, Guid? ParentId, string Currency, bool IsBankAccount, bool IsControlAccount);
+    public record CreateGlAccountRequest(string Code, string Name, GlAccountType Type, string? SubType, Guid? ParentId, string Currency, bool IsBankAccount, bool IsControlAccount, bool IsMonetary = false);
+    public record SetAccountMonetaryRequest(bool IsMonetary);
     public record SetAccountActiveRequest(bool IsActive);
     public record SetPostingRulesRequest(bool IsPostable, string? AllowedSources);
     public record CreateJournalLineRequest(Guid GlAccountId, decimal Debit, decimal Credit, string Currency, decimal ExchangeRate, Guid? CostCentreId, string? Narrative,
@@ -26,13 +27,16 @@ namespace ApexERP.API.Controllers
         private readonly GlPostingService _gl;
         private readonly PeriodCloseService _close;
         private readonly GovernanceService _gov;
+        private readonly AuditService _audit;
 
-        public GlController(ApexErpDbContext db, GlPostingService gl, PeriodCloseService close, GovernanceService gov)
+        public GlController(ApexErpDbContext db, GlPostingService gl, PeriodCloseService close,
+            GovernanceService gov, AuditService audit)
         {
             _db = db;
             _gl = gl;
             _close = close;
             _gov = gov;
+            _audit = audit;
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -65,7 +69,8 @@ namespace ApexERP.API.Controllers
                 ParentId = req.ParentId,
                 Currency = req.Currency,
                 IsBankAccount = req.IsBankAccount,
-                IsControlAccount = req.IsControlAccount
+                IsControlAccount = req.IsControlAccount,
+                IsMonetary = req.IsMonetary
             };
             _db.GlAccounts.Add(account);
             await _db.SaveChangesAsync();
@@ -74,6 +79,19 @@ namespace ApexERP.API.Controllers
 
         /// <summary>Deactivate (or reactivate) an account. A deactivated account accepts no NEW postings, but its
         /// historical activity still appears in the trial balance and statements.</summary>
+        [HttpPut("accounts/{id}/monetary")]
+        [HasPermission(Permissions.GlAccountsManage)]
+        public async Task<IActionResult> SetAccountMonetary(Guid id, SetAccountMonetaryRequest req)
+        {
+            var account = await _db.GlAccounts.FirstOrDefaultAsync(a => a.Id == id && a.CompanyId == CompanyId);
+            if (account == null) return NotFound();
+            if (req.IsMonetary && account.Type is not (GlAccountType.Asset or GlAccountType.Liability))
+                return BadRequest(new { error = "Only balance-sheet asset or liability accounts can be classified as monetary items." });
+            account.IsMonetary = req.IsMonetary;
+            await _db.SaveChangesAsync();
+            return Ok(account);
+        }
+
         [HttpPut("accounts/{id}/active")]
         [HasPermission(Permissions.GlAccountsManage)]
         public async Task<IActionResult> SetAccountActive(Guid id, SetAccountActiveRequest req)
@@ -228,6 +246,131 @@ namespace ApexERP.API.Controllers
                 account.AllowedSourcesCsv = sources.Count == 0 ? null : string.Join(",", sources.Select(x => Enum.Parse<JournalSource>(x, true).ToString()));
                 await _db.SaveChangesAsync();
                 return Ok(account);
+            });
+
+    public record SetExchangeRateRequest(string FromCurrency, string ToCurrency, DateTime RateDate,
+        decimal Rate, bool IsManualOverride = false, string RateSource = "Manual entry",
+        string? SourceReference = null);
+
+        [HttpGet("fx-rates")]
+        [HasPermission(Permissions.GlAccountsRead)]
+        public async Task<IActionResult> GetExchangeRates([FromQuery] string? fromCurrency = null,
+            [FromQuery] string? toCurrency = null, [FromQuery] DateTime? fromDate = null,
+            [FromQuery] DateTime? toDate = null)
+        {
+            var query = _db.ExchangeRates.Where(r => r.CompanyId == CompanyId);
+            if (!string.IsNullOrWhiteSpace(fromCurrency))
+                query = query.Where(r => r.FromCurrency == fromCurrency.Trim().ToUpperInvariant());
+            if (!string.IsNullOrWhiteSpace(toCurrency))
+                query = query.Where(r => r.ToCurrency == toCurrency.Trim().ToUpperInvariant());
+            if (fromDate.HasValue)
+            {
+                var fromUtc = DateTime.SpecifyKind(fromDate.Value.Date, DateTimeKind.Utc);
+                query = query.Where(r => r.RateDate >= fromUtc);
+            }
+            if (toDate.HasValue)
+            {
+                var toUtcExclusive = DateTime.SpecifyKind(toDate.Value.Date.AddDays(1), DateTimeKind.Utc);
+                query = query.Where(r => r.RateDate < toUtcExclusive);
+            }
+            return Ok(await query.OrderByDescending(r => r.RateDate)
+                .ThenBy(r => r.FromCurrency).ThenBy(r => r.ToCurrency).ToListAsync());
+        }
+
+        [HttpPost("fx-rates")]
+        [HasPermission(Permissions.GlAccountsManage)]
+        public Task<IActionResult> SetExchangeRate([FromBody] SetExchangeRateRequest request) =>
+            Run(async () =>
+            {
+                if (string.IsNullOrWhiteSpace(request.FromCurrency) || string.IsNullOrWhiteSpace(request.ToCurrency) ||
+                    request.RateDate == default || request.Rate <= 0m || string.IsNullOrWhiteSpace(request.RateSource) ||
+                    request.RateSource.Trim().Length > 100 || (request.SourceReference?.Trim().Length ?? 0) > 500)
+                    return BadRequest(new { error = "Currency codes, a rate date, a positive exchange rate, a rate source (max 100 characters) and a source reference (max 500 characters) are required." });
+                var from = request.FromCurrency.Trim().ToUpperInvariant();
+                var to = request.ToCurrency.Trim().ToUpperInvariant();
+                if (from.Length != 3 || to.Length != 3 || from == to)
+                    return BadRequest(new { error = "Provide two different three-letter currency codes." });
+                var rateDate = DateTime.SpecifyKind(request.RateDate.Date, DateTimeKind.Utc);
+                await _db.InTransactionAsync(async token =>
+                {
+                    await _db.AcquireTransactionLockAsync($"fx-rate:{CompanyId:N}:{from}:{to}:{rateDate:yyyyMMdd}", token);
+                    var existing = await _db.ExchangeRates.FirstOrDefaultAsync(r => r.CompanyId == CompanyId &&
+                        r.FromCurrency == from && r.ToCurrency == to && r.RateDate == rateDate, token);
+                    var before = existing == null ? null : new { existing.FromCurrency, existing.ToCurrency,
+                        existing.RateDate, existing.Rate, existing.IsManualOverride,
+                        existing.RateSource, existing.SourceReference, existing.ApprovedBy, existing.ApprovedAt };
+                    if (existing == null)
+                    {
+                        existing = new ExchangeRate { CompanyId = CompanyId, FromCurrency = from,
+                            ToCurrency = to, RateDate = rateDate, Rate = request.Rate,
+                            IsManualOverride = request.IsManualOverride,
+                            RateSource = request.RateSource.Trim(),
+                            SourceReference = string.IsNullOrWhiteSpace(request.SourceReference) ? null : request.SourceReference.Trim(),
+                            CreatedBy = UserId };
+                        _db.ExchangeRates.Add(existing);
+                    }
+                    else
+                    {
+                        existing.Rate = request.Rate;
+                        existing.IsManualOverride = request.IsManualOverride;
+                        existing.RateSource = request.RateSource.Trim();
+                        existing.SourceReference = string.IsNullOrWhiteSpace(request.SourceReference) ? null : request.SourceReference.Trim();
+                        existing.CreatedBy = UserId;
+                        existing.UpdatedBy = UserId;
+                        existing.ApprovedBy = null;
+                        existing.ApprovedAt = null;
+                    }
+                    _audit.Record(CompanyId, UserId, "FxRate.Upserted", "GL", nameof(ExchangeRate), existing.Id,
+                        before, new { existing.FromCurrency, existing.ToCurrency, existing.RateDate,
+                            existing.Rate, existing.IsManualOverride, existing.RateSource, existing.SourceReference,
+                            existing.ApprovedBy, existing.ApprovedAt });
+                    await _db.SaveChangesAsync(token);
+                });
+                return Ok(await _db.ExchangeRates.FirstAsync(r => r.CompanyId == CompanyId &&
+                    r.FromCurrency == from && r.ToCurrency == to && r.RateDate == rateDate));
+            });
+
+        [HttpPost("fx-rates/{id}/approve")]
+        [HasPermission(Permissions.GlAccountsManage)]
+        public Task<IActionResult> ApproveExchangeRate(Guid id) =>
+            Run(async () =>
+            {
+                var rate = await _db.ExchangeRates.AsNoTracking().FirstOrDefaultAsync(x =>
+                    x.Id == id && x.CompanyId == CompanyId);
+                if (rate == null) return NotFound(new { error = "Exchange rate not found." });
+                if (string.IsNullOrWhiteSpace(rate.RateSource) ||
+                    string.Equals(rate.RateSource.Trim(), "Unspecified", StringComparison.OrdinalIgnoreCase) ||
+                    string.IsNullOrWhiteSpace(rate.SourceReference))
+                    return BadRequest(new { error = "An exchange rate requires a named source and source-document reference before approval." });
+                if (!rate.CreatedBy.HasValue)
+                    return BadRequest(new { error = "The exchange-rate preparer is not recorded; re-enter the rate before approval." });
+                if (rate.CreatedBy == UserId)
+                    return BadRequest(new { error = "The exchange-rate preparer cannot approve their own rate." });
+                if (rate.ApprovedBy.HasValue || rate.ApprovedAt.HasValue)
+                    return Conflict(new { error = "This exchange rate is already approved. Amend it to create a new approval cycle." });
+
+                await _db.InTransactionAsync(async token =>
+                {
+                    await _db.AcquireTransactionLockAsync($"fx-rate:{CompanyId:N}:{rate.FromCurrency}:{rate.ToCurrency}:{rate.RateDate:yyyyMMdd}", token);
+                    var current = await _db.ExchangeRates.FirstOrDefaultAsync(x =>
+                        x.Id == id && x.CompanyId == CompanyId, token)
+                        ?? throw new InvalidOperationException("Exchange rate not found.");
+                    if (current.CreatedBy == UserId)
+                        throw new InvalidOperationException("The exchange-rate preparer cannot approve their own rate.");
+                    if (current.ApprovedBy.HasValue || current.ApprovedAt.HasValue)
+                        throw new InvalidOperationException("This exchange rate has already been approved.");
+                    if (string.IsNullOrWhiteSpace(current.SourceReference))
+                        throw new InvalidOperationException("The exchange rate requires its source-document reference before approval.");
+                    current.ApprovedBy = UserId;
+                    current.ApprovedAt = DateTime.UtcNow;
+                    current.UpdatedBy = UserId;
+                    current.UpdatedAt = DateTime.UtcNow;
+                    _audit.Record(CompanyId, UserId, "FxRate.Approved", "GL", nameof(ExchangeRate), current.Id,
+                        new { ApprovedBy = (Guid?)null, ApprovedAt = (DateTime?)null },
+                        new { current.ApprovedBy, current.ApprovedAt, current.Rate, current.RateSource, current.SourceReference });
+                    await _db.SaveChangesAsync(token);
+                });
+                return Ok(await _db.ExchangeRates.FirstAsync(x => x.Id == id && x.CompanyId == CompanyId));
             });
 
         [HttpPost("journal-entries/{id}/reject")]

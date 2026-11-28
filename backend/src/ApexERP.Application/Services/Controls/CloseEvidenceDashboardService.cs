@@ -169,9 +169,45 @@ namespace ApexERP.Application.Services
 
         public EvidenceService(ApexErpDbContext db, AuditService audit) { _db = db; _audit = audit; }
 
+        private void AssertCompanyContext(Guid companyId)
+        {
+            if (companyId == Guid.Empty || _db.CurrentCompanyId != companyId)
+                throw new UnauthorizedAccessException("Evidence operations must use the authenticated company context.");
+        }
+
+        private async Task<bool> TargetExistsInCompanyAsync(Guid companyId, string entityType, Guid entityId, CancellationToken ct)
+        {
+            // The allow-list is also an explicit map: never accept an arbitrary entity name or
+            // create evidence links to a record owned by a different company.
+            return entityType.ToLowerInvariant() switch
+            {
+                "journalentry" => await _db.JournalEntries.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "apinvoice" => await _db.ApInvoices.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "arinvoice" => await _db.ArInvoices.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "appayment" => await _db.ApPayments.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "appaymentrun" => await _db.ApPaymentRuns.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "controlexception" => await _db.ControlExceptions.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "reconciliationrun" => await _db.ReconciliationRuns.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "bankreconciliation" => await _db.BankReconciliations.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "impairmentassessment" => await _db.ImpairmentAssessments.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "inventorynrvassessment" => await _db.InventoryNrvAssessments.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "accrualschedule" => await _db.AccrualSchedules.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "prepaymentschedule" => await _db.PrepaymentSchedules.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "revenuecontract" => await _db.RevenueContracts.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "arcreditnote" => await _db.ArCreditNotes.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "supplierbankchange" => await _db.SupplierBankChanges.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "periodclosetask" => await _db.PeriodCloseTasks.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                "pettycashvoucher" => await _db.PettyCashVouchers.AnyAsync(x => x.Id == entityId && x.CompanyId == companyId, ct),
+                _ => false
+            };
+        }
+
         public async Task<AuditEvidenceReference> AttachAsync(Guid companyId, string entityType, Guid entityId, string fileName, string contentType, byte[] content, string? description, Guid userId, CancellationToken ct = default)
         {
+            AssertCompanyContext(companyId);
             if (!AllowedEntities.Contains(entityType)) throw new InvalidOperationException("Evidence cannot be attached to that record type.");
+            if (!await TargetExistsInCompanyAsync(companyId, entityType, entityId, ct))
+                throw new InvalidOperationException("The target record does not exist in the authenticated company.");
             if (content.Length == 0 || content.Length > MaxBytes) throw new InvalidOperationException($"Files must be between 1 byte and {MaxBytes / 1024 / 1024} MB.");
             if (!AllowedTypes.Contains(contentType)) throw new InvalidOperationException("Allowed types: PDF, PNG, JPEG, CSV, text, Excel (.xlsx) and Word (.docx).");
             var safeName = Path.GetFileName(fileName);
@@ -186,13 +222,17 @@ namespace ApexERP.Application.Services
             await _db.SaveChangesAsync(ct); return e;
         }
 
-        public Task<List<object>> ListAsync(Guid companyId, string entityType, Guid entityId, CancellationToken ct = default) =>
-            _db.AuditEvidenceReferences.Where(e => e.CompanyId == companyId && e.EntityType == entityType && e.EntityId == entityId).OrderBy(e => e.CreatedAt)
+        public Task<List<object>> ListAsync(Guid companyId, string entityType, Guid entityId, CancellationToken ct = default)
+        {
+            AssertCompanyContext(companyId);
+            return _db.AuditEvidenceReferences.Where(e => e.CompanyId == companyId && e.EntityType == entityType && e.EntityId == entityId).OrderBy(e => e.CreatedAt)
                 .Select(e => (object)new { e.Id, e.FileName, e.ContentType, e.SizeBytes, e.Sha256, e.Description, e.UploadedBy, e.CreatedAt }).ToListAsync(ct);
+        }
 
         /// <summary>Returns the file and whether its content still matches the hash recorded at upload.</summary>
         public async Task<(AuditEvidenceReference File, bool IntegrityOk)> DownloadAsync(Guid companyId, Guid id, Guid userId, CancellationToken ct = default)
         {
+            AssertCompanyContext(companyId);
             var e = await _db.AuditEvidenceReferences.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == companyId, ct) ?? throw new InvalidOperationException("Evidence not found.");
             var ok = string.Equals(Convert.ToHexString(SHA256.HashData(e.Content)), e.Sha256, StringComparison.OrdinalIgnoreCase);
             _audit.Record(companyId, userId, "Evidence.Downloaded", "Audit", e.EntityType, e.EntityId, null, new { e.FileName, ok });
@@ -324,6 +364,7 @@ namespace ApexERP.Application.Services
             var operations = new
             {
                 IntegrationPending = await _db.IntegrationMessages.CountAsync(m => m.CompanyId == companyId && m.Status == "Pending", ct),
+                IntegrationProcessing = await _db.IntegrationMessages.CountAsync(m => m.CompanyId == companyId && m.Status == "Processing", ct),
                 IntegrationDeadLetter = await _db.IntegrationMessages.CountAsync(m => m.CompanyId == companyId && m.Status == "DeadLetter", ct),
                 BackgroundJobFailures7d = await _db.JobExecutions.CountAsync(j => j.CompanyId == companyId && j.Status == "Failed" && j.StartedAt >= weekAgo, ct),
                 LastJobSuccess = await _db.JobExecutions.Where(j => j.CompanyId == companyId && j.Status == "Succeeded").MaxAsync(j => (DateTime?)j.FinishedAt, ct)

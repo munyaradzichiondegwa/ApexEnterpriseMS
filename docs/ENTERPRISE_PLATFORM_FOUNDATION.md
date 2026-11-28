@@ -50,7 +50,7 @@ A government department may be provisioned as an independent tenant or as a comp
 
 ### Customer operations and disaster recovery
 - Tenant operational checks capture status, duration and diagnostic metadata.
-- SLA policies define availability, response and resolution targets. SLA reporting computes availability over the configured monitoring window and reports response/resolution breaches for incidents.
+- SLA policies define availability, response and resolution targets. SLA reporting computes availability over the configured monitoring window and reports response/resolution breaches for incidents. Response and resolution clocks use the configured local business-hours window; `BusinessHoursJson` accepts `{"start":"09:00","end":"17:00","days":[1,2,3,4,5]}` where days are `DayOfWeek` values (Sunday=0). An empty object means 24/7.
 - Lifecycle jobs cover provisioning, diagnostics, backup, restore, export, offboarding and subscription renewal.
 - A background dispatcher sends HMAC-SHA256 signed jobs to a configured external operations worker. The worker must send timestamped HMAC-signed callbacks; signatures are verified with a five-minute tolerance and constant-time comparison.
 - The API stores job metadata and results only. Backup payloads, database credentials and cloud secrets remain with the operations worker.
@@ -130,7 +130,7 @@ The callback uses the same headers and secret and accepts `status` (`Running`, `
 
 ## External dependencies and legal controls
 
-The application side now provides the workflows and enforcement boundaries. The following require deployment-specific credentials, providers or authorised legal content:
+The tenant workspace is available at `/organisation`; the separate platform control-plane workspace is at `/platform/admin` and accepts a short-lived token issued by the configured platform identity provider. The application side now provides the workflows and enforcement boundaries. The following require deployment-specific credentials, providers or authorised legal content:
 - Platform identity issuer/private-key custody.
 - SMTP relay.
 - Billing/payment gateway and invoice/tax receipt integration.

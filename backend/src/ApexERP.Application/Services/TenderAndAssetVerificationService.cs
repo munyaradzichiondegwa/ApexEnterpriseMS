@@ -2,6 +2,7 @@ using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace ApexERP.Application.Services
 {
@@ -15,10 +16,14 @@ namespace ApexERP.Application.Services
     public class TenderService
     {
         private readonly ApexErpDbContext _db;
+        private readonly ApprovalChainService _approvalChains;
+        private readonly AuditService _audit;
 
-        public TenderService(ApexErpDbContext db)
+        public TenderService(ApexErpDbContext db, ApprovalChainService approvalChains, AuditService? audit = null)
         {
             _db = db;
+            _approvalChains = approvalChains;
+            _audit = audit ?? new AuditService(db);
         }
 
         public async Task<TenderNotice> CreateTenderAsync(Guid companyId, string title, string? specifications, DateTime submissionDeadline, CancellationToken ct = default)
@@ -37,56 +42,226 @@ namespace ApexERP.Application.Services
                 Status = TenderStatus.Open
             };
             _db.TenderNotices.Add(tender);
+            _audit.Record(companyId, _db.CurrentUserId, "Tender.Created", "PublicSector",
+                nameof(TenderNotice), tender.Id, null,
+                new { tender.TenderNo, tender.Title, tender.SubmissionDeadline, tender.Status });
             await _db.SaveChangesAsync(ct);
             return tender;
         }
 
         /// <summary>Submits a bid. Late bids are rejected automatically by comparing the server's
         /// own clock against the tender's deadline -- not a manual review step.</summary>
-        public async Task<TenderBid> SubmitBidAsync(Guid companyId, Guid tenderNoticeId, Guid vendorId, decimal priceAmount, CancellationToken ct = default)
+        public Task<TenderBid> SubmitBidAsync(Guid companyId, Guid tenderNoticeId, Guid vendorId, decimal priceAmount, CancellationToken ct = default)
         {
-            var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Tender notice not found.");
+            if (priceAmount <= 0) throw new InvalidOperationException("A bid price must be greater than zero.");
 
-            var now = DateTime.UtcNow;
-            var bid = new TenderBid
+            // Serialise bid submission with deadline closure/evaluation and with another submission
+            // from the same vendor. This makes the open-state/deadline check authoritative under load.
+            return _db.InTransactionAsync(async token =>
             {
-                CompanyId = companyId,
-                TenderNoticeId = tenderNoticeId,
-                VendorId = vendorId,
-                PriceAmount = priceAmount,
-                SubmittedAt = now,
-                IsLateRejected = now > tender.SubmissionDeadline
-            };
-            _db.TenderBids.Add(bid);
-            await _db.SaveChangesAsync(ct);
-            return bid;
+                await _db.AcquireTransactionLockAsync($"tender-submission:{companyId:N}:{tenderNoticeId:N}", token);
+                var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Tender notice not found.");
+                if (tender.Status != TenderStatus.Open)
+                    throw new InvalidOperationException("Bids can only be submitted while the tender is open.");
+
+                var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == vendorId && v.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Vendor is not registered in this company.");
+                EnsureVendorEligible(vendor);
+
+                if (await _db.TenderBids.AnyAsync(b => b.CompanyId == companyId &&
+                    b.TenderNoticeId == tenderNoticeId && b.VendorId == vendorId, token))
+                    throw new InvalidOperationException("This vendor has already submitted a bid for this tender.");
+
+                var now = DateTime.UtcNow;
+                var bid = new TenderBid
+                {
+                    CompanyId = companyId,
+                    TenderNoticeId = tenderNoticeId,
+                    VendorId = vendorId,
+                    PriceAmount = priceAmount,
+                    SubmittedAt = now,
+                    IsLateRejected = now > tender.SubmissionDeadline
+                };
+                _db.TenderBids.Add(bid);
+                _audit.Record(companyId, _db.CurrentUserId, "Tender.BidSubmitted", "PublicSector",
+                    nameof(TenderBid), bid.Id, null,
+                    new { bid.TenderNoticeId, bid.VendorId, bid.PriceAmount, bid.SubmittedAt, bid.IsLateRejected });
+                await _db.SaveChangesAsync(token);
+                return bid;
+            }, ct);
+        }
+
+        private static void EnsureVendorEligible(Vendor vendor)
+        {
+            if (!vendor.IsApproved)
+                throw new InvalidOperationException("Only an approved vendor may participate in a public-sector tender.");
+            if (vendor.IsBlacklisted)
+                throw new InvalidOperationException("A blacklisted vendor is not eligible to bid or receive an award.");
+            var today = DateTime.UtcNow.Date;
+            if (!vendor.TaxClearanceValidTo.HasValue || vendor.TaxClearanceValidTo.Value.Date < today)
+                throw new InvalidOperationException("The vendor must hold a valid tax-clearance certificate through the tender date.");
+            if (!vendor.RegistrationValidTo.HasValue || vendor.RegistrationValidTo.Value.Date < today)
+                throw new InvalidOperationException("The vendor's company registration must be valid through the tender date.");
+        }
+
+        /// <summary>Moves an expired open tender into evaluation. The server clock is authoritative.</summary>
+        public Task<TenderNotice> BeginEvaluationAsync(Guid companyId, Guid tenderNoticeId, CancellationToken ct = default)
+        {
+            return _db.InTransactionAsync(async token =>
+            {
+                // Uses the same lock as SubmitBidAsync: no bid can pass the open-state check
+                // concurrently with the tender moving into evaluation.
+                await _db.AcquireTransactionLockAsync($"tender-submission:{companyId:N}:{tenderNoticeId:N}", token);
+                var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Tender notice not found.");
+                if (tender.Status != TenderStatus.Open)
+                    throw new InvalidOperationException("Only an open tender can enter evaluation.");
+                if (DateTime.UtcNow <= tender.SubmissionDeadline)
+                    throw new InvalidOperationException("Tender evaluation cannot begin before the submission deadline.");
+                var previousStatus = tender.Status;
+                tender.Status = TenderStatus.Evaluation;
+                _audit.Record(companyId, _db.CurrentUserId, "Tender.EvaluationStarted", "PublicSector",
+                    nameof(TenderNotice), tender.Id, new { Status = previousStatus },
+                    new { tender.Status, StartedAt = DateTime.UtcNow });
+                await _db.SaveChangesAsync(token);
+                return tender;
+            }, ct);
         }
 
         /// <summary>Scores a bid on price/technical/local-content criteria (weights configurable per
         /// call) and rolls them into a total score for the evaluation matrix.</summary>
-        public async Task<TenderBid> ScoreBidAsync(Guid companyId, Guid bidId, decimal priceScore, decimal technicalScore,
+        private sealed record TenderEvaluationWeights(decimal Price, decimal Technical, decimal LocalContent);
+
+        /// <summary>
+        /// Scores every bid against one immutable weighting matrix per tender. The first valid
+        /// scoring operation locks the weights; subsequent bids must use exactly the same matrix.
+        /// </summary>
+        public Task<TenderBid> ScoreBidAsync(Guid companyId, Guid bidId, decimal priceScore, decimal technicalScore,
             decimal localContentScore, decimal priceWeight, decimal technicalWeight, decimal localContentWeight, CancellationToken ct = default)
         {
-            var bid = await _db.TenderBids.FirstOrDefaultAsync(b => b.Id == bidId && b.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Bid not found.");
-            if (bid.IsLateRejected) throw new InvalidOperationException("This bid was submitted after the deadline and cannot be scored.");
+            if (priceScore is < 0 or > 100 || technicalScore is < 0 or > 100 || localContentScore is < 0 or > 100)
+                throw new InvalidOperationException("Each evaluation score must be between 0 and 100.");
+            if (priceWeight < 0 || technicalWeight < 0 || localContentWeight < 0 ||
+                Math.Abs(priceWeight + technicalWeight + localContentWeight - 1m) > 0.0001m)
+                throw new InvalidOperationException("Evaluation weights must be non-negative and total exactly 100%.");
 
-            bid.PriceScore = priceScore;
-            bid.TechnicalScore = technicalScore;
-            bid.LocalContentScore = localContentScore;
-            bid.TotalScore = (priceScore * priceWeight) + (technicalScore * technicalWeight) + (localContentScore * localContentWeight);
-            await _db.SaveChangesAsync(ct);
-            return bid;
+            return _db.InTransactionAsync(async token =>
+            {
+                var bid = await _db.TenderBids.FirstOrDefaultAsync(b => b.Id == bidId && b.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Bid not found.");
+                if (bid.IsLateRejected) throw new InvalidOperationException("This bid was submitted after the deadline and cannot be scored.");
+                var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == bid.TenderNoticeId && t.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Tender notice not found.");
+                if (tender.Status != TenderStatus.Evaluation)
+                    throw new InvalidOperationException("A tender must be in evaluation before bids can be scored.");
+
+                await _db.AcquireTransactionLockAsync($"tender-evaluation-weights:{companyId:N}:{tender.Id:N}", token);
+                var settingKey = $"tender.evaluation.weights:{tender.Id:N}";
+                var setting = await _db.CompanySettings.FirstOrDefaultAsync(s => s.CompanyId == companyId && s.Key == settingKey, token);
+                var requested = new TenderEvaluationWeights(priceWeight, technicalWeight, localContentWeight);
+                if (setting == null)
+                {
+                    _db.CompanySettings.Add(new CompanySetting
+                    {
+                        CompanyId = companyId,
+                        Key = settingKey,
+                        Value = JsonSerializer.Serialize(requested)
+                    });
+                }
+                else
+                {
+                    TenderEvaluationWeights? locked;
+                    try { locked = JsonSerializer.Deserialize<TenderEvaluationWeights>(setting.Value); }
+                    catch (JsonException) { throw new InvalidOperationException("The tender's locked evaluation weights are invalid; administrator review is required."); }
+                    if (locked == null || locked != requested)
+                        throw new InvalidOperationException("Evaluation weights are locked by the first scored bid and cannot be changed for this tender.");
+                }
+
+                var previousScores = new { bid.PriceScore, bid.TechnicalScore, bid.LocalContentScore, bid.TotalScore };
+                bid.PriceScore = priceScore;
+                bid.TechnicalScore = technicalScore;
+                bid.LocalContentScore = localContentScore;
+                bid.TotalScore = (priceScore * priceWeight) + (technicalScore * technicalWeight) + (localContentScore * localContentWeight);
+                _audit.Record(companyId, _db.CurrentUserId, "Tender.BidScored", "PublicSector",
+                    nameof(TenderBid), bid.Id, previousScores,
+                    new { bid.PriceScore, bid.TechnicalScore, bid.LocalContentScore, bid.TotalScore,
+                        PriceWeight = priceWeight, TechnicalWeight = technicalWeight, LocalContentWeight = localContentWeight });
+                await _db.SaveChangesAsync(token);
+                return bid;
+            }, ct);
+        }
+
+        /// <summary>Submits the proposed winning bid to the configured multi-tier approval chain.
+        /// The approval references the immutable bid ID, so a different vendor/bid cannot be substituted later.</summary>
+        public async Task<WorkflowRequest> SubmitAwardForApprovalAsync(Guid companyId, Guid tenderNoticeId,
+            Guid winningVendorId, Guid submittedBy, CancellationToken ct = default)
+        {
+            var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Tender notice not found.");
+            if (tender.Status != TenderStatus.Evaluation)
+                throw new InvalidOperationException("Only a tender under evaluation can be submitted for award approval.");
+
+            var eligibleBids = await _db.TenderBids.Where(b => b.CompanyId == companyId &&
+                b.TenderNoticeId == tenderNoticeId && !b.IsLateRejected).ToListAsync(ct);
+            if (eligibleBids.Count == 0 || eligibleBids.Any(b => b.TotalScore <= 0))
+                throw new InvalidOperationException("Every eligible bid must be scored before award approval.");
+            var selected = eligibleBids.FirstOrDefault(b => b.VendorId == winningVendorId)
+                ?? throw new InvalidOperationException("The selected vendor has no eligible bid for this tender.");
+            var highest = eligibleBids.OrderByDescending(b => b.TotalScore).ThenBy(b => b.PriceAmount)
+                .ThenBy(b => b.SubmittedAt).First();
+            if (selected.Id != highest.Id)
+                throw new InvalidOperationException("Only the highest-scoring eligible bid can be submitted for award approval.");
+            var vendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == winningVendorId && v.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("The selected vendor is not registered in this company.");
+            EnsureVendorEligible(vendor);
+
+            return await _approvalChains.SubmitForApprovalAsync(companyId, "TenderAward", selected.Id,
+                "TenderBid", submittedBy, selected.PriceAmount, null,
+                $"Approve award of tender {tender.TenderNo} to vendor {winningVendorId}.", ct);
         }
 
         public async Task<TenderNotice> AwardAsync(Guid companyId, Guid tenderNoticeId, Guid winningVendorId, string justification, CancellationToken ct = default)
         {
+            if (string.IsNullOrWhiteSpace(justification))
+                throw new InvalidOperationException("An award justification is required.");
             var tender = await _db.TenderNotices.FirstOrDefaultAsync(t => t.Id == tenderNoticeId && t.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("Tender notice not found.");
+            if (tender.Status != TenderStatus.Evaluation)
+                throw new InvalidOperationException("Only a tender under evaluation can be awarded.");
+            var winningBid = await _db.TenderBids.FirstOrDefaultAsync(b => b.CompanyId == companyId &&
+                b.TenderNoticeId == tenderNoticeId && b.VendorId == winningVendorId && !b.IsLateRejected, ct)
+                ?? throw new InvalidOperationException("The selected vendor has no eligible bid for this tender.");
+            var approvedWorkflow = await _db.WorkflowRequests.Include(w => w.Approvals)
+                .FirstOrDefaultAsync(w => w.CompanyId == companyId && w.RequestType == "TenderAward" &&
+                    w.ReferenceTable == "TenderBid" && w.ReferenceId == winningBid.Id &&
+                    w.Amount == winningBid.PriceAmount && w.FundCentreId == null &&
+                    w.Status == WorkflowStatus.Approved && w.ApprovalChainId != null, ct);
+            if (approvedWorkflow == null || approvedWorkflow.Approvals.Count == 0 ||
+                approvedWorkflow.Approvals.Any(a => !a.Approved))
+                throw new InvalidOperationException("The selected bid must receive independent approval through the configured tender-award approval chain before award.");
+
+            var winningVendor = await _db.Vendors.FirstOrDefaultAsync(v => v.Id == winningVendorId && v.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("The selected vendor is no longer registered in this company.");
+            EnsureVendorEligible(winningVendor);
+            var eligibleBids = await _db.TenderBids
+                .Where(b => b.CompanyId == companyId && b.TenderNoticeId == tenderNoticeId && !b.IsLateRejected)
+                .ToListAsync(ct);
+            if (eligibleBids.Count == 0 || eligibleBids.Any(b => b.TotalScore <= 0))
+                throw new InvalidOperationException("Every eligible bid must be scored before the tender can be awarded.");
+            var highestRankedBid = eligibleBids.OrderByDescending(b => b.TotalScore)
+                .ThenBy(b => b.PriceAmount).ThenBy(b => b.SubmittedAt).First();
+            if (highestRankedBid.Id != winningBid.Id)
+                throw new InvalidOperationException("The award must go to the highest-scoring eligible bid (lowest price breaks a score tie).");
+            var beforeAward = new { tender.Status, tender.AwardedVendorId, tender.AwardJustification };
             tender.Status = TenderStatus.Awarded;
             tender.AwardedVendorId = winningVendorId;
             tender.AwardJustification = justification;
+            _audit.Record(companyId, _db.CurrentUserId, "Tender.Awarded", "PublicSector",
+                nameof(TenderNotice), tender.Id, beforeAward,
+                new { tender.Status, tender.AwardedVendorId, tender.AwardJustification,
+                    WinningBidId = winningBid.Id, WinningBidAmount = winningBid.PriceAmount,
+                    ApprovalWorkflowId = approvedWorkflow.Id });
             await _db.SaveChangesAsync(ct);
             return tender;
         }

@@ -21,6 +21,219 @@ namespace ApexERP.Domain.Entities
         public bool IsClosed { get; set; }
     }
 
+    /// <summary>
+    /// Versioned, authority-approved budget used for IPSAS 24 original/final comparison.
+    /// Original and revised budgets are separate immutable approval snapshots.
+    /// </summary>
+    public class PublicSectorBudgetVersion : TenantEntity
+    {
+        public int FinancialYear { get; set; }
+        public int VersionNumber { get; set; }
+        public PublicSectorBudgetVersionKind Kind { get; set; }
+        public PublicSectorBudgetVersionStatus Status { get; set; } = PublicSectorBudgetVersionStatus.Draft;
+        public string Currency { get; set; } = "USD";
+        public AccountingBasis AccountingBasis { get; set; }
+        public string ClassificationBasis { get; set; } = string.Empty;
+        public string EntityScope { get; set; } = string.Empty;
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+        public string AuthorityReference { get; set; } = string.Empty;
+        public string? AmendmentReason { get; set; }
+        public PublicSectorBudgetAmendmentNature? AmendmentNature { get; set; }
+        public Guid? ApprovalWorkflowId { get; set; }
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+        public ICollection<PublicSectorBudgetVersionLine> Lines { get; set; } = new List<PublicSectorBudgetVersionLine>();
+    }
+
+    /// <summary>One approved budget line, mapped to the chart of accounts and government vote.</summary>
+    public class PublicSectorBudgetVersionLine : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public Guid FundCentreId { get; set; }
+        public Guid GlAccountId { get; set; }
+        public Guid? CostCentreId { get; set; }
+        public int LineNumber { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string ClassificationCode { get; set; } = string.Empty;
+        public string? TreasuryClassificationCode { get; set; }
+        public string? NoteReference { get; set; }
+        public decimal Amount { get; set; }
+    }
+
+    /// <summary>
+    /// Reconciliation adjustment between comparable budget actuals and the amounts in the
+    /// accrual-basis financial statements. Categories follow IPSAS 24 paragraph 47.
+    /// </summary>
+    public class PublicSectorBudgetReconciliation : TenantEntity
+    {
+        public int FinancialYear { get; set; }
+        // Null only for legacy rows created before reconciliations were tied to a specific approved budget.
+        public Guid? BudgetVersionId { get; set; }
+        public DateTime? StatementPeriodStart { get; set; }
+        public DateTime? StatementPeriodEnd { get; set; }
+        public string? StatementEntityScope { get; set; }
+        public string? SourceFingerprint { get; set; }
+        public DateTime? CalculatedAt { get; set; }
+        public PublicSectorBudgetReconciliationType Type { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string StatementSection { get; set; } = string.Empty;
+        public decimal RevenueAmount { get; set; }
+        public decimal ExpenseAmount { get; set; }
+        public decimal OperatingAmount { get; set; }
+        public decimal InvestingAmount { get; set; }
+        public decimal FinancingAmount { get; set; }
+        public string SupportingReference { get; set; } = string.Empty;
+        public bool IsNoDifferenceAttestation { get; set; }
+        public PublicSectorBudgetReconciliationStatus Status { get; set; } = PublicSectorBudgetReconciliationStatus.Draft;
+        public Guid? ApprovalWorkflowId { get; set; }
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+    }
+
+    /// <summary>
+    /// An expected bank, receivables-control or payables-control source for one approved IPSAS 24
+    /// cash-budget reporting period. Cashbook is not accepted until a dedicated adapter exists.
+    /// Approved entries are immutable; changes require a new
+    /// controlled register entry rather than editing the approved source population.
+    /// </summary>
+    public class PublicSectorExpectedCashSource : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public string SourceKind { get; set; } = string.Empty;
+        public string SourceCode { get; set; } = string.Empty;
+        public string SourceName { get; set; } = string.Empty;
+        public string? SourceIdentifier { get; set; }
+        public bool IsRequired { get; set; } = true;
+        public DateTime EffectiveFrom { get; set; }
+        public DateTime EffectiveTo { get; set; }
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+    }
+
+    /// <summary>
+    /// Period submission for one approved expected cash source. It captures source control
+    /// totals and evidence; it does not itself assert that individual source records have been
+    /// mapped to budget actuals.
+    /// </summary>
+    public class PublicSectorCashSourceSubmission : TenantEntity
+    {
+        public Guid ExpectedCashSourceId { get; set; }
+        public Guid BudgetVersionId { get; set; }
+        public int SubmissionRevision { get; set; } = 1;
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+        public int RecordCount { get; set; }
+        public decimal ControlTotal { get; set; }
+        public decimal OpeningBalance { get; set; }
+        public decimal ClosingBalance { get; set; }
+        public string Currency { get; set; } = "USD";
+        public string EvidenceReference { get; set; } = string.Empty;
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? ReviewedBy { get; set; }
+        public DateTime? ReviewedAt { get; set; }
+        public string? ReviewNote { get; set; }
+        // Separate transaction-level reconciliation lifecycle; source control totals above remain immutable.
+        public string RecordLevelStatus { get; set; } = "NotStarted";
+        public Guid? RecordLevelSubmittedBy { get; set; }
+        public DateTime? RecordLevelSubmittedAt { get; set; }
+        public Guid? RecordLevelReviewedBy { get; set; }
+        public DateTime? RecordLevelReviewedAt { get; set; }
+        public string? RecordLevelReviewNote { get; set; }
+    }
+
+    /// <summary>One source transaction-to-budget-actual allocation, or a single reason-coded exclusion.
+    /// Multiple rows may share a source record key when one receipt/payment is split across budget lines.</summary>
+    public class PublicSectorCashSourceReconciliationLine : TenantEntity
+    {
+        public Guid CashSourceSubmissionId { get; set; }
+        public Guid SourceRecordId { get; set; }
+        public string SourceReference { get; set; } = string.Empty;
+        public decimal SourceAmount { get; set; }
+        public Guid? BudgetExecutionActualId { get; set; }
+        public decimal AllocatedAmount { get; set; }
+        public bool IsExcluded { get; set; }
+        public string? ExclusionReason { get; set; }
+    }
+    
+    /// <summary>Independent attestation that the expected cash-source register is complete for
+    /// the approved budget reporting entity and period. Certification freezes additions to the register.</summary>
+    public class PublicSectorExpectedCashSourceRegisterAttestation : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public int ExpectedSourceCount { get; set; }
+        public string EntityScope { get; set; } = string.Empty;
+        public string EvidenceReference { get; set; } = string.Empty;
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? CertifiedBy { get; set; }
+        public DateTime? CertifiedAt { get; set; }
+        public string? ReviewNote { get; set; }
+    }
+
+    /// <summary>Evidence-backed explanation of a final-budget-to-actual variance. The variance
+    /// amount is revalidated against the current approved comparison at submission and approval.</summary>
+    public class PublicSectorBudgetVarianceExplanation : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public Guid BudgetVersionLineId { get; set; }
+        public decimal VarianceAmount { get; set; }
+        public string Explanation { get; set; } = string.Empty;
+        public string EvidenceReference { get; set; } = string.Empty;
+        public string? CommentReference { get; set; }
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? ReviewedBy { get; set; }
+        public DateTime? ReviewedAt { get; set; }
+        public string? ReviewNote { get; set; }
+    }
+
+    /// <summary>
+    /// Independent period-level declaration that no cash source activity occurred.
+    /// This is evidence of completeness, not a mechanism for assuming missing records are zero.
+    /// Certification is permitted only after re-counting all supported source populations.
+    /// </summary>
+    public class PublicSectorCashPeriodAttestation : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+        public int ObservedBankTransactionCount { get; set; }
+        public int ObservedArReceiptCount { get; set; }
+        public int ObservedApPaymentCount { get; set; }
+        public string EvidenceReference { get; set; } = string.Empty;
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? CertifiedBy { get; set; }
+        public DateTime? CertifiedAt { get; set; }
+        public string? RejectionReason { get; set; }
+    }
+
+    /// <summary>
+    /// Approved appropriation distribution to an expense GL account and optional cost centre.
+    /// Draft and pending allocations are excluded from budget-versus-actual reporting.
+    /// </summary>
+    public class PublicSectorBudgetAllocation : TenantEntity
+    {
+        public Guid FundCentreId { get; set; }
+        public Guid GlAccountId { get; set; }
+        public Guid? CostCentreId { get; set; }
+        public int FinancialYear { get; set; }
+        public decimal Amount { get; set; }
+        public PublicSectorBudgetAllocationStatus Status { get; set; } = PublicSectorBudgetAllocationStatus.Draft;
+        public Guid? ApprovalWorkflowId { get; set; }
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+    }
+
     /// <summary>Encumbrance created when a PO is approved against a FundCentre: reduces the
     /// available budget immediately (Appropriation - Commitments - Actuals), released/replaced by
     /// the actual expenditure on GRN/invoice, or fully reversed on PO cancellation.</summary>
@@ -29,6 +242,8 @@ namespace ApexERP.Domain.Entities
         public Guid FundCentreId { get; set; }
         public Guid PurchaseOrderId { get; set; }
         public decimal Amount { get; set; }
+        /// <summary>Base-currency actual expenditure already posted against this commitment.</summary>
+        public decimal RealisedAmount { get; set; }
         public CommitmentStatus Status { get; set; } = CommitmentStatus.Active;
         public DateTime CommittedDate { get; set; }
         public DateTime? ReleasedDate { get; set; }
@@ -93,5 +308,42 @@ namespace ApexERP.Domain.Entities
         public AssetVerificationResult Result { get; set; }
         public string? ConditionNotes { get; set; }
         public DateTime ScannedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Immutable source-linked actual captured on the approved budget basis for IPSAS 24.
+    /// Only reconciled bank movements and posted, authorised AR/AP cash transactions qualify.
+    /// </summary>
+    public class PublicSectorBudgetExecutionActual : TenantEntity
+    {
+        public int FinancialYear { get; set; }
+        public Guid BudgetVersionId { get; set; }
+        public Guid BudgetVersionLineId { get; set; }
+        public Guid FundCentreId { get; set; }
+        public Guid GlAccountId { get; set; }
+        public Guid? CostCentreId { get; set; }
+        public PublicSectorBudgetActualEventKind EventKind { get; set; }
+        public PublicSectorBudgetActualSourceKind SourceKind { get; set; }
+        public Guid SourceRecordId { get; set; }
+        public string SourceReference { get; set; } = string.Empty;
+        public DateTime SourceDate { get; set; }
+        public DateTime EffectiveDate { get; set; }
+        /// <summary>Original source-currency amount; Amount is the translated budget-currency amount.</summary>
+        public string Currency { get; set; } = "USD";
+        public decimal SourceAmount { get; set; }
+        public decimal Amount { get; set; }
+        public decimal ExchangeRateToBudgetCurrency { get; set; } = 1m;
+        public DateTime? ExchangeRateDate { get; set; }
+        public string? ExchangeRateSource { get; set; }
+        public string? ExchangeRateSourceReference { get; set; }
+        public bool ExchangeRateIsInverse { get; set; }
+        public Guid? ExchangeRateApprovedBy { get; set; }
+        public DateTime? ExchangeRateApprovedAt { get; set; }
+        public CashFlowCategory CashFlowSection { get; set; }
+        public PublicSectorBudgetActualStatus Status { get; set; } = PublicSectorBudgetActualStatus.Draft;
+        public Guid? ReversalOfId { get; set; }
+        public string? ReversalReason { get; set; }
+        public Guid? CertifiedBy { get; set; }
+        public DateTime? CertifiedAt { get; set; }
     }
 }

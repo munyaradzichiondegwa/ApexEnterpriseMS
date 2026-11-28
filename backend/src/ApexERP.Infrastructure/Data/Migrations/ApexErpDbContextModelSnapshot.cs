@@ -22,6 +22,100 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.ZimbabweDswtFiling", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("TaxYear").HasColumnType("integer");
+                    b.Property<int>("TaxPeriod").HasColumnType("integer");
+                    b.Property<int>("ReturnVersion").HasColumnType("integer");
+                    b.Property<string>("TaxpayerTin").IsRequired().HasColumnType("text");
+                    b.Property<string>("TaxpayerName").IsRequired().HasColumnType("text");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("TaxableIncome").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("TaxAmount").HasColumnType("numeric(20,6)");
+                    b.Property<int>("PaymentCount").HasColumnType("integer");
+                    b.Property<string>("PayloadJson").IsRequired().HasColumnType("text");
+                    b.Property<string>("PayloadSha256").IsRequired().HasColumnType("text");
+                    b.Property<string>("IdempotencyKey").IsRequired().HasColumnType("text");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<string>("SubmissionChannel").IsRequired().HasColumnType("text");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<string>("SubmissionReference").HasColumnType("text");
+                    b.Property<string>("SubmissionEvidenceReference").HasColumnType("text");
+                    b.Property<DateTime?>("AcknowledgedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("AcknowledgementReference").HasColumnType("text");
+                    b.Property<string>("AcknowledgementEvidenceReference").HasColumnType("text");
+                    b.Property<DateTime?>("PaymentConfirmedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("PaymentReference").HasColumnType("text");
+                    b.Property<decimal?>("PaymentAmount").HasColumnType("numeric(20,6)");
+                    b.Property<string>("PaymentCurrency").HasColumnType("text");
+                    b.Property<string>("PaymentEvidenceReference").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "TaxYear", "TaxPeriod", "ReturnVersion").IsUnique();
+                    b.HasIndex("CompanyId", "IdempotencyKey").IsUnique();
+                    b.HasIndex("CompanyId", "SubmissionReference").IsUnique()
+                        .HasFilter("\"SubmissionReference\" IS NOT NULL");
+                    b.ToTable("ZimbabweDswtFilings", t =>
+                        {
+                            t.HasCheckConstraint("CK_ZimbabweDswtFilings_Period", "\"TaxYear\" >= 2026 AND \"TaxPeriod\" BETWEEN 1 AND 12 AND \"ReturnVersion\" >= 1");
+                            t.HasCheckConstraint("CK_ZimbabweDswtFilings_Amounts", "\"TaxableIncome\" >= 0 AND \"TaxAmount\" >= 0 AND \"PaymentCount\" >= 0");
+                            t.HasCheckConstraint("CK_ZimbabweDswtFilings_Hash", "char_length(\"PayloadSha256\") = 64 AND char_length(\"IdempotencyKey\") = 64");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ZimbabweDswtWithholdingRecord", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<string>("PaymentReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("IntermediaryName").IsRequired().HasColumnType("text");
+                    b.Property<string>("SupplierName").IsRequired().HasColumnType("text");
+                    b.Property<string>("SupplierCountryCode").IsRequired().HasColumnType("text");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("GrossPaymentAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("WithholdingRate").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("WithheldAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("SupplierRemittanceAmount").HasColumnType("numeric(20,6)");
+                    b.Property<int>("ServiceKind").HasColumnType("integer");
+                    b.Property<int>("SupplierVatStatus").HasColumnType("integer");
+                    b.Property<int>("PaymentRoute").HasColumnType("integer");
+                    b.Property<bool>("ConsumedInZimbabwe").HasColumnType("boolean");
+                    b.Property<bool>("ZeroRatedOrExempt").HasColumnType("boolean");
+                    b.Property<bool>("RecipientAlreadySelfAccountedVat").HasColumnType("boolean");
+                    b.Property<DateTime>("WithheldAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("TaxPeriodYear").HasColumnType("integer");
+                    b.Property<int>("TaxPeriodMonth").HasColumnType("integer");
+                    b.Property<string>("CertificateNumber").HasColumnType("text");
+                    b.Property<DateTime?>("CertificateIssuedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("RemittedToZimraAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("EvidenceReference").HasColumnType("text");
+                    b.Property<Guid?>("ApPaymentId").HasColumnType("uuid");
+                    b.Property<Guid?>("BankStatementTransactionId").HasColumnType("uuid");
+                    b.Property<DateTime?>("BankReconciledAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "PaymentReference").IsUnique();
+                    b.HasIndex("CompanyId", "ApPaymentId").IsUnique().HasFilter("\"ApPaymentId\" IS NOT NULL");
+                    b.HasIndex("CompanyId", "BankStatementTransactionId").IsUnique().HasFilter("\"BankStatementTransactionId\" IS NOT NULL");
+                    b.HasIndex("CompanyId", "TaxPeriodYear", "TaxPeriodMonth", "Status");
+                    b.ToTable("ZimbabweDswtWithholdingRecords", t =>
+                        {
+                            t.HasCheckConstraint("CK_ZimbabweDswtWithholdingRecords_Amounts", "\"GrossPaymentAmount\" > 0 AND \"WithholdingRate\" > 0 AND \"WithheldAmount\" > 0 AND \"SupplierRemittanceAmount\" >= 0 AND \"GrossPaymentAmount\" = \"WithheldAmount\" + \"SupplierRemittanceAmount\"");
+                            t.HasCheckConstraint("CK_ZimbabweDswtWithholdingRecords_TaxPeriod", "\"TaxPeriodYear\" BETWEEN 2026 AND 9999 AND \"TaxPeriodMonth\" BETWEEN 1 AND 12");
+                        });
+                });
+
+
             modelBuilder.Entity("ApexERP.Domain.Entities.OrganisationalBranch", b =>
                 {
                     b.Property<Guid>("Id")
@@ -85,6 +179,133 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
                     b.HasIndex("TenantId").IsUnique();
                     b.ToTable("TenantSlaPolicies");
+                });
+
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.TaxAccountMapping", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("TaxType").HasColumnType("integer");
+                    b.Property<string>("Purpose").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("TaxCodeId").HasColumnType("uuid");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<int>("VersionNumber").HasColumnType("integer");
+                    b.Property<DateTime>("EffectiveFrom").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("EffectiveTo").HasColumnType("timestamp with time zone");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "Purpose", "TaxCodeId", "VersionNumber").IsUnique();
+                    b.HasIndex("CompanyId", "Purpose", "TaxCodeId", "EffectiveFrom", "EffectiveTo").HasDatabaseName("IX_TaxAccountMappings_Effective");
+                    b.ToTable("TaxAccountMappings", t =>
+                        {
+                            t.HasCheckConstraint("CK_TaxAccountMappings_Version", "\"VersionNumber\" > 0");
+                            t.HasCheckConstraint("CK_TaxAccountMappings_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                            t.HasCheckConstraint("CK_TaxAccountMappings_Purpose", "((\"Purpose\" IN ('AR-VAT-OUTPUT','AP-VAT-INPUT') AND \"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"Purpose\" = 'AP-WHT-PAYABLE' AND \"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.InvoiceTaxComponent", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<string>("InvoiceKind").IsRequired().HasMaxLength(2).HasColumnType("character varying(2)");
+                    b.Property<Guid>("InvoiceId").HasColumnType("uuid");
+                    b.Property<Guid?>("InvoiceLineId").HasColumnType("uuid");
+                    b.Property<Guid?>("TaxCodeId").HasColumnType("uuid");
+                    b.Property<int>("TaxType").HasColumnType("integer");
+                    b.Property<decimal>("TaxableBase").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("Rate").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<Guid>("TaxAccountMappingId").HasColumnType("uuid");
+                    b.Property<int>("MappingVersionNumber").HasColumnType("integer");
+                    b.Property<Guid>("JournalEntryId").HasColumnType("uuid");
+                    b.Property<Guid>("JournalLineId").HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "InvoiceKind", "InvoiceId", "JournalLineId", "InvoiceLineId").IsUnique();
+                    b.HasIndex("CompanyId", "TaxAccountMappingId", "InvoiceId");
+                    b.ToTable("InvoiceTaxComponents", t =>
+                        {
+                            t.HasCheckConstraint("CK_InvoiceTaxComponents_Amounts", "\"TaxableBase\" >= 0 AND \"Rate\" >= 0 AND \"Amount\" > 0");
+                            t.HasCheckConstraint("CK_InvoiceTaxComponents_Kind", "\"InvoiceKind\" IN ('AR','AP')");
+                            t.HasCheckConstraint("CK_InvoiceTaxComponents_TaxCode", "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorTaxBudgetPolicy", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("TaxType").HasColumnType("integer");
+                    b.Property<Guid?>("TaxCodeId").HasColumnType("uuid");
+                    b.Property<int>("Treatment").HasColumnType("integer");
+                    b.Property<Guid?>("BudgetGlAccountId").HasColumnType("uuid");
+                    b.Property<Guid?>("FundCentreId").HasColumnType("uuid");
+                    b.Property<Guid?>("CostCentreId").HasColumnType("uuid");
+                    b.Property<int>("VersionNumber").HasColumnType("integer");
+                    b.Property<DateTime>("EffectiveFrom").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("EffectiveTo").HasColumnType("timestamp with time zone");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "TaxType", "TaxCodeId", "VersionNumber").IsUnique();
+                    b.HasIndex("CompanyId", "TaxType", "TaxCodeId", "EffectiveFrom", "EffectiveTo").HasDatabaseName("IX_PublicSectorTaxBudgetPolicies_Effective");
+                    b.ToTable("PublicSectorTaxBudgetPolicies", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Version", "\"VersionNumber\" > 0");
+                            t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                            t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Separate", "\"Treatment\" <> 2 OR \"BudgetGlAccountId\" IS NOT NULL");
+                            t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_TaxCode", "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.SettlementComponentAllocation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<string>("SettlementKind").IsRequired().HasMaxLength(2).HasColumnType("character varying(2)");
+                    b.Property<Guid>("SettlementAllocationId").HasColumnType("uuid");
+                    b.Property<Guid>("InvoiceId").HasColumnType("uuid");
+                    b.Property<int>("ComponentKind").HasColumnType("integer");
+                    b.Property<Guid?>("InvoiceLineId").HasColumnType("uuid");
+                    b.Property<Guid?>("TaxComponentId").HasColumnType("uuid");
+                    b.Property<decimal>("AmountApplied").HasColumnType("numeric(20,6)");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "SettlementKind", "SettlementAllocationId", "InvoiceLineId", "TaxComponentId").IsUnique().HasDatabaseName("IX_SettlementComponentAllocations_Allocation");
+                    b.HasIndex("TaxComponentId").HasDatabaseName("IX_SettlementComponentAllocations_TaxComponentId");
+                    b.ToTable("SettlementComponentAllocations", t =>
+                        {
+                            t.HasCheckConstraint("CK_SettlementComponentAllocations_Component", "((\"ComponentKind\" = 0 AND \"InvoiceLineId\" IS NOT NULL AND \"TaxComponentId\" IS NULL) OR (\"ComponentKind\" = 1 AND \"InvoiceLineId\" IS NULL AND \"TaxComponentId\" IS NOT NULL))");
+                            t.HasCheckConstraint("CK_SettlementComponentAllocations_Amount", "\"AmountApplied\" > 0");
+                            t.HasCheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP','TX')");
+                            t.HasCheckConstraint("CK_SettlementComponentAllocations_TaxRemittance", "\"SettlementKind\" <> 'TX' OR \"ComponentKind\" = 1");
+                        });
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.TenantSlaIncident", b =>
@@ -708,6 +929,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("DispatchAttempts")
+                        .HasColumnType("integer");
+
                     b.Property<string>("JobType")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1010,6 +1234,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("VatInputAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("WhtPayableAccountId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("VatAmount")
                         .HasColumnType("numeric(20,6)");
 
@@ -1051,6 +1281,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<Guid>("GlAccountId")
                         .HasColumnType("uuid");
+                    
+                    b.Property<Guid?>("CostCentreId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("InventoryItemId")
                         .HasColumnType("uuid");
@@ -1079,6 +1312,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
 
+                    b.HasIndex("CostCentreId");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ApInvoiceId");
@@ -1103,6 +1338,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<Guid?>("BankAccountId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("BankReference")
+                        .HasColumnType("text");
 
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid");
@@ -1578,6 +1816,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("FdmsSubmissionId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("FundCentreId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("GrantId")
                         .HasColumnType("uuid");
 
@@ -1609,12 +1850,17 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("VatOutputAccountId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("VatAmount")
                         .HasColumnType("numeric(20,6)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerId");
+
+                    b.HasIndex("FundCentreId");
 
                     b.HasIndex("CompanyId", "InvoiceNo")
                         .IsUnique();
@@ -1643,6 +1889,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<Guid>("GlAccountId")
                         .HasColumnType("uuid");
+                    
+                    b.Property<Guid?>("CostCentreId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("InventoryItemId")
                         .HasColumnType("uuid");
@@ -1670,6 +1919,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
+
+                    b.HasIndex("CostCentreId");
 
                     b.HasKey("Id");
 
@@ -2376,6 +2627,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("PurchaseOrderId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("RealisedAmount")
+                        .HasColumnType("numeric(20,6)");
+
                     b.Property<DateTime?>("ReleasedDate")
                         .HasColumnType("timestamp with time zone");
 
@@ -2390,7 +2644,10 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Commitments");
+                    b.ToTable("Commitments", t =>
+                        {
+                            t.HasCheckConstraint("CK_Commitments_RealisedAmount", "\"RealisedAmount\" >= 0 AND \"RealisedAmount\" <= \"Amount\"");
+                        });
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.CustomerOrganisation", b =>
@@ -2502,6 +2759,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("VatNo")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ZimbabweTaxpayerTin")
                         .HasColumnType("text");
 
                     b.HasKey("Id");
@@ -2926,6 +3186,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("ManagerId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
@@ -3341,6 +3606,10 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<bool>("IsManualOverride")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("RateSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<decimal>("Rate")
                         .HasColumnType("numeric(20,6)");
 
@@ -3350,6 +3619,15 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<string>("ToCurrency")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("SourceReference")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -3603,6 +3881,678 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.ToTable("FundCentres");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetAllocation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<Guid?>("CostCentreId").HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<Guid>("FundCentreId").HasColumnType("uuid");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CostCentreId");
+                    b.HasIndex("FundCentreId");
+                    b.HasIndex("GlAccountId");
+                    b.HasIndex("CompanyId", "FundCentreId", "GlAccountId", "CostCentreId", "FinancialYear")
+                        .IsUnique().HasFilter("\"CostCentreId\" IS NOT NULL")
+                        .HasDatabaseName("UX_PublicSectorBudgetAllocation_Dimension");
+                    b.HasIndex("CompanyId", "FundCentreId", "GlAccountId", "FinancialYear")
+                        .IsUnique().HasFilter("\"CostCentreId\" IS NULL")
+                        .HasDatabaseName("UX_PublicSectorBudgetAllocation_Unassigned");
+                    b.ToTable("PublicSectorBudgetAllocations", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetAllocations_Amount", "\"Amount\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersion", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<int>("VersionNumber").HasColumnType("integer");
+                    b.Property<int>("Kind").HasColumnType("integer");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<int>("AccountingBasis").HasColumnType("integer");
+                    b.Property<string>("ClassificationBasis").IsRequired().HasColumnType("text");
+                    b.Property<string>("EntityScope").IsRequired().HasColumnType("text");
+                    b.Property<DateTime>("PeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<string>("AuthorityReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("AmendmentReason").HasColumnType("text");
+                    b.Property<int?>("AmendmentNature").HasColumnType("integer");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "FinancialYear", "Kind", "VersionNumber")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetVersion_Sequence");
+                    b.ToTable("PublicSectorBudgetVersions", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVersion_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVersion_Sequence", "\"VersionNumber\" > 0");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVersion_AmendmentNature",
+                                "\"AmendmentNature\" IS NULL OR \"AmendmentNature\" IN (0, 1, 2)");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<int>("VersionNumber").HasColumnType("integer");
+                    b.Property<string>("PolicyReference").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<DateTime>("EffectiveFrom").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("EffectiveTo").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("ReportingPeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("ReportingPeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<int>("PostPeriodRecognitionWindowDays").HasColumnType("integer");
+                    b.Property<int>("Treatment").HasColumnType("integer");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid>("PreparedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "VersionNumber").IsUnique()
+                        .HasDatabaseName("UX_ModifiedCashPolicy_Version");
+                    b.ToTable("ModifiedCashRecognitionPolicies", t =>
+                        {
+                            t.HasCheckConstraint("CK_ModifiedCashPolicy_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                            t.HasCheckConstraint("CK_ModifiedCashPolicy_ReportingPeriod", "\"ReportingPeriodEnd\" > \"ReportingPeriodStart\"");
+                            t.HasCheckConstraint("CK_ModifiedCashPolicy_Window", "\"PostPeriodRecognitionWindowDays\" >= 0");
+                            t.HasCheckConstraint("CK_ModifiedCashPolicy_Version", "\"VersionNumber\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionMapping", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("PolicyId").HasColumnType("uuid");
+                    b.Property<string>("SourceEventKind").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
+                    b.Property<Guid>("BudgetVersionLineId").HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionLineId");
+                    b.HasIndex("PolicyId");
+                    b.HasIndex("CompanyId", "PolicyId", "SourceEventKind").IsUnique()
+                        .HasDatabaseName("UX_ModifiedCashMapping_EventKind");
+                    b.ToTable("ModifiedCashRecognitionMappings");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionLedgerEvent", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("PolicyId").HasColumnType("uuid");
+                    b.Property<Guid>("CommitmentId").HasColumnType("uuid");
+                    b.Property<Guid>("SourceEventId").HasColumnType("uuid");
+                    b.Property<string>("SourceEventKind").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
+                    b.Property<int>("EventKind").HasColumnType("integer");
+                    b.Property<Guid?>("OriginalEventId").HasColumnType("uuid");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<DateTime>("EventDate").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("EvidenceAcceptedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("EvidenceReference").IsRequired().HasMaxLength(1000).HasColumnType("character varying(1000)");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid>("PreparedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CommitmentId");
+                    b.HasIndex("OriginalEventId").IsUnique().HasFilter("\"OriginalEventId\" IS NOT NULL AND \"EventKind\" = 2")
+                        .HasDatabaseName("UX_ModifiedCashLedger_OneReversal");
+                    b.HasIndex("PolicyId");
+                    b.HasIndex("CompanyId", "CommitmentId", "Status", "EventDate")
+                        .HasDatabaseName("IX_ModifiedCashLedger_CommitmentStatusDate");
+                    b.HasIndex("CompanyId", "SourceEventId", "EventKind").IsUnique()
+                        .HasDatabaseName("UX_ModifiedCashLedger_SourceEvent");
+                    b.ToTable("ModifiedCashRecognitionLedgerEvents", t =>
+                        {
+                            t.HasCheckConstraint("CK_ModifiedCashLedger_Amount", "\"Amount\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.BankStatementImportBatch", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BankAccountId").HasColumnType("uuid");
+                    b.Property<string>("SourceInstitution").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<string>("SourceAccountReference").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<string>("StatementReference").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<DateTime>("PeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<decimal>("OpeningBalance").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("ClosingBalance").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("TotalDebits").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("TotalCredits").HasColumnType("numeric(20,6)");
+                    b.Property<int>("TransactionCount").HasColumnType("integer");
+                    b.Property<string>("OriginalFileName").IsRequired().HasMaxLength(255).HasColumnType("character varying(255)");
+                    b.Property<string>("MediaType").IsRequired().HasMaxLength(128).HasColumnType("character varying(128)");
+                    b.Property<string>("ParserVersion").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+                    b.Property<string>("Sha256").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+                    b.Property<long>("ByteLength").HasColumnType("bigint");
+                    b.Property<byte[]>("OriginalBytes").IsRequired().HasColumnType("bytea");
+                    b.Property<Guid>("UploadedBy").HasColumnType("uuid");
+                    b.Property<DateTime>("UploadedAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("AuthenticationMethod").HasColumnType("integer");
+                    b.Property<string>("AuthenticationEvidenceReference").HasMaxLength(1000).HasColumnType("character varying(1000)");
+                    b.Property<Guid?>("AuthenticationWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("AuthenticatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("AuthenticatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("CompletenessCertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CompletenessCertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BankAccountId");
+                    b.HasIndex("CompanyId", "BankAccountId", "PeriodStart", "PeriodEnd")
+                        .HasDatabaseName("IX_BankStatementBatch_AccountPeriod");
+                    b.HasIndex("CompanyId", "BankAccountId", "StatementReference").IsUnique()
+                        .HasDatabaseName("UX_BankStatementBatch_StatementIdentity");
+                    b.ToTable("BankStatementImportBatches", t =>
+                        {
+                            t.HasCheckConstraint("CK_BankStatementBatch_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+                            t.HasCheckConstraint("CK_BankStatementBatch_ByteLength", "\"ByteLength\" > 0 AND octet_length(\"OriginalBytes\") = \"ByteLength\"");
+                            t.HasCheckConstraint("CK_BankStatementBatch_Totals", "\"TotalDebits\" >= 0 AND \"TotalCredits\" >= 0 AND \"TransactionCount\" >= 0");
+                            t.HasCheckConstraint("CK_BankStatementBatch_Balance", "\"OpeningBalance\" + \"TotalCredits\" - \"TotalDebits\" = \"ClosingBalance\"");
+                            t.HasCheckConstraint("CK_BankStatementBatch_Authentication", "(\"Status\" = 0 AND \"AuthenticationMethod\" = 0 AND \"AuthenticatedBy\" IS NULL AND \"AuthenticatedAt\" IS NULL AND \"AuthenticationEvidenceReference\" IS NULL) OR (\"Status\" IN (1,2) AND \"AuthenticationMethod\" = 1 AND \"AuthenticatedBy\" IS NOT NULL AND \"AuthenticatedAt\" IS NOT NULL AND \"AuthenticationEvidenceReference\" IS NOT NULL) OR \"Status\" = 3");
+                            t.HasCheckConstraint("CK_BankStatementBatch_Completeness", "(\"Status\" = 2 AND \"CompletenessCertifiedBy\" IS NOT NULL AND \"CompletenessCertifiedAt\" IS NOT NULL) OR (\"Status\" <> 2 AND \"CompletenessCertifiedBy\" IS NULL AND \"CompletenessCertifiedAt\" IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.BankStatementImportedTransaction", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("ImportBatchId").HasColumnType("uuid");
+                    b.Property<Guid>("BankAccountId").HasColumnType("uuid");
+                    b.Property<string>("ExternalTransactionId").IsRequired().HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<DateTime>("TransactionDate").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Description").IsRequired().HasMaxLength(500).HasColumnType("character varying(500)");
+                    b.Property<string>("Reference").HasMaxLength(160).HasColumnType("character varying(160)");
+                    b.Property<decimal>("Debit").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("Credit").HasColumnType("numeric(20,6)");
+                    b.Property<string>("Currency").IsRequired().HasMaxLength(3).HasColumnType("character varying(3)");
+                    b.Property<int>("SourceLineNumber").HasColumnType("integer");
+                    b.Property<string>("TransactionFingerprint").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("MatchedBankTransactionId").HasColumnType("uuid");
+                    b.Property<Guid?>("MatchedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("MatchedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ExclusionReason").HasMaxLength(1000).HasColumnType("character varying(1000)");
+                    b.Property<Guid?>("ExcludedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ExcludedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BankAccountId");
+                    b.HasIndex("ImportBatchId");
+                    b.HasIndex("CompanyId", "ImportBatchId", "Status")
+                        .HasDatabaseName("IX_BankStatementTransaction_BatchStatus");
+                    b.HasIndex("CompanyId", "BankAccountId", "ExternalTransactionId").IsUnique()
+                        .HasDatabaseName("UX_BankStatementTransaction_ExternalIdentity");
+                    b.HasIndex("CompanyId", "BankAccountId", "TransactionFingerprint").IsUnique()
+                        .HasDatabaseName("UX_BankStatementTransaction_Fingerprint");
+                    b.HasIndex("MatchedBankTransactionId").IsUnique()
+                        .HasFilter("\"MatchedBankTransactionId\" IS NOT NULL")
+                        .HasDatabaseName("UX_BankStatementTransaction_MatchedBankTransaction");
+                    b.ToTable("BankStatementImportedTransactions", t =>
+                        {
+                            t.HasCheckConstraint("CK_BankStatementTransaction_Amounts", "(\"Debit\" > 0 AND \"Credit\" = 0) OR (\"Credit\" > 0 AND \"Debit\" = 0)");
+                            t.HasCheckConstraint("CK_BankStatementTransaction_SourceLine", "\"SourceLineNumber\" > 1");
+                            t.HasCheckConstraint("CK_BankStatementTransaction_Identity", "length(trim(\"ExternalTransactionId\")) > 0 AND length(\"Currency\") = 3 AND length(\"TransactionFingerprint\") = 64");
+                            t.HasCheckConstraint("CK_BankStatementTransaction_Review", "(\"Status\" = 0 AND \"MatchedBankTransactionId\" IS NULL AND \"MatchedBy\" IS NULL AND \"MatchedAt\" IS NULL AND \"ExclusionReason\" IS NULL AND \"ExcludedBy\" IS NULL AND \"ExcludedAt\" IS NULL) OR (\"Status\" = 1 AND \"MatchedBankTransactionId\" IS NOT NULL AND \"MatchedBy\" IS NOT NULL AND \"MatchedAt\" IS NOT NULL AND \"ExclusionReason\" IS NULL AND \"ExcludedBy\" IS NULL AND \"ExcludedAt\" IS NULL) OR (\"Status\" = 2 AND \"MatchedBankTransactionId\" IS NULL AND \"MatchedBy\" IS NULL AND \"MatchedAt\" IS NULL AND length(trim(\"ExclusionReason\")) > 0 AND \"ExcludedBy\" IS NOT NULL AND \"ExcludedAt\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionLineId").HasColumnType("uuid");
+                    b.Property<Guid>("FundCentreId").HasColumnType("uuid");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<Guid?>("CostCentreId").HasColumnType("uuid");
+                    b.Property<int>("EventKind").HasColumnType("integer");
+                    b.Property<int>("SourceKind").HasColumnType("integer");
+                    b.Property<Guid>("SourceRecordId").HasColumnType("uuid");
+                    b.Property<string>("SourceReference").IsRequired().HasColumnType("text");
+                    b.Property<DateTime>("SourceDate").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("EffectiveDate").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("SourceAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("ExchangeRateToBudgetCurrency").HasColumnType("numeric(20,10)");
+                    b.Property<DateTime?>("ExchangeRateDate").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ExchangeRateSource").HasMaxLength(100).HasColumnType("character varying(100)");
+                    b.Property<string>("ExchangeRateSourceReference").HasMaxLength(500).HasColumnType("character varying(500)");
+                    b.Property<bool>("ExchangeRateIsInverse").HasColumnType("boolean");
+                    b.Property<Guid?>("ExchangeRateApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ExchangeRateApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("CashFlowSection").HasColumnType("integer");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("ReversalOfId").HasColumnType("uuid");
+                    b.Property<string>("ReversalReason").HasMaxLength(2000).HasColumnType("character varying(2000)");
+                    b.Property<Guid?>("CertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionLineId");
+                    b.HasIndex("FundCentreId");
+                    b.HasIndex("GlAccountId");
+                    b.HasIndex("CompanyId", "SourceKind", "SourceRecordId", "BudgetVersionLineId")
+                        .IsUnique().HasFilter("\"ReversalOfId\" IS NULL AND \"Status\" <> 4")
+                        .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_SourceAllocation");
+                    b.HasIndex("ReversalOfId").IsUnique()
+                        .HasFilter("\"ReversalOfId\" IS NOT NULL")
+                        .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_OneReversal");
+                    b.HasIndex("BudgetVersionId", "EffectiveDate");
+                    b.ToTable("PublicSectorBudgetExecutionActuals", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_Amount", "\"Amount\" > 0");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_SourceAmount", "\"SourceAmount\" > 0");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashSourceSubmission", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("ExpectedCashSourceId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<int>("SubmissionRevision").HasColumnType("integer");
+                    b.Property<DateTime>("PeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<int>("RecordCount").HasColumnType("integer");
+                    b.Property<decimal>("ControlTotal").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("OpeningBalance").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("ClosingBalance").HasColumnType("numeric(20,6)");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ReviewedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ReviewedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ReviewNote").HasColumnType("text");
+                    b.Property<string>("RecordLevelStatus").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("RecordLevelSubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("RecordLevelSubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("RecordLevelReviewedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("RecordLevelReviewedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("RecordLevelReviewNote").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("ExpectedCashSourceId")
+                        .HasDatabaseName("IX_PublicSectorCashSourceSubmissions_ExpectedCashSourceId");
+                    b.HasIndex("CompanyId", "ExpectedCashSourceId", "SubmissionRevision")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorCashSourceSubmission_Revision");
+                    b.ToTable("PublicSectorCashSourceSubmissions", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Revision", "\"SubmissionRevision\" >= 1");
+                            t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+                            t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_RecordCount", "\"RecordCount\" >= 0");
+                            t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Currency", "char_length(\"Currency\") = 3");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashSourceReconciliationLine", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("CashSourceSubmissionId").HasColumnType("uuid");
+                    b.Property<Guid>("SourceRecordId").HasColumnType("uuid");
+                    b.Property<string>("SourceReference").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("SourceAmount").HasColumnType("numeric(20,6)");
+                    b.Property<Guid?>("BudgetExecutionActualId").HasColumnType("uuid");
+                    b.Property<decimal>("AllocatedAmount").HasColumnType("numeric(20,6)");
+                    b.Property<bool>("IsExcluded").HasColumnType("boolean");
+                    b.Property<string>("ExclusionReason").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CashSourceSubmissionId").HasDatabaseName("IX_CashSourceReconciliationLines_Submission");
+                    b.HasIndex("BudgetExecutionActualId").HasDatabaseName("IX_PublicSectorCashSourceReconciliationLines_BudgetExecutionActualId");
+                    b.HasIndex("CompanyId", "CashSourceSubmissionId", "BudgetExecutionActualId").IsUnique()
+                        .HasFilter("\"BudgetExecutionActualId\" IS NOT NULL")
+                        .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
+                    b.HasIndex("CompanyId", "CashSourceSubmissionId", "SourceRecordId", "BudgetExecutionActualId")
+                        .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
+                    b.HasIndex("CompanyId", "CashSourceSubmissionId", "SourceRecordId")
+                        .IsUnique().HasFilter("\"IsExcluded\" = TRUE")
+                        .HasDatabaseName("UX_CashSourceReconciliationLine_Exclusion");
+                    b.ToTable("PublicSectorCashSourceReconciliationLines", t =>
+                        {
+                            t.HasCheckConstraint("CK_CashSourceReconciliationLine_SourceAmount", "\"SourceAmount\" > 0");
+                            t.HasCheckConstraint("CK_CashSourceReconciliationLine_Amounts",
+                                "(\"IsExcluded\" = TRUE AND \"BudgetExecutionActualId\" IS NULL AND \"AllocatedAmount\" = 0 AND length(trim(\"ExclusionReason\")) > 0) OR (\"IsExcluded\" = FALSE AND \"BudgetExecutionActualId\" IS NOT NULL AND \"AllocatedAmount\" > 0 AND \"ExclusionReason\" IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSourceRegisterAttestation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<int>("ExpectedSourceCount").HasColumnType("integer");
+                    b.Property<string>("EntityScope").IsRequired().HasColumnType("text");
+                    b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ReviewNote").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId").HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId")
+                        .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
+                    b.ToTable("PublicSectorExpectedCashSourceRegisterAttestations", t =>
+                        {
+                            t.HasCheckConstraint("CK_ExpectedCashSourceRegisterAttestation_Count", "\"ExpectedSourceCount\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVarianceExplanation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionLineId").HasColumnType("uuid");
+                    b.Property<decimal>("VarianceAmount").HasColumnType("numeric(20,6)");
+                    b.Property<string>("Explanation").IsRequired().HasColumnType("text");
+                    b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("CommentReference").HasColumnType("text");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ReviewedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ReviewedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("ReviewNote").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId").HasDatabaseName("IX_PublicSectorBudgetVarianceExplanations_BudgetVersionId");
+                    b.HasIndex("BudgetVersionLineId").HasDatabaseName("IX_PublicSectorBudgetVarianceExplanations_BudgetVersionLineId");
+                    b.HasIndex("CompanyId", "BudgetVersionLineId")
+                        .HasDatabaseName("IX_PublicSectorBudgetVarianceExplanation_Line");
+                    b.ToTable("PublicSectorBudgetVarianceExplanations", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVarianceExplanation_Amount", "\"VarianceAmount\" <> 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<string>("SourceKind").IsRequired().HasColumnType("text");
+                    b.Property<string>("SourceCode").IsRequired().HasColumnType("text");
+                    b.Property<string>("SourceName").IsRequired().HasColumnType("text");
+                    b.Property<string>("SourceIdentifier").HasColumnType("text");
+                    b.Property<bool>("IsRequired").HasColumnType("boolean");
+                    b.Property<DateTime>("EffectiveFrom").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("EffectiveTo").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "SourceKind", "SourceCode")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorExpectedCashSource_Key");
+                    b.ToTable("PublicSectorExpectedCashSources", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorExpectedCashSource_Period", "\"EffectiveTo\" > \"EffectiveFrom\"");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashPeriodAttestation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<DateTime>("PeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("PeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<int>("ObservedBankTransactionCount").HasColumnType("integer");
+                    b.Property<int>("ObservedArReceiptCount").HasColumnType("integer");
+                    b.Property<int>("ObservedApPaymentCount").HasColumnType("integer");
+                    b.Property<string>("EvidenceReference").IsRequired().HasColumnType("text");
+                    b.Property<string>("Status").IsRequired().HasColumnType("text");
+                    b.Property<Guid?>("SubmittedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("SubmittedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<string>("RejectionReason").HasColumnType("text");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "PeriodStart", "PeriodEnd")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorCashPeriodAttestation_Period");
+                    b.ToTable("PublicSectorCashPeriodAttestations", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+                            t.HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Counts",
+                                "\"ObservedBankTransactionCount\" >= 0 AND \"ObservedArReceiptCount\" >= 0 AND \"ObservedApPaymentCount\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashSourceSubmission", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", null)
+                        .WithMany()
+                        .HasForeignKey("ExpectedCashSourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashSourceSubmission_ExpectedSource")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashSourceSubmission_BudgetVersion")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashSourceReconciliationLine", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorCashSourceSubmission", null)
+                        .WithMany()
+                        .HasForeignKey("CashSourceSubmissionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashSourceReconciliationLine_Submission")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetExecutionActualId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashSourceReconciliationLine_Actual");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSourceRegisterAttestation", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ExpectedCashSourceRegisterAttestation_BudgetVersion")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVarianceExplanation", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PublicSectorBudgetVarianceExplanation_BudgetVersion")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PublicSectorBudgetVarianceExplanation_BudgetLine")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorExpectedCashSource", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ExpectedCashSource_BudgetVersion")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorCashPeriodAttestation", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_CashPeriodAttestation_BudgetVersion")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<Guid>("FundCentreId").HasColumnType("uuid");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<Guid?>("CostCentreId").HasColumnType("uuid");
+                    b.Property<int>("LineNumber").HasColumnType("integer");
+                    b.Property<string>("Description").IsRequired().HasColumnType("text");
+                    b.Property<string>("ClassificationCode").IsRequired().HasColumnType("text");
+                    b.Property<string>("TreasuryClassificationCode").HasColumnType("text");
+                    b.Property<string>("NoteReference").HasColumnType("text");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CostCentreId");
+                    b.HasIndex("FundCentreId");
+                    b.HasIndex("GlAccountId");
+                    b.HasIndex("BudgetVersionId");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "LineNumber")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetVersionLine_Number");
+                    b.ToTable("PublicSectorBudgetVersionLines", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetVersionLine_Amount", "\"Amount\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetReconciliation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<Guid?>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<DateTime?>("StatementPeriodStart").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime?>("StatementPeriodEnd").HasColumnType("timestamp with time zone");
+                    b.Property<string>("StatementEntityScope").HasColumnType("text");
+                    b.Property<string>("SourceFingerprint").HasMaxLength(128).HasColumnType("character varying(128)");
+                    b.Property<DateTime?>("CalculatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<int>("Type").HasColumnType("integer");
+                    b.Property<string>("Description").IsRequired().HasColumnType("text");
+                    b.Property<string>("StatementSection").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("RevenueAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("ExpenseAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("OperatingAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("InvestingAmount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("FinancingAmount").HasColumnType("numeric(20,6)");
+                    b.Property<string>("SupportingReference").IsRequired().HasColumnType("text");
+                    b.Property<bool>("IsNoDifferenceAttestation").HasColumnType("boolean");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("ApprovalWorkflowId").HasColumnType("uuid");
+                    b.Property<Guid?>("ApprovedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("ApprovedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("CompanyId", "BudgetVersionId", "StatementPeriodStart", "StatementPeriodEnd", "StatementEntityScope", "Type", "StatementSection", "SourceFingerprint")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetRecon_SourceScope");
+                    b.ToTable("PublicSectorBudgetReconciliations", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
+                                "(\"IsNoDifferenceAttestation\" = TRUE AND \"RevenueAmount\" = 0 AND \"ExpenseAmount\" = 0 AND \"OperatingAmount\" = 0 AND \"InvestingAmount\" = 0 AND \"FinancingAmount\" = 0) OR (\"IsNoDifferenceAttestation\" = FALSE AND (\"RevenueAmount\" <> 0 OR \"ExpenseAmount\" <> 0 OR \"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0))");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetRecon_StatementPeriod", "\"StatementPeriodStart\" IS NULL OR \"StatementPeriodEnd\" IS NULL OR \"StatementPeriodEnd\" > \"StatementPeriodStart\"");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.GlAccount", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3646,6 +4596,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<bool>("IsControlAccount")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsMonetary")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsIntercompanyAccount")
                         .HasColumnType("boolean");
@@ -4677,6 +5632,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("GrantId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("TaxCodeId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("JournalEntryId")
                         .HasColumnType("uuid");
 
@@ -5020,6 +5978,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<Guid?>("JournalEntryId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("USD");
 
                     b.Property<int>("PeriodMonth")
                         .HasColumnType("integer");
@@ -6347,6 +7311,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("EffectiveFrom")
                         .HasColumnType("timestamp with time zone");
 
@@ -6623,6 +7590,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<string>("BankDetailsJson")
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("TaxClearanceValidTo")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RegistrationValidTo")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Category")
                         .HasColumnType("text");
 
@@ -6651,6 +7624,14 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.Property<bool>("IsApproved")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsBlacklisted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("BlacklistedReason")
+                        .HasColumnType("text");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -6788,6 +7769,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid>("ApproverId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Comments")
                         .HasColumnType("text");
 
@@ -6814,6 +7798,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CompanyId");
+
                     b.HasIndex("WorkflowRequestId");
 
                     b.ToTable("WorkflowApprovals");
@@ -6825,10 +7811,16 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(20,6)");
+
                     b.Property<Guid?>("ApprovalChainId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("FundCentreId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
@@ -6874,6 +7866,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FundCentreId");
+
                     b.ToTable("WorkflowRequests");
                 });
 
@@ -6895,6 +7889,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("ApInvoiceId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.CostCentre", null)
+                        .WithMany()
+                        .HasForeignKey("CostCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.ApPaymentAllocation", b =>
@@ -6932,6 +7931,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Customer");
                 });
 
@@ -6942,6 +7946,11 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasForeignKey("ArInvoiceId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.CostCentre", null)
+                        .WithMany()
+                        .HasForeignKey("CostCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("ApexERP.Domain.Entities.ArReceiptAllocation", b =>
@@ -7110,8 +8119,23 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.WorkflowRequest", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.WorkflowApproval", b =>
                 {
+                    b.HasOne("ApexERP.Domain.Entities.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ApexERP.Domain.Entities.WorkflowRequest", null)
                         .WithMany("Approvals")
                         .HasForeignKey("WorkflowRequestId")
@@ -7452,6 +8476,156 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasOne("ApexERP.Domain.Entities.CustomerOrganisation", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany().HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashPolicy_BudgetVersion")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionMapping", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", null)
+                        .WithMany().HasForeignKey("PolicyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashMapping_Policy")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", null)
+                        .WithMany().HasForeignKey("BudgetVersionLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashMapping_BudgetLine")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.ModifiedCashRecognitionLedgerEvent", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.ModifiedCashRecognitionPolicy", null)
+                        .WithMany().HasForeignKey("PolicyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashLedger_Policy")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.Commitment", null)
+                        .WithMany().HasForeignKey("CommitmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashLedger_Commitment")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.ModifiedCashRecognitionLedgerEvent", null)
+                        .WithMany().HasForeignKey("OriginalEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ModifiedCashLedger_OriginalEvent");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.BankStatementImportBatch", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.BankAccount", null)
+                        .WithMany().HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BankStatementBatch_BankAccount")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.BankStatementImportedTransaction", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.BankStatementImportBatch", null)
+                        .WithMany().HasForeignKey("ImportBatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BankStatementTransaction_Batch")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.BankAccount", null)
+                        .WithMany().HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BankStatementTransaction_BankAccount")
+                        .IsRequired();
+                    b.HasOne("ApexERP.Domain.Entities.BankTransaction", null)
+                        .WithMany().HasForeignKey("MatchedBankTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BankStatementTransaction_MatchedBankTransaction");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BudgetActual_BudgetVersion")
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BudgetActual_BudgetLine")
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BudgetActual_FundCentre")
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.GlAccount", null)
+                        .WithMany()
+                        .HasForeignKey("GlAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_BudgetActual_GlAccount")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.CostCentre", null)
+                        .WithMany()
+                        .HasForeignKey("CostCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.GlAccount", null)
+                        .WithMany()
+                        .HasForeignKey("GlAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersion", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetAllocation", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.CostCentre", null)
+                        .WithMany()
+                        .HasForeignKey("CostCentreId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.GlAccount", null)
+                        .WithMany()
+                        .HasForeignKey("GlAccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

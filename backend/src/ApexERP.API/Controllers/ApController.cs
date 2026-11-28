@@ -17,7 +17,9 @@ namespace ApexERP.API.Controllers
         int PaymentTermsDays, bool WhtApplicable, decimal WhtRate, string? BankName = null, string? BankAccountNo = null, string? BankBranch = null);
     public record PostApInvoiceRequest(Guid ApControlAccountId, Guid VatInputAccountId, Guid WhtPayableAccountId);
     public record ApPaymentRequest(Guid SupplierId, DateTime PaymentDate, string Currency, decimal Amount,
-        PaymentMethod Method, Guid BankGlAccountId, Guid ApControlAccountId, Dictionary<Guid, decimal> Allocations);
+        PaymentMethod Method, Guid BankGlAccountId, Guid ApControlAccountId, Dictionary<Guid, decimal> Allocations,
+        IReadOnlyCollection<SettlementComponentRequest>? ComponentAllocations = null,
+        string? BankReference = null);
 
     [Route("api/v1/ap")]
     public class ApController : ApiControllerBase
@@ -103,10 +105,7 @@ namespace ApexERP.API.Controllers
             {
                 var invoice = await _ap.PostInvoiceAsync(CompanyId, id, req.ApControlAccountId, req.VatInputAccountId, req.WhtPayableAccountId);
 
-                // Public Sector: posting the actual invoice replaces the estimate -- release the commitment.
-                if (invoice.CommitmentId.HasValue)
-                    await _publicSector.ReleaseCommitmentForPoAsync(CompanyId, invoice.CommitmentId.Value);
-
+                // Commitment realisation is already performed atomically inside ApService.PostInvoiceAsync.
                 return Ok(invoice);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
@@ -127,12 +126,24 @@ namespace ApexERP.API.Controllers
                     return BadRequest(new { error = $"Payments above {limit:N2} must be made through a payment run, authorised by a second person." });
 
                 var payment = await _ap.PayAndAllocateAsync(CompanyId, req.SupplierId, req.PaymentDate, req.Currency,
-                    req.Amount, req.Method, req.BankGlAccountId, req.ApControlAccountId, req.Allocations);
+                    req.Amount, req.Method, req.BankGlAccountId, req.ApControlAccountId, req.Allocations,
+                    componentAllocations: req.ComponentAllocations?.Select(x => new SettlementComponentInput(
+                        x.InvoiceId, x.InvoiceLineId, x.TaxComponentId, x.AmountApplied)).ToArray(),
+                    bankReference: req.BankReference);
                 payment.PreparedBy = UserId;
                 await _db.SaveChangesAsync();
                 return Ok(payment);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpGet("payments")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetPayments([FromQuery] int? year, CancellationToken ct)
+        {
+            var query = _db.ApPayments.Where(x => x.CompanyId == CompanyId);
+            if (year.HasValue) query = query.Where(x => x.PaymentDate.Year == year.Value);
+            return Ok(await query.OrderByDescending(x => x.PaymentDate).Take(500).ToListAsync(ct));
         }
 
         [HttpGet("ageing")]

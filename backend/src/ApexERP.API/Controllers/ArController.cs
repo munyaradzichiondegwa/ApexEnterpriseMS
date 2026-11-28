@@ -11,10 +11,12 @@ using Microsoft.EntityFrameworkCore;
 namespace ApexERP.API.Controllers
 {
     public record CreateArInvoiceRequest(Guid CustomerId, DateTime InvoiceDate, string Currency, decimal ExchangeRate,
-        List<ArInvoiceLineRequest> Lines, Guid VatControlAccountId, Guid? GrantId);
+        List<ArInvoiceLineRequest> Lines, Guid VatControlAccountId, Guid? GrantId, Guid? FundCentreId = null);
     public record PostArInvoiceRequest(Guid ArControlAccountId, Guid VatOutputAccountId, bool FiscaliseWithFdms = false);
+    public record SettlementComponentRequest(Guid InvoiceId, Guid? InvoiceLineId, Guid? TaxComponentId, decimal AmountApplied);
     public record ArReceiptRequest(Guid CustomerId, DateTime ReceiptDate, string Currency, decimal Amount,
-        PaymentMethod Method, string? Reference, Guid BankGlAccountId, Guid ArControlAccountId, Dictionary<Guid, decimal> Allocations);
+        PaymentMethod Method, string? Reference, Guid BankGlAccountId, Guid ArControlAccountId, Dictionary<Guid, decimal> Allocations,
+        IReadOnlyCollection<SettlementComponentRequest>? ComponentAllocations = null);
 
     public record CreateCustomerRequest(string Code, string Name, string? Email, string? Phone, string? Currency, decimal CreditLimit, Guid? ArAccountId, string? VatNo,
         int PaymentTermsDays, string? Tin = null, string? LegalName = null, string? FiscalAddress = null);
@@ -71,7 +73,7 @@ namespace ApexERP.API.Controllers
             try
             {
                 var invoice = await _ar.CreateInvoiceAsync(CompanyId, req.CustomerId, req.InvoiceDate, req.Currency,
-                    req.ExchangeRate, req.Lines, req.VatControlAccountId, req.GrantId);
+                    req.ExchangeRate, req.Lines, req.VatControlAccountId, req.GrantId, fundCentreId: req.FundCentreId);
                 return Ok(invoice);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
@@ -113,10 +115,21 @@ namespace ApexERP.API.Controllers
             try
             {
                 var receipt = await _ar.ReceiveAndAllocateAsync(CompanyId, req.CustomerId, req.ReceiptDate, req.Currency,
-                    req.Amount, req.Method, req.Reference, req.BankGlAccountId, req.ArControlAccountId, req.Allocations);
+                    req.Amount, req.Method, req.Reference, req.BankGlAccountId, req.ArControlAccountId, req.Allocations,
+                    componentAllocations: req.ComponentAllocations?.Select(x => new SettlementComponentInput(
+                        x.InvoiceId, x.InvoiceLineId, x.TaxComponentId, x.AmountApplied)).ToArray());
                 return Ok(receipt);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpGet("receipts")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetReceipts([FromQuery] int? year, CancellationToken ct)
+        {
+            var query = _db.ArReceipts.Where(x => x.CompanyId == CompanyId);
+            if (year.HasValue) query = query.Where(x => x.ReceiptDate.Year == year.Value);
+            return Ok(await query.OrderByDescending(x => x.ReceiptDate).Take(500).ToListAsync(ct));
         }
 
         [HttpGet("ageing")]

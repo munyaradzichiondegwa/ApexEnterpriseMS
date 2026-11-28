@@ -111,11 +111,13 @@ namespace ApexERP.API.Controllers
             var passwordProblem = PasswordPolicy.Validate(request.Password, request.Email);
             if (passwordProblem != null) return BadRequest(new { error = passwordProblem });
             using var scope = _db.SystemAccessScope("onboarding: accept company user invitation");
+            await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)));
             var invitation = await _db.CompanyUserInvitations.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
             if (invitation is null || invitation.AcceptedAt.HasValue || invitation.ExpiresAt <= DateTime.UtcNow ||
                 !string.Equals(invitation.Email, request.Email.Trim(), StringComparison.OrdinalIgnoreCase))
                 return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+            await _db.AcquireTenantCapacityLockAsync(invitation.TenantId, "seat-limit", ct);
             if (await _db.Users.IgnoreQueryFilters().AnyAsync(x => x.Email == invitation.Email, ct))
                 return Conflict(new { error = "An account with this email already exists." });
             var company = await _db.Companies.IgnoreQueryFilters().SingleOrDefaultAsync(
@@ -137,19 +139,36 @@ namespace ApexERP.API.Controllers
                 .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == tenant.Id && x.IsActive),
                     m => m.CompanyId, x => x.Id, (m,x) => new { m.UserId, m.IsActive })
                 .Where(x => x.IsActive).Select(x => x.UserId).Distinct().CountAsync(ct);
-            if (activeSeats >= seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been reached.", seatLimit });
+            var pendingSeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == tenant.Id && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+            var pendingAdminSeats = await _db.TenantAdministratorInvitations.CountAsync(x => x.TenantId == tenant.Id && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+            if (activeSeats + pendingSeats + pendingAdminSeats > seatLimit) return StatusCode(402, new { error = "The subscription seat limit has been exceeded by current reservations.", seatLimit });
+
+            var claimedAt = DateTime.UtcNow;
+            var claimed = await _db.CompanyUserInvitations
+                .Where(x => x.Id == invitation.Id && x.AcceptedAt == null && x.ExpiresAt > claimedAt)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.AcceptedAt, claimedAt), ct);
+            if (claimed != 1) return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+            invitation.AcceptedAt = claimedAt;
 
             var user = new User { CompanyId = company.Id, Email = invitation.Email,
                 PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
                 LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true };
-            _db.Users.Add(user);
-            var existingMemberships = await _db.CompanyMemberships.IgnoreQueryFilters().CountAsync(x => x.UserId == user.Id && x.IsActive, ct);
-            _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
-                MembershipRole = role.Name, RoleId = role.Id, IsDefault = existingMemberships == 0,
-                IsActive = true, ValidFrom = DateTime.UtcNow });
-            invitation.AcceptedAt = DateTime.UtcNow;
-            invitation.AcceptedUserId = user.Id;
-            await _db.SaveChangesAsync(ct);
+            try
+            {
+                _db.Users.Add(user);
+                await _db.SaveChangesAsync(ct);
+                _db.CompanyMemberships.Add(new CompanyMembership { CompanyId = company.Id, UserId = user.Id,
+                    MembershipRole = role.Name, RoleId = role.Id, IsDefault = true,
+                    IsActive = true, ValidFrom = DateTime.UtcNow });
+                invitation.AcceptedUserId = user.Id;
+                await _db.SaveChangesAsync(ct);
+                if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
+            }
+            catch
+            {
+                if (capacityTransaction is not null) await capacityTransaction.RollbackAsync(ct);
+                throw;
+            }
             var login = await _auth.IssueTokensAsync(user, Ip, null, ct);
             return Ok(Deliver(login));
         }
@@ -203,7 +222,7 @@ namespace ApexERP.API.Controllers
                 var result = await _auth.IssueTokensForCompanyAsync(CurrentUserId, request.CompanyId, Ip, null, ct);
                 return Ok(Deliver(result));
             }
-            catch (UnauthorizedAccessException ex) { return Forbid(); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
         }
 
         private Guid CurrentUserId => Guid.Parse((User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))!.Value);

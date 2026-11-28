@@ -64,6 +64,8 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<JournalLine> JournalLines => Set<JournalLine>();
         public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
         public DbSet<TaxCode> TaxCodes => Set<TaxCode>();
+        public DbSet<TaxAccountMapping> TaxAccountMappings => Set<TaxAccountMapping>();
+        public DbSet<InvoiceTaxComponent> InvoiceTaxComponents => Set<InvoiceTaxComponent>();
         public DbSet<PayeTaxBand> PayeTaxBands => Set<PayeTaxBand>();
         public DbSet<DividendDeclaration> DividendDeclarations => Set<DividendDeclaration>();
         public DbSet<FinancialStatementNote> FinancialStatementNotes => Set<FinancialStatementNote>();
@@ -78,6 +80,8 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<ApInvoice> ApInvoices => Set<ApInvoice>();
         public DbSet<ApInvoiceLine> ApInvoiceLines => Set<ApInvoiceLine>();
         public DbSet<ApPayment> ApPayments => Set<ApPayment>();
+        public DbSet<ZimbabweDswtWithholdingRecord> ZimbabweDswtWithholdingRecords => Set<ZimbabweDswtWithholdingRecord>();
+        public DbSet<ZimbabweDswtFiling> ZimbabweDswtFilings => Set<ZimbabweDswtFiling>();
         public DbSet<ApPaymentAllocation> ApPaymentAllocations => Set<ApPaymentAllocation>();
         public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
         public DbSet<BankTransaction> BankTransactions => Set<BankTransaction>();
@@ -171,7 +175,25 @@ namespace ApexERP.Infrastructure.Data
 
         // Public Sector & Government
         public DbSet<FundCentre> FundCentres => Set<FundCentre>();
+        public DbSet<PublicSectorBudgetAllocation> PublicSectorBudgetAllocations => Set<PublicSectorBudgetAllocation>();
+        public DbSet<PublicSectorBudgetVersion> PublicSectorBudgetVersions => Set<PublicSectorBudgetVersion>();
+        public DbSet<PublicSectorBudgetVersionLine> PublicSectorBudgetVersionLines => Set<PublicSectorBudgetVersionLine>();
+        public DbSet<PublicSectorBudgetReconciliation> PublicSectorBudgetReconciliations => Set<PublicSectorBudgetReconciliation>();
+        public DbSet<PublicSectorBudgetExecutionActual> PublicSectorBudgetExecutionActuals => Set<PublicSectorBudgetExecutionActual>();
+        public DbSet<PublicSectorCashPeriodAttestation> PublicSectorCashPeriodAttestations => Set<PublicSectorCashPeriodAttestation>();
+        public DbSet<PublicSectorExpectedCashSource> PublicSectorExpectedCashSources => Set<PublicSectorExpectedCashSource>();
+        public DbSet<PublicSectorCashSourceSubmission> PublicSectorCashSourceSubmissions => Set<PublicSectorCashSourceSubmission>();
+        public DbSet<PublicSectorCashSourceReconciliationLine> PublicSectorCashSourceReconciliationLines => Set<PublicSectorCashSourceReconciliationLine>();
+        public DbSet<PublicSectorExpectedCashSourceRegisterAttestation> PublicSectorExpectedCashSourceRegisterAttestations => Set<PublicSectorExpectedCashSourceRegisterAttestation>();
+        public DbSet<PublicSectorBudgetVarianceExplanation> PublicSectorBudgetVarianceExplanations => Set<PublicSectorBudgetVarianceExplanation>();
+        public DbSet<PublicSectorTaxBudgetPolicy> PublicSectorTaxBudgetPolicies => Set<PublicSectorTaxBudgetPolicy>();
+        public DbSet<SettlementComponentAllocation> SettlementComponentAllocations => Set<SettlementComponentAllocation>();
         public DbSet<Commitment> Commitments => Set<Commitment>();
+        public DbSet<ModifiedCashRecognitionPolicy> ModifiedCashRecognitionPolicies => Set<ModifiedCashRecognitionPolicy>();
+        public DbSet<ModifiedCashRecognitionMapping> ModifiedCashRecognitionMappings => Set<ModifiedCashRecognitionMapping>();
+        public DbSet<ModifiedCashRecognitionLedgerEvent> ModifiedCashRecognitionLedgerEvents => Set<ModifiedCashRecognitionLedgerEvent>();
+        public DbSet<BankStatementImportBatch> BankStatementImportBatches => Set<BankStatementImportBatch>();
+        public DbSet<BankStatementImportedTransaction> BankStatementImportedTransactions => Set<BankStatementImportedTransaction>();
         public DbSet<TenderNotice> TenderNotices => Set<TenderNotice>();
         public DbSet<TenderBid> TenderBids => Set<TenderBid>();
         public DbSet<AssetVerificationBatch> AssetVerificationBatches => Set<AssetVerificationBatch>();
@@ -228,6 +250,7 @@ namespace ApexERP.Infrastructure.Data
             // Enterprise platform constraints. Platform catalogue/audit rows are deliberately
             // outside tenant query filters and must only be exposed through platform-admin policies.
             modelBuilder.Entity<OrganisationalBranch>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique();
+            modelBuilder.Entity<Department>().Property(x => x.IsActive).HasDefaultValue(true);
             modelBuilder.Entity<Department>().HasIndex(x => new { x.CompanyId, x.BranchId });
             modelBuilder.Entity<CostCentre>().HasIndex(x => new { x.CompanyId, x.BranchId });
             modelBuilder.Entity<CompanyMembership>().HasIndex(x => new { x.CompanyId, x.UserId }).IsUnique();
@@ -273,8 +296,11 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PlatformAuditEvent>().Property(x => x.DetailsJson).HasColumnType("jsonb");
             modelBuilder.Entity<TenantOperationalCheck>().Property(x => x.DetailsJson).HasColumnType("jsonb");
 
-            // Explicitly model every new FK created by the enterprise platform migration.
-            // Restrict prevents tenant/company/user deletion from cascading into audit or access records.
+            // Explicitly model every FK created by the enterprise platform migration.
+            modelBuilder.Entity<WorkflowRequest>().HasOne<FundCentre>().WithMany()
+                .HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict);
+                        modelBuilder.Entity<WorkflowApproval>().HasOne<Company>().WithMany()
+                .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<OrganisationalBranch>().HasOne<Company>().WithMany()
                 .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<OrganisationalBranch>().HasOne<OrganisationalBranch>().WithMany()
@@ -348,6 +374,32 @@ namespace ApexERP.Infrastructure.Data
             }
 
             // ---- Unique/business indexes ----
+            modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.PaymentReference }).IsUnique();
+            modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.ApPaymentId })
+                .IsUnique().HasFilter("\"ApPaymentId\" IS NOT NULL");
+            modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.BankStatementTransactionId })
+                .IsUnique().HasFilter("\"BankStatementTransactionId\" IS NOT NULL");
+            modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_ZimbabweDswtWithholdingRecords_Amounts",
+                    "\"GrossPaymentAmount\" > 0 AND \"WithholdingRate\" > 0 AND \"WithheldAmount\" > 0 AND \"SupplierRemittanceAmount\" >= 0 AND \"GrossPaymentAmount\" = \"WithheldAmount\" + \"SupplierRemittanceAmount\"");
+                t.HasCheckConstraint("CK_ZimbabweDswtWithholdingRecords_TaxPeriod",
+                    "\"TaxPeriodYear\" BETWEEN 2026 AND 9999 AND \"TaxPeriodMonth\" BETWEEN 1 AND 12");
+            });
+            modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.TaxPeriodYear, x.TaxPeriodMonth, x.Status });
+            modelBuilder.Entity<ZimbabweDswtFiling>().HasIndex(x => new { x.CompanyId, x.TaxYear, x.TaxPeriod, x.ReturnVersion }).IsUnique();
+            modelBuilder.Entity<ZimbabweDswtFiling>().HasIndex(x => new { x.CompanyId, x.IdempotencyKey }).IsUnique();
+            modelBuilder.Entity<ZimbabweDswtFiling>().HasIndex(x => new { x.CompanyId, x.SubmissionReference })
+                .IsUnique().HasFilter("\"SubmissionReference\" IS NOT NULL");
+            modelBuilder.Entity<ZimbabweDswtFiling>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_ZimbabweDswtFilings_Period",
+                    "\"TaxYear\" >= 2026 AND \"TaxPeriod\" BETWEEN 1 AND 12 AND \"ReturnVersion\" >= 1");
+                t.HasCheckConstraint("CK_ZimbabweDswtFilings_Amounts",
+                    "\"TaxableIncome\" >= 0 AND \"TaxAmount\" >= 0 AND \"PaymentCount\" >= 0");
+                t.HasCheckConstraint("CK_ZimbabweDswtFilings_Hash",
+                    "char_length(\"PayloadSha256\") = 64 AND char_length(\"IdempotencyKey\") = 64");
+            });
             modelBuilder.Entity<User>().HasIndex(u => new { u.CompanyId, u.Email }).IsUnique();
             modelBuilder.Entity<GlAccount>().HasIndex(a => new { a.CompanyId, a.Code }).IsUnique();
             modelBuilder.Entity<Customer>().HasIndex(c => new { c.CompanyId, c.Code }).IsUnique();
@@ -362,12 +414,86 @@ namespace ApexERP.Infrastructure.Data
             // A journal can be reversed at most once: no two entries may reverse the same original
             // (PostgreSQL permits many NULLs in a unique index, so ordinary entries are unaffected).
             modelBuilder.Entity<JournalEntry>().HasIndex(j => j.ReversalOfId).IsUnique();
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => x.CashSourceSubmissionId)
+                .HasDatabaseName("IX_CashSourceReconciliationLines_Submission");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId })
+                .IsUnique().HasFilter("\"IsExcluded\" = TRUE")
+                .HasDatabaseName("UX_CashSourceReconciliationLine_Exclusion");
+            modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
+                .HasIndex(x => x.BudgetVersionId)
+                .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersionId");
+            modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId })
+                .HasDatabaseName("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion");
+            modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.Purpose, x.TaxCodeId, x.VersionNumber }).IsUnique();
+            modelBuilder.Entity<TaxAccountMapping>().HasIndex(x => new { x.CompanyId, x.Purpose, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo }).HasDatabaseName("IX_TaxAccountMappings_Effective");
+            modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.InvoiceKind, x.InvoiceId, x.JournalLineId, x.InvoiceLineId }).IsUnique();
+            modelBuilder.Entity<InvoiceTaxComponent>().HasIndex(x => new { x.CompanyId, x.TaxAccountMappingId, x.InvoiceId });
+            modelBuilder.Entity<InvoiceTaxComponent>().Property(x => x.InvoiceKind).HasMaxLength(2);
+            modelBuilder.Entity<InvoiceTaxComponent>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_InvoiceTaxComponents_Amounts", "\"TaxableBase\" >= 0 AND \"Rate\" >= 0 AND \"Amount\" > 0");
+                t.HasCheckConstraint("CK_InvoiceTaxComponents_Kind", "\"InvoiceKind\" IN ('AR','AP')");
+                t.HasCheckConstraint("CK_InvoiceTaxComponents_TaxCode",
+                    "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
+            });
+            modelBuilder.Entity<SettlementComponentAllocation>().Property(x => x.SettlementKind).HasMaxLength(2);
+            modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.VersionNumber }).IsUnique();
+            modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo }).HasDatabaseName("IX_PublicSectorTaxBudgetPolicies_Effective");
+            modelBuilder.Entity<SettlementComponentAllocation>().HasIndex(x => new { x.CompanyId, x.SettlementKind, x.SettlementAllocationId, x.InvoiceLineId, x.TaxComponentId }).IsUnique().HasDatabaseName("IX_SettlementComponentAllocations_Allocation");
+            modelBuilder.Entity<SettlementComponentAllocation>().HasIndex(x => x.TaxComponentId).HasDatabaseName("IX_SettlementComponentAllocations_TaxComponentId");
+            modelBuilder.Entity<SettlementComponentAllocation>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_SettlementComponentAllocations_Component",
+                    "((\"ComponentKind\" = 0 AND \"InvoiceLineId\" IS NOT NULL AND \"TaxComponentId\" IS NULL) OR (\"ComponentKind\" = 1 AND \"InvoiceLineId\" IS NULL AND \"TaxComponentId\" IS NOT NULL))");
+                t.HasCheckConstraint("CK_SettlementComponentAllocations_Amount", "\"AmountApplied\" > 0");
+                t.HasCheckConstraint("CK_SettlementComponentAllocations_TaxRemittance",
+                    "\"SettlementKind\" <> 'TX' OR \"ComponentKind\" = 1");
+            });
+            modelBuilder.Entity<TaxAccountMapping>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_TaxAccountMappings_Version", "\"VersionNumber\" > 0");
+                t.HasCheckConstraint("CK_TaxAccountMappings_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                t.HasCheckConstraint("CK_TaxAccountMappings_Purpose",
+                    "((\"Purpose\" IN ('AR-VAT-OUTPUT','AP-VAT-INPUT') AND \"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"Purpose\" = 'AP-WHT-PAYABLE' AND \"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
+            });
+            modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Version", "\"VersionNumber\" > 0");
+                t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Period", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+                t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_Separate", "\"Treatment\" <> 2 OR \"BudgetGlAccountId\" IS NOT NULL");
+                t.HasCheckConstraint("CK_PublicSectorTaxBudgetPolicies_TaxCode",
+                    "((\"TaxType\" = 0 AND \"TaxCodeId\" IS NOT NULL) OR (\"TaxType\" = 1 AND \"TaxCodeId\" IS NULL))");
+            });
+            modelBuilder.Entity<SettlementComponentAllocation>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP','TX')");
+            });
+            modelBuilder.Entity<PublicSectorBudgetVarianceExplanation>()
+                 .HasIndex(x => new { x.CompanyId, x.BudgetVersionLineId })
+                .HasDatabaseName("IX_PublicSectorBudgetVarianceExplanation_Line");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId, x.BudgetExecutionActualId })
+                .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => x.BudgetExecutionActualId)
+                .HasDatabaseName("IX_PublicSectorCashSourceReconciliationLines_BudgetExecutionActualId");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.BudgetExecutionActualId }).IsUnique()
+                .HasFilter("\"BudgetExecutionActualId\" IS NOT NULL")
+                .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
             // One accounting period per company per month (guards concurrent first-posting races).
             modelBuilder.Entity<AccountingPeriod>().HasIndex(p => new { p.CompanyId, p.Year, p.PeriodNo }).IsUnique();
             // An AR invoice is mirrored into the counterparty's books at most once.
             modelBuilder.Entity<IntercompanyTransaction>().HasIndex(t => t.SourceArInvoiceId).IsUnique();
             modelBuilder.Entity<ExceptionItem>().HasIndex(e => new { e.CompanyId, e.Status, e.Category });
             // Ledger lines: non-negative amounts, one side only, strictly positive FX rate.
+            modelBuilder.Entity<Commitment>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_Commitments_RealisedAmount", "\"RealisedAmount\" >= 0 AND \"RealisedAmount\" <= \"Amount\"");
+            });
             modelBuilder.Entity<JournalLine>().ToTable(t =>
             {
                 t.HasCheckConstraint("CK_JournalLines_Amounts",
@@ -376,6 +502,43 @@ namespace ApexERP.Infrastructure.Data
             });
 
             // ---- Relationships (delete behaviour Restrict to protect financial history) ----
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_CashSourceReconciliationLine_Amounts",
+                    "(\"IsExcluded\" = TRUE AND \"BudgetExecutionActualId\" IS NULL AND \"AllocatedAmount\" = 0 AND length(trim(\"ExclusionReason\")) > 0) OR (\"IsExcluded\" = FALSE AND \"BudgetExecutionActualId\" IS NOT NULL AND \"AllocatedAmount\" > 0 AND \"ExclusionReason\" IS NULL)");
+                t.HasCheckConstraint("CK_CashSourceReconciliationLine_SourceAmount", "\"SourceAmount\" > 0");
+            });
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasOne<PublicSectorCashSourceSubmission>().WithMany()
+                .HasForeignKey(x => x.CashSourceSubmissionId).OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_CashSourceReconciliationLine_Submission");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasOne<PublicSectorBudgetExecutionActual>().WithMany()
+                .HasForeignKey(x => x.BudgetExecutionActualId).OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_CashSourceReconciliationLine_Actual");
+
+            modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_ExpectedCashSourceRegisterAttestation_Count", "\"ExpectedSourceCount\" > 0");
+            });
+            modelBuilder.Entity<PublicSectorExpectedCashSourceRegisterAttestation>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany()
+                .HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_ExpectedCashSourceRegisterAttestation_BudgetVersion");
+
+            modelBuilder.Entity<PublicSectorBudgetVarianceExplanation>().ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_PublicSectorBudgetVarianceExplanation_Amount", "\"VarianceAmount\" <> 0");
+            });
+            modelBuilder.Entity<PublicSectorBudgetVarianceExplanation>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany()
+                .HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_PublicSectorBudgetVarianceExplanation_BudgetVersion");
+            modelBuilder.Entity<PublicSectorBudgetVarianceExplanation>()
+                .HasOne<PublicSectorBudgetVersionLine>().WithMany()
+                .HasForeignKey(x => x.BudgetVersionLineId).OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_PublicSectorBudgetVarianceExplanation_BudgetLine");
+
             modelBuilder.Entity<JournalEntry>()
                 .HasMany(j => j.Lines)
                 .WithOne(l => l.JournalEntry!)
@@ -412,6 +575,8 @@ namespace ApexERP.Infrastructure.Data
                 .HasForeignKey(l => l.SalesOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            modelBuilder.Entity<Vendor>().Property(v => v.IsBlacklisted).HasDefaultValue(false);
+            modelBuilder.Entity<PayrollRun>().Property(p => p.Currency).HasDefaultValue("USD");
             modelBuilder.Entity<PayrollRun>()
                 .HasMany(p => p.Lines)
                 .WithOne()
@@ -435,6 +600,7 @@ namespace ApexERP.Infrastructure.Data
                     (!m.ValidTo.HasValue || m.ValidTo > DateTime.UtcNow)))));
             ApplyTenantFilter<AuditLogEntry>(modelBuilder);
             ApplyTenantFilter<WorkflowRequest>(modelBuilder);
+            ApplyTenantFilter<WorkflowApproval>(modelBuilder);
             ApplyTenantFilter<GlAccount>(modelBuilder);
             ApplyTenantFilter<AccountingPeriod>(modelBuilder);
             ApplyTenantFilter<CostCentre>(modelBuilder);
@@ -442,6 +608,8 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<JournalEntry>(modelBuilder);
             ApplyTenantFilter<ExchangeRate>(modelBuilder);
             ApplyTenantFilter<TaxCode>(modelBuilder);
+            ApplyTenantFilter<TaxAccountMapping>(modelBuilder);
+            ApplyTenantFilter<InvoiceTaxComponent>(modelBuilder);
             ApplyTenantFilter<PayeTaxBand>(modelBuilder);
             ApplyTenantFilter<Customer>(modelBuilder);
             ApplyTenantFilter<ArInvoice>(modelBuilder);
@@ -449,6 +617,7 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<Supplier>(modelBuilder);
             ApplyTenantFilter<ApInvoice>(modelBuilder);
             ApplyTenantFilter<ApPayment>(modelBuilder);
+            ApplyTenantFilter<ZimbabweDswtWithholdingRecord>(modelBuilder);
             ApplyTenantFilter<BankAccount>(modelBuilder);
             ApplyTenantFilter<BankTransaction>(modelBuilder);
             ApplyTenantFilter<Warehouse>(modelBuilder);
@@ -481,7 +650,25 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<IntercompanyTransaction>(modelBuilder);
             ApplyTenantFilter<NettingBatch>(modelBuilder);
             ApplyTenantFilter<FundCentre>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetAllocation>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetVersion>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetVersionLine>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetReconciliation>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetExecutionActual>(modelBuilder);
+            ApplyTenantFilter<PublicSectorCashPeriodAttestation>(modelBuilder);
+            ApplyTenantFilter<PublicSectorExpectedCashSource>(modelBuilder);
+            ApplyTenantFilter<PublicSectorCashSourceSubmission>(modelBuilder);
+            ApplyTenantFilter<PublicSectorCashSourceReconciliationLine>(modelBuilder);
+            ApplyTenantFilter<PublicSectorExpectedCashSourceRegisterAttestation>(modelBuilder);
+            ApplyTenantFilter<PublicSectorBudgetVarianceExplanation>(modelBuilder);
+            ApplyTenantFilter<PublicSectorTaxBudgetPolicy>(modelBuilder);
+            ApplyTenantFilter<SettlementComponentAllocation>(modelBuilder);
             ApplyTenantFilter<Commitment>(modelBuilder);
+            ApplyTenantFilter<ModifiedCashRecognitionPolicy>(modelBuilder);
+            ApplyTenantFilter<ModifiedCashRecognitionMapping>(modelBuilder);
+            ApplyTenantFilter<ModifiedCashRecognitionLedgerEvent>(modelBuilder);
+            ApplyTenantFilter<BankStatementImportBatch>(modelBuilder);
+            ApplyTenantFilter<BankStatementImportedTransaction>(modelBuilder);
             ApplyTenantFilter<TenderNotice>(modelBuilder);
             ApplyTenantFilter<AssetVerificationBatch>(modelBuilder);
             ApplyTenantFilter<AssetRevaluation>(modelBuilder);
@@ -528,6 +715,7 @@ namespace ApexERP.Infrastructure.Data
             // ---- Controls & automation: relationships and integrity indexes ----
             // Existing rows must keep working after the migration: accounts stay postable, existing invoices need no match.
             // (EF Core 8 sends an explicit false even when the column default is true.)
+            modelBuilder.Entity<GlAccount>().Property(a => a.IsMonetary).HasDefaultValue(false);
             modelBuilder.Entity<GlAccount>().Property(a => a.IsPostable).HasDefaultValue(true);
             modelBuilder.Entity<ApInvoice>().Property(i => i.MatchStatus).HasDefaultValue("NotRequired");
             modelBuilder.Entity<IdempotencyRecord>().HasIndex(r => new { r.CompanyId, r.Scope, r.Key }).IsUnique();
@@ -594,6 +782,261 @@ namespace ApexERP.Infrastructure.Data
 
             // Unique business keys for the new modules
             modelBuilder.Entity<FundCentre>().HasIndex(f => new { f.CompanyId, f.Code, f.FinancialYear }).IsUnique();
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasIndex(a => new { a.CompanyId, a.FundCentreId, a.GlAccountId, a.CostCentreId, a.FinancialYear })
+                .IsUnique().HasFilter("\"CostCentreId\" IS NOT NULL")
+                .HasDatabaseName("UX_PublicSectorBudgetAllocation_Dimension");
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasIndex(a => new { a.CompanyId, a.FundCentreId, a.GlAccountId, a.FinancialYear })
+                .IsUnique().HasFilter("\"CostCentreId\" IS NULL")
+                .HasDatabaseName("UX_PublicSectorBudgetAllocation_Unassigned");
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasCheckConstraint("CK_PublicSectorBudgetAllocations_Amount", "\"Amount\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetVersion>()
+                .HasIndex(x => new { x.CompanyId, x.FinancialYear, x.Kind, x.VersionNumber }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorBudgetVersion_Sequence");
+            modelBuilder.Entity<PublicSectorBudgetVersion>()
+                .HasCheckConstraint("CK_PublicSectorBudgetVersion_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+            modelBuilder.Entity<PublicSectorBudgetVersion>()
+                .HasCheckConstraint("CK_PublicSectorBudgetVersion_Sequence", "\"VersionNumber\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetVersion>()
+                .HasCheckConstraint("CK_PublicSectorBudgetVersion_AmendmentNature",
+                    "\"AmendmentNature\" IS NULL OR \"AmendmentNature\" IN (0, 1, 2)");
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.LineNumber }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorBudgetVersionLine_Number");
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasCheckConstraint("CK_PublicSectorBudgetVersionLine_Amount", "\"Amount\" >= 0");
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany(x => x.Lines).HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetVersionLine>()
+                .HasOne<CostCentre>().WithMany().HasForeignKey(x => x.CostCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<ArInvoiceLine>()
+                .HasOne<CostCentre>().WithMany().HasForeignKey(x => x.CostCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<ApInvoiceLine>()
+                .HasOne<CostCentre>().WithMany().HasForeignKey(x => x.CostCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetReconciliation>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.StatementPeriodStart, x.StatementPeriodEnd, x.StatementEntityScope, x.Type, x.StatementSection, x.SourceFingerprint }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorBudgetRecon_SourceScope");
+            modelBuilder.Entity<PublicSectorBudgetReconciliation>().Property(x => x.SourceFingerprint).HasMaxLength(128);
+            modelBuilder.Entity<PublicSectorBudgetReconciliation>()
+                .HasCheckConstraint("CK_PublicSectorBudgetRecon_StatementPeriod",
+                    "\"StatementPeriodStart\" IS NULL OR \"StatementPeriodEnd\" IS NULL OR \"StatementPeriodEnd\" > \"StatementPeriodStart\"");
+            modelBuilder.Entity<PublicSectorBudgetReconciliation>()
+                .HasCheckConstraint("CK_PublicSectorBudgetRecon_NonZero",
+                    "(\"IsNoDifferenceAttestation\" = TRUE AND \"RevenueAmount\" = 0 AND \"ExpenseAmount\" = 0 AND \"OperatingAmount\" = 0 AND \"InvestingAmount\" = 0 AND \"FinancingAmount\" = 0) OR (\"IsNoDifferenceAttestation\" = FALSE AND (\"RevenueAmount\" <> 0 OR \"ExpenseAmount\" <> 0 OR \"OperatingAmount\" <> 0 OR \"InvestingAmount\" <> 0 OR \"FinancingAmount\" <> 0))");
+            modelBuilder.Entity<ModifiedCashRecognitionPolicy>().Property(x => x.PolicyReference).HasMaxLength(160);
+            modelBuilder.Entity<ModifiedCashRecognitionMapping>().Property(x => x.SourceEventKind).HasMaxLength(80);
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>().Property(x => x.SourceEventKind).HasMaxLength(80);
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>().Property(x => x.EvidenceReference).HasMaxLength(1000);
+            modelBuilder.Entity<ModifiedCashRecognitionPolicy>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.VersionNumber }).IsUnique()
+                .HasDatabaseName("UX_ModifiedCashPolicy_Version");
+            modelBuilder.Entity<ModifiedCashRecognitionPolicy>()
+                .HasCheckConstraint("CK_ModifiedCashPolicy_Period",
+                    "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"")
+                .HasCheckConstraint("CK_ModifiedCashPolicy_ReportingPeriod",
+                    "\"ReportingPeriodEnd\" > \"ReportingPeriodStart\"")
+                .HasCheckConstraint("CK_ModifiedCashPolicy_Window", "\"PostPeriodRecognitionWindowDays\" >= 0")
+                .HasCheckConstraint("CK_ModifiedCashPolicy_Version", "\"VersionNumber\" > 0");
+            modelBuilder.Entity<ModifiedCashRecognitionPolicy>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashPolicy_BudgetVersion");
+            modelBuilder.Entity<ModifiedCashRecognitionMapping>()
+                .HasIndex(x => new { x.CompanyId, x.PolicyId, x.SourceEventKind }).IsUnique()
+                .HasDatabaseName("UX_ModifiedCashMapping_EventKind");
+            modelBuilder.Entity<ModifiedCashRecognitionMapping>()
+                .HasOne<ModifiedCashRecognitionPolicy>().WithMany().HasForeignKey(x => x.PolicyId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashMapping_Policy");
+            modelBuilder.Entity<ModifiedCashRecognitionMapping>()
+                .HasOne<PublicSectorBudgetVersionLine>().WithMany().HasForeignKey(x => x.BudgetVersionLineId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashMapping_BudgetLine");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasIndex(x => new { x.CompanyId, x.SourceEventId, x.EventKind }).IsUnique()
+                .HasDatabaseName("UX_ModifiedCashLedger_SourceEvent");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasIndex(x => x.OriginalEventId).IsUnique().HasFilter("\"OriginalEventId\" IS NOT NULL AND \"EventKind\" = 2")
+                .HasDatabaseName("UX_ModifiedCashLedger_OneReversal");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasIndex(x => new { x.CompanyId, x.CommitmentId, x.Status, x.EventDate })
+                .HasDatabaseName("IX_ModifiedCashLedger_CommitmentStatusDate");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasCheckConstraint("CK_ModifiedCashLedger_Amount", "\"Amount\" > 0");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasOne<ModifiedCashRecognitionPolicy>().WithMany().HasForeignKey(x => x.PolicyId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashLedger_Policy");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasOne<Commitment>().WithMany().HasForeignKey(x => x.CommitmentId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashLedger_Commitment");
+            modelBuilder.Entity<ModifiedCashRecognitionLedgerEvent>()
+                .HasOne<ModifiedCashRecognitionLedgerEvent>().WithMany().HasForeignKey(x => x.OriginalEventId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ModifiedCashLedger_OriginalEvent");
+
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.SourceInstitution).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.SourceAccountReference).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.StatementReference).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.OriginalFileName).HasMaxLength(255);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.MediaType).HasMaxLength(128);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.ParserVersion).HasMaxLength(64);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.Sha256).HasMaxLength(64);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .Property(x => x.AuthenticationEvidenceReference).HasMaxLength(1000);
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .HasIndex(x => new { x.CompanyId, x.BankAccountId, x.StatementReference }).IsUnique()
+                .HasDatabaseName("UX_BankStatementBatch_StatementIdentity");
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .HasIndex(x => new { x.CompanyId, x.BankAccountId, x.PeriodStart, x.PeriodEnd })
+                .HasDatabaseName("IX_BankStatementBatch_AccountPeriod");
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .HasCheckConstraint("CK_BankStatementBatch_Period", "\"PeriodEnd\" > \"PeriodStart\"")
+                .HasCheckConstraint("CK_BankStatementBatch_ByteLength", "\"ByteLength\" > 0 AND octet_length(\"OriginalBytes\") = \"ByteLength\"")
+                .HasCheckConstraint("CK_BankStatementBatch_Totals",
+                    "\"TotalDebits\" >= 0 AND \"TotalCredits\" >= 0 AND \"TransactionCount\" >= 0")
+                .HasCheckConstraint("CK_BankStatementBatch_Balance",
+                    "\"OpeningBalance\" + \"TotalCredits\" - \"TotalDebits\" = \"ClosingBalance\"")
+                .HasCheckConstraint("CK_BankStatementBatch_Authentication",
+                    "(\"Status\" = 0 AND \"AuthenticationMethod\" = 0 AND \"AuthenticatedBy\" IS NULL AND \"AuthenticatedAt\" IS NULL AND \"AuthenticationEvidenceReference\" IS NULL) OR (\"Status\" IN (1,2) AND \"AuthenticationMethod\" = 1 AND \"AuthenticatedBy\" IS NOT NULL AND \"AuthenticatedAt\" IS NOT NULL AND \"AuthenticationEvidenceReference\" IS NOT NULL) OR \"Status\" = 3")
+                .HasCheckConstraint("CK_BankStatementBatch_Completeness",
+                    "(\"Status\" = 2 AND \"CompletenessCertifiedBy\" IS NOT NULL AND \"CompletenessCertifiedAt\" IS NOT NULL) OR (\"Status\" <> 2 AND \"CompletenessCertifiedBy\" IS NULL AND \"CompletenessCertifiedAt\" IS NULL)");
+            modelBuilder.Entity<BankStatementImportBatch>()
+                .HasOne<BankAccount>().WithMany().HasForeignKey(x => x.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementBatch_BankAccount");
+
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.ExternalTransactionId).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.Description).HasMaxLength(500);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.Reference).HasMaxLength(160);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.Currency).HasMaxLength(3);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.TransactionFingerprint).HasMaxLength(64);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .Property(x => x.ExclusionReason).HasMaxLength(1000);
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasIndex(x => new { x.CompanyId, x.BankAccountId, x.ExternalTransactionId }).IsUnique()
+                .HasDatabaseName("UX_BankStatementTransaction_ExternalIdentity");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasIndex(x => new { x.CompanyId, x.BankAccountId, x.TransactionFingerprint }).IsUnique()
+                .HasDatabaseName("UX_BankStatementTransaction_Fingerprint");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasIndex(x => x.MatchedBankTransactionId).IsUnique()
+                .HasFilter("\"MatchedBankTransactionId\" IS NOT NULL")
+                .HasDatabaseName("UX_BankStatementTransaction_MatchedBankTransaction");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasIndex(x => new { x.CompanyId, x.ImportBatchId, x.Status })
+                .HasDatabaseName("IX_BankStatementTransaction_BatchStatus");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasCheckConstraint("CK_BankStatementTransaction_Amounts",
+                    "(\"Debit\" > 0 AND \"Credit\" = 0) OR (\"Credit\" > 0 AND \"Debit\" = 0)")
+                .HasCheckConstraint("CK_BankStatementTransaction_SourceLine", "\"SourceLineNumber\" > 1")
+                .HasCheckConstraint("CK_BankStatementTransaction_Identity",
+                    "length(trim(\"ExternalTransactionId\")) > 0 AND length(\"Currency\") = 3 AND length(\"TransactionFingerprint\") = 64")
+                .HasCheckConstraint("CK_BankStatementTransaction_Review",
+                    "(\"Status\" = 0 AND \"MatchedBankTransactionId\" IS NULL AND \"MatchedBy\" IS NULL AND \"MatchedAt\" IS NULL AND \"ExclusionReason\" IS NULL AND \"ExcludedBy\" IS NULL AND \"ExcludedAt\" IS NULL) OR (\"Status\" = 1 AND \"MatchedBankTransactionId\" IS NOT NULL AND \"MatchedBy\" IS NOT NULL AND \"MatchedAt\" IS NOT NULL AND \"ExclusionReason\" IS NULL AND \"ExcludedBy\" IS NULL AND \"ExcludedAt\" IS NULL) OR (\"Status\" = 2 AND \"MatchedBankTransactionId\" IS NULL AND \"MatchedBy\" IS NULL AND \"MatchedAt\" IS NULL AND length(trim(\"ExclusionReason\")) > 0 AND \"ExcludedBy\" IS NOT NULL AND \"ExcludedAt\" IS NOT NULL)");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasOne<BankStatementImportBatch>().WithMany().HasForeignKey(x => x.ImportBatchId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementTransaction_Batch");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasOne<BankAccount>().WithMany().HasForeignKey(x => x.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementTransaction_BankAccount");
+            modelBuilder.Entity<BankStatementImportedTransaction>()
+                .HasOne<BankTransaction>().WithMany().HasForeignKey(x => x.MatchedBankTransactionId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementTransaction_MatchedBankTransaction");
+
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasIndex(x => new { x.CompanyId, x.SourceKind, x.SourceRecordId, x.BudgetVersionLineId })
+                .IsUnique().HasFilter("\"ReversalOfId\" IS NULL AND \"Status\" <> 4")
+                .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_SourceAllocation");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasIndex(x => x.ReversalOfId).IsUnique()
+                .HasFilter("\"ReversalOfId\" IS NOT NULL")
+                .HasDatabaseName("UX_PublicSectorBudgetExecutionActual_OneReversal");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasIndex(x => new { x.BudgetVersionId, x.EffectiveDate });
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_Amount", "\"Amount\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_SourceAmount", "\"SourceAmount\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.SourceAmount).HasColumnType("numeric(20,6)");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.ExchangeRateToBudgetCurrency).HasColumnType("numeric(20,10)");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.ExchangeRateSource).HasMaxLength(100);
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.ExchangeRateSourceReference).HasMaxLength(500);
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .Property(x => x.ReversalReason).HasMaxLength(2000);
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_BudgetVersion");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasOne<PublicSectorBudgetVersionLine>().WithMany().HasForeignKey(x => x.BudgetVersionLineId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_BudgetLine");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasOne<FundCentre>().WithMany().HasForeignKey(x => x.FundCentreId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_FundCentre");
+            modelBuilder.Entity<PublicSectorBudgetExecutionActual>()
+                .HasOne<GlAccount>().WithMany().HasForeignKey(x => x.GlAccountId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BudgetActual_GlAccount");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasIndex(x => x.ExpectedCashSourceId)
+                .HasDatabaseName("IX_PublicSectorCashSourceSubmissions_ExpectedCashSourceId");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasIndex(x => new { x.CompanyId, x.ExpectedCashSourceId, x.SubmissionRevision }).IsUnique()
+                .HasDatabaseName("UX_PublicSectorCashSourceSubmission_Revision");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Revision", "\"SubmissionRevision\" >= 1");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_RecordCount", "\"RecordCount\" >= 0");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Currency", "char_length(\"Currency\") = 3");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasOne<PublicSectorExpectedCashSource>().WithMany().HasForeignKey(x => x.ExpectedCashSourceId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_CashSourceSubmission_ExpectedSource");
+            modelBuilder.Entity<PublicSectorCashSourceSubmission>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_CashSourceSubmission_BudgetVersion");
+            modelBuilder.Entity<PublicSectorExpectedCashSource>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.SourceKind, x.SourceCode })
+                .IsUnique().HasDatabaseName("UX_PublicSectorExpectedCashSource_Key");
+            modelBuilder.Entity<PublicSectorExpectedCashSource>()
+                .HasCheckConstraint("CK_PublicSectorExpectedCashSource_Period", "\"EffectiveTo\" > \"EffectiveFrom\"");
+            modelBuilder.Entity<PublicSectorExpectedCashSource>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_ExpectedCashSource_BudgetVersion");
+            modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
+                .HasIndex(x => new { x.CompanyId, x.BudgetVersionId, x.PeriodStart, x.PeriodEnd })
+                .IsUnique().HasDatabaseName("UX_PublicSectorCashPeriodAttestation_Period");
+            modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
+                .HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Period", "\"PeriodEnd\" > \"PeriodStart\"");
+            modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
+                .HasCheckConstraint("CK_PublicSectorCashPeriodAttestation_Counts",
+                    "\"ObservedBankTransactionCount\" >= 0 AND \"ObservedArReceiptCount\" >= 0 AND \"ObservedApPaymentCount\" >= 0");
+            modelBuilder.Entity<PublicSectorCashPeriodAttestation>()
+                .HasOne<PublicSectorBudgetVersion>().WithMany().HasForeignKey(x => x.BudgetVersionId)
+                .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_CashPeriodAttestation_BudgetVersion");
+            modelBuilder.Entity<ArInvoice>()
+                .HasOne<FundCentre>().WithMany().HasForeignKey(a => a.FundCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasOne<FundCentre>().WithMany().HasForeignKey(a => a.FundCentreId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasOne<GlAccount>().WithMany().HasForeignKey(a => a.GlAccountId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PublicSectorBudgetAllocation>()
+                .HasOne<CostCentre>().WithMany().HasForeignKey(a => a.CostCentreId).OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<Grant>().HasIndex(g => new { g.CompanyId, g.GrantNo }).IsUnique();
             modelBuilder.Entity<TenderNotice>().HasIndex(t => new { t.CompanyId, t.TenderNo }).IsUnique();
             modelBuilder.Entity<Segment>().HasIndex(s => new { s.CompanyId, s.Code }).IsUnique();
@@ -667,6 +1110,95 @@ namespace ApexERP.Infrastructure.Data
         /// </summary>
         private void EnforceLedgerImmutability()
         {
+            foreach (var entry in ChangeTracker.Entries<InvoiceTaxComponent>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted)
+                    throw new InvalidOperationException("Posted invoice tax-component provenance is immutable.");
+            }
+            foreach (var entry in ChangeTracker.Entries<SettlementComponentAllocation>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted)
+                    throw new InvalidOperationException("Cash settlement component allocations are immutable; correct them through reversal and replacement.");
+            }
+            foreach (var entry in ChangeTracker.Entries<TaxAccountMapping>())
+            {
+                if ((entry.State is EntityState.Modified or EntityState.Deleted) &&
+                    entry.Property(x => x.Status).OriginalValue == TaxConfigurationStatus.Approved)
+                    throw new InvalidOperationException("Approved tax-account mappings are immutable. Create a new effective-dated version.");
+            }
+            foreach (var entry in ChangeTracker.Entries<PublicSectorTaxBudgetPolicy>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted &&
+                    entry.Property(x => x.Status).OriginalValue == TaxConfigurationStatus.Approved)
+                    throw new InvalidOperationException("Approved tax budget policies are immutable. Create a new effective-dated version.");
+            }
+            foreach (var entry in ChangeTracker.Entries<PublicSectorBudgetReconciliation>())
+            {
+                if ((entry.State is EntityState.Modified or EntityState.Deleted) &&
+                    entry.Property(x => x.Status).OriginalValue == PublicSectorBudgetReconciliationStatus.Approved)
+                    throw new InvalidOperationException("Approved IPSAS 24 reconciliations are immutable. Reject and replace them using current source evidence.");
+            }
+            foreach (var entry in ChangeTracker.Entries<ModifiedCashRecognitionPolicy>())
+            {
+                if ((entry.State is EntityState.Modified or EntityState.Deleted) &&
+                    entry.Property(x => x.Status).OriginalValue == ModifiedCashRecognitionPolicyStatus.Approved)
+                    throw new InvalidOperationException("Approved modified-cash recognition policies are immutable. Create a new effective-dated version.");
+            }
+            foreach (var entry in ChangeTracker.Entries<ModifiedCashRecognitionMapping>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted)
+                    throw new InvalidOperationException("Modified-cash recognition mappings are immutable; create a new policy version.");
+            }
+            foreach (var entry in ChangeTracker.Entries<ModifiedCashRecognitionLedgerEvent>())
+            {
+                if (entry.State is EntityState.Modified or EntityState.Deleted &&
+                    entry.Property(x => x.Status).OriginalValue == ModifiedCashLedgerEventStatus.Certified)
+                    throw new InvalidOperationException("Certified modified-cash ledger events are immutable; correct them through a separately certified reversal.");
+            }
+            foreach (var entry in ChangeTracker.Entries<BankStatementImportBatch>())
+            {
+                if (entry.State == EntityState.Deleted)
+                    throw new InvalidOperationException("Original bank statement files and import batches are retained and cannot be deleted.");
+                if (entry.State == EntityState.Modified)
+                {
+                    var allowed = new HashSet<string>
+                    {
+                        nameof(BankStatementImportBatch.AuthenticationMethod),
+                        nameof(BankStatementImportBatch.AuthenticationEvidenceReference),
+                        nameof(BankStatementImportBatch.AuthenticationWorkflowId),
+                        nameof(BankStatementImportBatch.AuthenticatedBy),
+                        nameof(BankStatementImportBatch.AuthenticatedAt),
+                        nameof(BankStatementImportBatch.Status),
+                        nameof(BankStatementImportBatch.CompletenessCertifiedBy),
+                        nameof(BankStatementImportBatch.CompletenessCertifiedAt),
+                        nameof(BaseEntity.UpdatedAt), nameof(BaseEntity.UpdatedBy)
+                    };
+                    if (entry.Properties.Any(p => p.IsModified && !allowed.Contains(p.Metadata.Name)))
+                        throw new InvalidOperationException("Original bank statement bytes, digest and source metadata are immutable.");
+                }
+            }
+            foreach (var entry in ChangeTracker.Entries<BankStatementImportedTransaction>())
+            {
+                if (entry.State == EntityState.Deleted)
+                    throw new InvalidOperationException("Imported bank statement transactions cannot be deleted.");
+                if (entry.State == EntityState.Modified)
+                {
+                    var allowed = new HashSet<string>
+                    {
+                        nameof(BankStatementImportedTransaction.Status),
+                        nameof(BankStatementImportedTransaction.MatchedBankTransactionId),
+                        nameof(BankStatementImportedTransaction.MatchedBy),
+                        nameof(BankStatementImportedTransaction.MatchedAt),
+                        nameof(BankStatementImportedTransaction.ExclusionReason),
+                        nameof(BankStatementImportedTransaction.ExcludedBy),
+                        nameof(BankStatementImportedTransaction.ExcludedAt),
+                        nameof(BaseEntity.UpdatedAt), nameof(BaseEntity.UpdatedBy)
+                    };
+                    if (entry.Properties.Any(p => p.IsModified && !allowed.Contains(p.Metadata.Name)))
+                        throw new InvalidOperationException("Imported bank statement transaction source data is immutable.");
+                }
+            }
+
             foreach (var entry in ChangeTracker.Entries<JournalLine>())
             {
                 if (entry.State is EntityState.Modified or EntityState.Deleted)
@@ -677,6 +1209,53 @@ namespace ApexERP.Infrastructure.Data
             {
                 if (entry.State is EntityState.Modified or EntityState.Deleted)
                     throw new InvalidOperationException("The audit log is append-only and cannot be changed or deleted.");
+            }
+
+            foreach (var entry in ChangeTracker.Entries<ZimbabweDswtFiling>())
+            {
+                if (entry.State == EntityState.Deleted)
+                    throw new InvalidOperationException("DSWT filing snapshots and their evidence cannot be deleted.");
+                if (entry.State != EntityState.Modified) continue;
+
+                var allowed = new HashSet<string>
+                {
+                    nameof(ZimbabweDswtFiling.Status),
+                    nameof(ZimbabweDswtFiling.SubmittedAt), nameof(ZimbabweDswtFiling.SubmittedBy),
+                    nameof(ZimbabweDswtFiling.SubmissionReference), nameof(ZimbabweDswtFiling.SubmissionEvidenceReference),
+                    nameof(ZimbabweDswtFiling.AcknowledgedAt), nameof(ZimbabweDswtFiling.AcknowledgementReference),
+                    nameof(ZimbabweDswtFiling.AcknowledgementEvidenceReference),
+                    nameof(ZimbabweDswtFiling.PaymentConfirmedAt), nameof(ZimbabweDswtFiling.PaymentReference),
+                    nameof(ZimbabweDswtFiling.PaymentAmount), nameof(ZimbabweDswtFiling.PaymentCurrency),
+                    nameof(ZimbabweDswtFiling.PaymentEvidenceReference),
+                    nameof(BaseEntity.UpdatedAt), nameof(BaseEntity.UpdatedBy)
+                };
+                if (entry.Properties.Any(p => p.IsModified && !allowed.Contains(p.Metadata.Name)))
+                    throw new InvalidOperationException("The DSWT return payload, hash and identity are immutable after preparation.");
+
+                var original = entry.Property(x => x.Status).OriginalValue;
+                var current = entry.Property(x => x.Status).CurrentValue;
+                var expectedChanges = new HashSet<string> { nameof(BaseEntity.UpdatedAt), nameof(BaseEntity.UpdatedBy) };
+                var validTransition =
+                    (original == ZimbabweDswtFilingStatus.Prepared && current == ZimbabweDswtFilingStatus.Submitted) ||
+                    (original == ZimbabweDswtFilingStatus.Submitted &&
+                        current is ZimbabweDswtFilingStatus.Acknowledged or ZimbabweDswtFilingStatus.Rejected) ||
+                    (original == ZimbabweDswtFilingStatus.Acknowledged && current == ZimbabweDswtFilingStatus.PaymentConfirmed);
+                if (original == ZimbabweDswtFilingStatus.Prepared && current == ZimbabweDswtFilingStatus.Submitted)
+                    expectedChanges.UnionWith(new[] { nameof(ZimbabweDswtFiling.SubmittedAt), nameof(ZimbabweDswtFiling.SubmittedBy),
+                        nameof(ZimbabweDswtFiling.SubmissionReference), nameof(ZimbabweDswtFiling.SubmissionEvidenceReference), nameof(ZimbabweDswtFiling.Status) });
+                else if (original == ZimbabweDswtFilingStatus.Submitted &&
+                    current is ZimbabweDswtFilingStatus.Acknowledged or ZimbabweDswtFilingStatus.Rejected)
+                    expectedChanges.UnionWith(new[] { nameof(ZimbabweDswtFiling.AcknowledgedAt), nameof(ZimbabweDswtFiling.AcknowledgementReference),
+                        nameof(ZimbabweDswtFiling.AcknowledgementEvidenceReference), nameof(ZimbabweDswtFiling.Status) });
+                else if (original == ZimbabweDswtFilingStatus.Acknowledged && current == ZimbabweDswtFilingStatus.PaymentConfirmed)
+                    expectedChanges.UnionWith(new[] { nameof(ZimbabweDswtFiling.PaymentConfirmedAt), nameof(ZimbabweDswtFiling.PaymentReference),
+                        nameof(ZimbabweDswtFiling.PaymentAmount), nameof(ZimbabweDswtFiling.PaymentCurrency),
+                        nameof(ZimbabweDswtFiling.PaymentEvidenceReference), nameof(ZimbabweDswtFiling.Status) });
+
+                var changed = entry.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name);
+                if (!validTransition || changed.Any(name => !expectedChanges.Contains(name)))
+                    throw new InvalidOperationException(
+                        $"A DSWT filing cannot move from {original} to {current} or alter evidence outside its permitted transition.");
             }
 
             foreach (var entry in ChangeTracker.Entries<JournalEntry>())

@@ -5,6 +5,7 @@ using ApexERP.Application.Security;
 using ApexERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using ApexERP.API.Authorization;
 using ApexERP.API.Services;
@@ -20,7 +21,7 @@ namespace ApexERP.API.Controllers;
 [ApiController]
 [Route("api/platform")]
 [Authorize(AuthenticationSchemes = "PlatformBearer", Policy = "PlatformAdmin")]
-[AuthenticatedOnly]
+[ModulePermissionExempt]
 public sealed class PlatformAdministrationController : ControllerBase
 {
     private readonly ApexErpDbContext _db;
@@ -83,7 +84,7 @@ public sealed class PlatformAdministrationController : ControllerBase
         };
         var company = new Company
         {
-            TenantId = tenant.Id, Name = request.InitialCompanyName.Trim(),
+            TenantId = tenant.Id, Tenant = tenant, Name = request.InitialCompanyName.Trim(),
             BaseCurrency = (request.Currency ?? "USD").ToUpperInvariant(),
             FunctionalCurrency = (request.Currency ?? "USD").ToUpperInvariant(),
             FiscalYearStartMonth = request.FiscalYearStartMonth,
@@ -91,8 +92,10 @@ public sealed class PlatformAdministrationController : ControllerBase
         };
         _db.CustomerOrganisations.Add(tenant);
         _db.Companies.Add(company);
+        await _db.SaveChangesAsync(ct);
         var adminRole = new Role { CompanyId = company.Id, Name = "Administrator", IsSystemRole = true, PermissionsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "*" }) };
         _db.Roles.Add(adminRole);
+        await _db.SaveChangesAsync(ct);
         _db.TenantSubscriptions.Add(new TenantSubscription
         {
             TenantId = tenant.Id, PlanId = plan.Id, Status = request.TrialDays > 0 ? "Trial" : "Active",
@@ -184,6 +187,7 @@ public sealed class PlatformAdministrationController : ControllerBase
 
     [HttpPost("invitations/accept")]
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> AcceptAdministratorInvitation([FromBody] AcceptInvitationRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.Email) ||
@@ -193,11 +197,18 @@ public sealed class PlatformAdministrationController : ControllerBase
         if (passwordProblem != null) return BadRequest(new { error = passwordProblem });
 
         using var scope = _db.SystemAccessScope("onboarding: accept initial administrator invitation");
+        await using var capacityTransaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)));
         var invitation = await _db.TenantAdministratorInvitations.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
         if (invitation is null || invitation.AcceptedAt != null || invitation.ExpiresAt <= DateTime.UtcNow ||
             !string.Equals(invitation.Email, request.Email.Trim(), StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+        await _db.AcquireTenantCapacityLockAsync(invitation.TenantId, "seat-limit", ct);
+
+        var tenantIsActive = await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == invitation.TenantId && x.IsActive, ct);
+        var companyIsActive = await _db.Companies.IgnoreQueryFilters().AnyAsync(x => x.Id == invitation.CompanyId && x.TenantId == invitation.TenantId && x.IsActive, ct);
+        if (!tenantIsActive || !companyIsActive)
+            return Conflict(new { error = "The tenant or initial company is no longer active. Contact the platform administrator." });
 
         var subscription = await _db.TenantSubscriptions.Where(x => x.TenantId == invitation.TenantId).OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
         if (subscription is null || subscription.Status is not ("Active" or "Trial") ||
@@ -207,6 +218,13 @@ public sealed class PlatformAdministrationController : ControllerBase
         var plan = await _db.SubscriptionPlans.SingleAsync(x => x.Id == subscription.PlanId, ct);
         var seatLimit = subscription.SeatOverride > 0 ? subscription.SeatOverride : plan.MaxSeats;
         if (seatLimit < 1) return StatusCode(402, new { error = "The subscription has no administrator seat available." });
+        var activeSeats = await _db.CompanyMemberships.IgnoreQueryFilters().Where(x => x.IsActive)
+            .Join(_db.Companies.IgnoreQueryFilters().Where(x => x.TenantId == invitation.TenantId && x.IsActive),
+                m => m.CompanyId, c => c.Id, (m,c) => m.UserId).Distinct().CountAsync(ct);
+        var pendingCompanySeats = await _db.CompanyUserInvitations.CountAsync(x => x.TenantId == invitation.TenantId && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        var pendingAdminSeats = await _db.TenantAdministratorInvitations.CountAsync(x => x.TenantId == invitation.TenantId && x.Id != invitation.Id && x.AcceptedAt == null && x.ExpiresAt > DateTime.UtcNow, ct);
+        if (activeSeats + pendingCompanySeats + pendingAdminSeats >= seatLimit)
+            return StatusCode(402, new { error = "The subscription seat limit has been reached.", seatLimit });
         if (await _db.Users.IgnoreQueryFilters().AnyAsync(x => x.Email == invitation.Email, ct))
             return Conflict(new { error = "An account with this email already exists. Ask the platform administrator to issue a user invitation." });
 
@@ -220,18 +238,33 @@ public sealed class PlatformAdministrationController : ControllerBase
             PasswordHash = AuthService.HashPassword(request.Password), FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(), RoleId = role.Id, IsActive = true
         };
-        _db.Users.Add(user);
-        _db.CompanyMemberships.Add(new CompanyMembership
+        try
         {
-            CompanyId = invitation.CompanyId, UserId = user.Id, MembershipRole = "Administrator",
-            IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow, RoleId = role.Id
-        });
-        invitation.AcceptedAt = DateTime.UtcNow;
-        invitation.AcceptedUserId = user.Id;
-        var onboarding = await _db.TenantOnboardings.SingleAsync(x => x.TenantId == invitation.TenantId, ct);
-        onboarding.Status = "AdministratorCreated";
-        onboarding.CompletedStepsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "tenant-provisioned", "initial-company-created", "initial-administrator-created" });
-        await _db.SaveChangesAsync(ct);
+            var claimedAt = DateTime.UtcNow;
+            var claimed = await _db.TenantAdministratorInvitations
+                .Where(x => x.Id == invitation.Id && x.AcceptedAt == null && x.ExpiresAt > claimedAt)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.AcceptedAt, claimedAt), ct);
+            if (claimed != 1) return BadRequest(new { error = "Invitation is invalid, expired or already used." });
+            invitation.AcceptedAt = claimedAt;
+            _db.Users.Add(user);
+            await _db.SaveChangesAsync(ct);
+            _db.CompanyMemberships.Add(new CompanyMembership
+            {
+                CompanyId = invitation.CompanyId, UserId = user.Id, MembershipRole = "Administrator",
+                IsDefault = true, IsActive = true, ValidFrom = DateTime.UtcNow, RoleId = role.Id
+            });
+            invitation.AcceptedUserId = user.Id;
+            var onboarding = await _db.TenantOnboardings.SingleAsync(x => x.TenantId == invitation.TenantId, ct);
+            onboarding.Status = "AdministratorCreated";
+            onboarding.CompletedStepsJson = System.Text.Json.JsonSerializer.Serialize(new[] { "tenant-provisioned", "initial-company-created", "initial-administrator-created" });
+            await _db.SaveChangesAsync(ct);
+            if (capacityTransaction is not null) await capacityTransaction.CommitAsync(ct);
+        }
+        catch
+        {
+            if (capacityTransaction is not null) await capacityTransaction.RollbackAsync(ct);
+            throw;
+        }
         var login = await _auth.IssueTokensAsync(user, HttpContext.Connection.RemoteIpAddress?.ToString(), null, ct);
         var sameSite = Enum.TryParse<SameSiteMode>(_configuration["Auth:CookieSameSite"], true, out var mode) ? mode : SameSiteMode.Strict;
         Response.Cookies.Append(AuthController.RefreshCookie, login.RefreshToken, new CookieOptions
@@ -391,8 +424,8 @@ public sealed class PlatformAdministrationController : ControllerBase
         if (request.AvailabilityTargetPercent is <= 0 or > 100 || request.ResponseTargetMinutes < 1 ||
             request.ResolutionTargetMinutes < request.ResponseTargetMinutes || request.MonitoringWindowDays is < 1 or > 90)
             return BadRequest(new { error = "SLA targets are outside permitted ranges." });
-        try { using var _ = JsonDocument.Parse(request.BusinessHoursJson ?? "{}"); }
-        catch { return BadRequest(new { error = "BusinessHoursJson must be valid JSON." }); }
+        try { using var parsedHours = JsonDocument.Parse(request.BusinessHoursJson ?? "{}"); _ = TimeZoneInfo.FindSystemTimeZoneById(request.BusinessTimeZone ?? "UTC"); }
+        catch { return BadRequest(new { error = "Business hours JSON or time zone is invalid." }); }
         using var scope = _db.SystemAccessScope("platform admin: configure tenant SLA policy");
         if (!await _db.CustomerOrganisations.IgnoreQueryFilters().AnyAsync(x => x.Id == tenantId, ct)) return NotFound();
         var policy = await _db.TenantSlaPolicies.SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
@@ -428,10 +461,10 @@ public sealed class PlatformAdministrationController : ControllerBase
         var incidentMetrics = incidents.Select(x => new
         {
             x.Id, x.IncidentNumber, x.Severity, x.Status, x.Summary, x.OpenedAt, x.FirstResponseAt, x.ResolvedAt,
-            responseBreached = x.FirstResponseAt == null && now > x.OpenedAt.AddMinutes(x.ResponseTargetMinutes),
-            resolutionBreached = x.ResolvedAt == null && now > x.OpenedAt.AddMinutes(x.ResolutionTargetMinutes),
-            responseMinutes = x.FirstResponseAt.HasValue ? (double?)(x.FirstResponseAt.Value - x.OpenedAt).TotalMinutes : null,
-            resolutionMinutes = x.ResolvedAt.HasValue ? (double?)(x.ResolvedAt.Value - x.OpenedAt).TotalMinutes : null
+            responseBreached = x.FirstResponseAt == null && BusinessMinutesBetween(x.OpenedAt, now, policy.BusinessTimeZone, policy.BusinessHoursJson) > x.ResponseTargetMinutes,
+            resolutionBreached = x.ResolvedAt == null && BusinessMinutesBetween(x.OpenedAt, now, policy.BusinessTimeZone, policy.BusinessHoursJson) > x.ResolutionTargetMinutes,
+            responseMinutes = x.FirstResponseAt.HasValue ? (double?)BusinessMinutesBetween(x.OpenedAt, x.FirstResponseAt.Value, policy.BusinessTimeZone, policy.BusinessHoursJson) : null,
+            resolutionMinutes = x.ResolvedAt.HasValue ? (double?)BusinessMinutesBetween(x.OpenedAt, x.ResolvedAt.Value, policy.BusinessTimeZone, policy.BusinessHoursJson) : null
         }).ToList();
         return Ok(new { policy, windowStart = since, availabilityPercent = availability,
             availabilityTargetMet = availability.HasValue && availability.Value >= policy.AvailabilityTargetPercent,
@@ -562,11 +595,38 @@ public sealed class PlatformAdministrationController : ControllerBase
             var job = await _db.TenantLifecycleJobs.SingleOrDefaultAsync(x => x.Id == jobId, ct);
             if (job is null) return NotFound();
             if (job.Status is "Succeeded" or "Failed" or "Cancelled") return Conflict(new { error = "Lifecycle job is already terminal." });
+            TenantSubscription? renewedSubscription = null;
+            DateTime? renewalPeriodEnd = null;
+            if (job.JobType == "Renewal" && status == "Succeeded")
+            {
+                if (!root.TryGetProperty("periodEndsAt", out var periodValue) ||
+                    !DateTimeOffset.TryParse(periodValue.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedPeriod) ||
+                    parsedPeriod <= DateTimeOffset.UtcNow)
+                    return BadRequest(new { error = "A successful renewal callback must include a future periodEndsAt timestamp." });
+                renewedSubscription = await _db.TenantSubscriptions.Where(x => x.TenantId == job.TenantId)
+                    .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+                if (renewedSubscription is null) return Conflict(new { error = "Tenant subscription record is missing." });
+                renewalPeriodEnd = parsedPeriod.UtcDateTime;
+                if (root.TryGetProperty("planId", out var planValue) && Guid.TryParse(planValue.GetString(), out var planId))
+                {
+                    if (!await _db.SubscriptionPlans.AnyAsync(x => x.Id == planId && x.IsActive, ct))
+                        return BadRequest(new { error = "Renewal callback referenced an inactive plan." });
+                    renewedSubscription.PlanId = planId;
+                }
+                if (root.TryGetProperty("externalBillingReference", out var billingRef))
+                    renewedSubscription.ExternalBillingReference = billingRef.GetString();
+            }
             job.Status = status;
             if (status == "Running") job.StartedAt ??= DateTime.UtcNow;
             if (status is "Succeeded" or "Failed") job.CompletedAt = DateTime.UtcNow;
             if (root.TryGetProperty("externalJobReference", out var reference)) job.ExternalJobReference = reference.GetString();
             if (root.TryGetProperty("resultSummary", out var summary)) job.ResultSummary = summary.GetString();
+            if (renewedSubscription is not null && renewalPeriodEnd.HasValue)
+            {
+                renewedSubscription.Status = "Active"; renewedSubscription.TrialEndsAt = null;
+                renewedSubscription.CurrentPeriodEndsAt = renewalPeriodEnd.Value;
+                renewedSubscription.SuspendedAt = null; renewedSubscription.CancelledAt = null;
+            }
             await _db.SaveChangesAsync(ct);
             await AuditAsync("tenant.lifecycle-job.worker-callback", "TenantLifecycleJob", job.Id.ToString(), new { status }, ct);
             return Ok(new { job.Id, job.Status, job.CompletedAt });
@@ -605,6 +665,41 @@ public sealed class PlatformAdministrationController : ControllerBase
             .OrderByDescending(x => x.CreatedAt).Take(50).ToListAsync(ct);
         await AuditAsync("support-grant.diagnostics-accessed", "TenantSupportGrant", grant.Id.ToString(), null, ct);
         return Ok(new { grant.TenantId, grant.ExpiresAt, checks, jobs });
+    }
+
+
+    private static double BusinessMinutesBetween(DateTime startUtc, DateTime endUtc, string timeZoneId, string hoursJson)
+    {
+        if (endUtc <= startUtc) return 0;
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        var startLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(startUtc, DateTimeKind.Utc), zone);
+        var endLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(endUtc, DateTimeKind.Utc), zone);
+        var start = TimeSpan.Zero;
+        var finish = TimeSpan.FromDays(1);
+        var days = new HashSet<int>(Enumerable.Range(0, 7));
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(hoursJson) ? "{}" : hoursJson);
+            if (doc.RootElement.TryGetProperty("start", out var startValue) &&
+                TimeSpan.TryParse(startValue.GetString(), CultureInfo.InvariantCulture, out var parsedStart)) start = parsedStart;
+            if (doc.RootElement.TryGetProperty("end", out var endValue) &&
+                TimeSpan.TryParse(endValue.GetString(), CultureInfo.InvariantCulture, out var parsedEnd)) finish = parsedEnd;
+            if (doc.RootElement.TryGetProperty("days", out var dayValues) && dayValues.ValueKind == JsonValueKind.Array)
+                days = dayValues.EnumerateArray().Where(x => x.TryGetInt32(out _)).Select(x => x.GetInt32()).Where(x => x is >= 0 and <= 6).ToHashSet();
+        }
+        catch { /* Policy writes validate JSON; invalid legacy values fall back to 24/7 measurement. */ }
+        if (finish <= start) return 0;
+        var total = 0d;
+        for (var date = startLocal.Date; date <= endLocal.Date; date = date.AddDays(1))
+        {
+            if (!days.Contains((int)date.DayOfWeek)) continue;
+            var windowStart = date.Add(start);
+            var windowEnd = date.Add(finish);
+            var from = startLocal > windowStart ? startLocal : windowStart;
+            var to = endLocal < windowEnd ? endLocal : windowEnd;
+            if (to > from) total += (to - from).TotalMinutes;
+        }
+        return total;
     }
 
     private Guid CurrentActorId() => Guid.TryParse(User.FindFirst("sub")?.Value, out var id)

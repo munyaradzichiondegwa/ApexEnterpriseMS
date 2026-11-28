@@ -145,6 +145,7 @@ export default function GroupPage() {
         <div>
           <button className="btn-primary mb-4" onClick={() => loadConsolidated("")}>Run Consolidation (this company as parent)</button>
           {consolidated && (
+            <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="card">
                 <div className="flex justify-between text-sm py-1"><span className="text-slate-500">Total Assets</span><span className="font-medium">{fmt(consolidated.totalAssets)}</span></div>
@@ -159,6 +160,50 @@ export default function GroupPage() {
                   <tbody>{consolidated.lines.map((l: any, i: number) => (<tr key={i}><td>{l.code}</td><td>{l.name}</td><td className="text-right">{fmt(l.groupAmount)}</td><td className="text-right">{fmt(l.eliminatedAmount)}</td><td className="text-right font-medium">{fmt(l.consolidatedAmount)}</td></tr>))}</tbody>
                 </table>
               </div>
+            </div>
+            <div className="card mt-4 overflow-x-auto">
+              <h3 className="font-semibold mb-1">Foreign-currency translation evidence</h3>
+              <p className="text-xs text-slate-500 mb-3">Effective-date selections used to translate each foreign subsidiary, including quote direction, rate source and reference.</p>
+              {(!consolidated.rateEvidence || consolidated.rateEvidence.length === 0) ? (
+                <p className="text-sm text-slate-500">No foreign-currency translation rates were required for this consolidation.</p>
+              ) : (
+                <table className="table-base">
+                  <thead><tr><th>Company</th><th>Currency pair</th><th>Applied for</th><th>Rate date</th><th className="text-right">Quoted</th><th className="text-right">Applied</th><th>Source</th><th>Reference</th></tr></thead>
+                  <tbody>{consolidated.rateEvidence.map((r: any, i: number) => (
+                    <tr key={r.companyId + "-" + r.effectiveDate + "-" + i}>
+                      <td>{r.companyName}</td><td>{r.fromCurrency}/{r.toCurrency}</td>
+                      <td>{new Date(r.effectiveDate).toLocaleDateString()}</td><td>{new Date(r.rateDate).toLocaleDateString()}</td>
+                      <td className="text-right tabular-nums">{Number(r.quotedRate).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                      <td className="text-right tabular-nums">{Number(r.appliedRate).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                      <td>{r.rateSource}{r.isManualOverride ? " (manual override)" : ""}{r.isInverse ? " (inverse)" : " (direct)"}</td>
+                      <td className="max-w-xs truncate" title={r.sourceReference || ""}>{r.sourceReference || "—"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              )}
+            </div>
+            <div className="card mt-4 overflow-x-auto">
+              <h3 className="font-semibold mb-1">Reporting-period alignment</h3>
+              <p className="text-xs text-slate-500 mb-3">Shows whether each group company has one accounting period covering the consolidation date, ends on the reporting date and matches the parent company's reporting window.</p>
+              {(!consolidated.periodEvidence || consolidated.periodEvidence.length === 0) ? (
+                <p className="text-sm text-slate-500">No accounting-period evidence is available.</p>
+              ) : (
+                <table className="table-base">
+                  <thead><tr><th>Company</th><th>Financial year</th><th>Period</th><th>Period start</th><th>Period end</th><th>Period end aligned</th><th>Group window</th></tr></thead>
+                  <tbody>{consolidated.periodEvidence.map((p: any) => (
+                    <tr key={p.companyId}>
+                      <td>{p.companyName}</td>
+                      <td>{p.year ?? "—"}</td>
+                      <td>{p.periodNo ?? "—"}</td>
+                      <td>{p.periodStart ? new Date(p.periodStart).toLocaleDateString() : "—"}</td>
+                      <td>{p.periodEnd ? new Date(p.periodEnd).toLocaleDateString() : "—"}</td>
+                      <td className={p.isPeriodEndAligned ? "text-emerald-700 font-medium" : "text-amber-700 font-medium"}>{p.isPeriodEndAligned ? "Aligned" : p.status}</td>
+                      <td className={p.isGroupPeriodAligned ? "text-emerald-700 font-medium" : "text-amber-700 font-medium"}>{p.isGroupPeriodAligned ? "Matches parent" : "Differs / unavailable"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              )}
+            </div>
             </div>
           )}
         </div>

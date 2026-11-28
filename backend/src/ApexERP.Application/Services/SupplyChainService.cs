@@ -67,46 +67,67 @@ namespace ApexERP.Application.Services
 
         /// <summary>Records a goods receipt against an approved PO, increasing inventory quantity/value
         /// and updating PO fulfilment status (partial/fulfilled).</summary>
-        public async Task<GoodsReceipt> ReceiveGoodsAsync(Guid companyId, Guid poId, DateTime receiptDate,
+        public Task<GoodsReceipt> ReceiveGoodsAsync(Guid companyId, Guid poId, DateTime receiptDate,
             Guid? warehouseId, IEnumerable<GrnLineRequest> lines, CancellationToken ct = default)
         {
-            var po = await _db.PurchaseOrders.Include(p => p.Lines)
-                .FirstOrDefaultAsync(p => p.Id == poId && p.CompanyId == companyId, ct)
-                ?? throw new InvalidOperationException("Purchase order not found.");
-            if (po.Status is not (PurchaseOrderStatus.Approved or PurchaseOrderStatus.Partial))
-                throw new InvalidOperationException("Only approved purchase orders can receive goods.");
+            var receiptLines = lines?.ToList() ?? throw new ArgumentNullException(nameof(lines));
+            if (receiptLines.Count == 0)
+                throw new InvalidOperationException("A goods receipt must contain at least one PO line.");
 
-            var grnNo = await GenerateGrnNoAsync(companyId, ct);
-            var grn = new GoodsReceipt { CompanyId = companyId, GrnNo = grnNo, PurchaseOrderId = poId, ReceiptDate = receiptDate, WarehouseId = warehouseId };
-
-            foreach (var lr in lines)
+            return _db.InTransactionAsync(async token =>
             {
-                var poLine = po.Lines.FirstOrDefault(l => l.Id == lr.PurchaseOrderLineId)
-                    ?? throw new InvalidOperationException("PO line not found.");
-                var remainingQty = poLine.QuantityOrdered - poLine.QuantityReceived;
-                if (lr.QuantityReceived > remainingQty)
-                    throw new InvalidOperationException($"Receiving {lr.QuantityReceived} exceeds remaining ordered quantity {remainingQty}.");
+                // Serialize receipts against the same PO so concurrent GRNs cannot over-receive it.
+                await _db.AcquireTransactionLockAsync($"goods-receipt:{companyId:N}:{poId:N}", token);
+                var po = await _db.PurchaseOrders.Include(p => p.Lines)
+                    .FirstOrDefaultAsync(p => p.Id == poId && p.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Purchase order not found.");
+                if (po.Status is not (PurchaseOrderStatus.Approved or PurchaseOrderStatus.Partial))
+                    throw new InvalidOperationException("Only approved purchase orders can receive goods.");
 
-                poLine.QuantityReceived += lr.QuantityReceived;
-                grn.Lines.Add(new GoodsReceiptLine
+                var grnNo = await GenerateGrnNoAsync(companyId, token);
+                var grn = new GoodsReceipt
                 {
-                    PurchaseOrderLineId = poLine.Id,
-                    InventoryItemId = lr.InventoryItemId,
-                    QuantityReceived = lr.QuantityReceived,
-                    UnitCost = lr.UnitCost
-                });
+                    CompanyId = companyId, GrnNo = grnNo, PurchaseOrderId = poId,
+                    ReceiptDate = receiptDate, WarehouseId = warehouseId
+                };
 
-                await _inventory.ReceiveAsync(companyId, lr.InventoryItemId, warehouseId, lr.QuantityReceived,
-                    lr.UnitCost, receiptDate, MovementType.GRN, grnNo, null, ct);
-            }
+                foreach (var lr in receiptLines)
+                {
+                    if (lr.QuantityReceived <= 0m)
+                        throw new InvalidOperationException("Goods receipt quantities must be greater than zero.");
+                    if (lr.UnitCost < 0m)
+                        throw new InvalidOperationException("Goods receipt unit cost cannot be negative.");
 
-            po.Status = po.Lines.All(l => l.QuantityReceived >= l.QuantityOrdered)
-                ? PurchaseOrderStatus.Fulfilled
-                : PurchaseOrderStatus.Partial;
+                    var poLine = po.Lines.FirstOrDefault(l => l.Id == lr.PurchaseOrderLineId)
+                        ?? throw new InvalidOperationException("PO line not found.");
+                    if (poLine.InventoryItemId != lr.InventoryItemId)
+                        throw new InvalidOperationException("The received inventory item does not match the purchase order line.");
 
-            _db.GoodsReceipts.Add(grn);
-            await _db.SaveChangesAsync(ct);
-            return grn;
+                    var remainingQty = poLine.QuantityOrdered - poLine.QuantityReceived;
+                    if (lr.QuantityReceived > remainingQty)
+                        throw new InvalidOperationException($"Receiving {lr.QuantityReceived} exceeds remaining ordered quantity {remainingQty}.");
+
+                    poLine.QuantityReceived += lr.QuantityReceived;
+                    grn.Lines.Add(new GoodsReceiptLine
+                    {
+                        PurchaseOrderLineId = poLine.Id,
+                        InventoryItemId = lr.InventoryItemId,
+                        QuantityReceived = lr.QuantityReceived,
+                        UnitCost = lr.UnitCost
+                    });
+
+                    await _inventory.ReceiveAsync(companyId, lr.InventoryItemId, warehouseId, lr.QuantityReceived,
+                        lr.UnitCost, receiptDate, MovementType.GRN, grnNo, null, token);
+                }
+
+                po.Status = po.Lines.All(l => l.QuantityReceived >= l.QuantityOrdered)
+                    ? PurchaseOrderStatus.Fulfilled
+                    : PurchaseOrderStatus.Partial;
+
+                _db.GoodsReceipts.Add(grn);
+                await _db.SaveChangesAsync(token);
+                return grn;
+            }, ct);
         }
 
         private async Task<string> GeneratePoNoAsync(Guid companyId, CancellationToken ct)

@@ -90,12 +90,16 @@ namespace ApexERP.Application.Services
         public async Task<(int Status, string Message)> ReceiveWebhookAsync(Guid companyId, string provider, string body, string? timestamp, string? signature, CancellationToken ct = default)
         {
             if (body.Length > 64 * 1024) return (413, "Payload too large.");
+            var canonicalProvider = Providers.FirstOrDefault(p =>
+                p.Equals(provider, StringComparison.OrdinalIgnoreCase));
+            if (canonicalProvider == null) return (404, "Unknown integration.");
+
             IntegrationEndpoint? endpoint;
             Guid? tenantId;
             using (_db.SystemAccessScope("webhook: resolve endpoint and owning tenant before signature verification"))
             {
                 endpoint = await _db.IntegrationEndpoints.IgnoreQueryFilters()
-                    .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == provider && e.IsActive, ct);
+                    .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == canonicalProvider && e.IsActive, ct);
                 tenantId = await _db.Companies.IgnoreQueryFilters()
                     .Where(c => c.Id == companyId && c.IsActive && c.TenantId.HasValue &&
                                 c.Tenant != null && c.Tenant.IsActive)
@@ -142,46 +146,133 @@ namespace ApexERP.Application.Services
             msg.Attempts++;
             try
             {
-                if (p.Status == "Failed") { msg.Status = "Processed"; msg.LastError = "Provider reported the payment as failed; nothing posted."; }
-                else if (p.Status == "Pending") { msg.Status = "Pending"; msg.NextAttemptAt = null; }
-                else
+                // The receipt, GL journal, invoice allocation and message outcome commit together.
+                // A crash cannot leave a posted receipt with a retryable message that posts it again.
+                await _db.InTransactionAsync(async token =>
                 {
-                    var companyId = msg.CompanyId;
-                    var invoice = await _db.ArInvoices.Where(i => i.CompanyId == companyId && i.InvoiceNo == p.Reference && i.Status != InvoiceStatus.Cancelled && i.Status != InvoiceStatus.Draft).FirstOrDefaultAsync(ct)
-                        ?? throw new InvalidOperationException($"No open invoice with number '{p.Reference}'.");
-                    if (invoice.Currency != p.Currency) throw new InvalidOperationException($"Currency {p.Currency} does not match the invoice currency {invoice.Currency}.");
-                    var apply = Math.Min(p.Amount, invoice.Outstanding);
-                    if (apply <= 0) throw new InvalidOperationException("The invoice is already settled.");
-                    if (!Guid.TryParse(endpoint.SettlementBankGlAccountId, out var bankGl)) throw new InvalidOperationException("No settlement bank account is configured for this integration.");
-                    var arAccountText = await _settings.GetAsync(companyId, "integrations.arControlAccountId", ct);
-                    if (!Guid.TryParse(arAccountText, out var arControl)) throw new InvalidOperationException("Set the company setting integrations.arControlAccountId to the trade debtors account.");
-                    var receipt = await _db.InTransactionAsync(async token =>
-                        await _ar.ReceiveAndAllocateAsync(companyId, invoice.CustomerId, (p.PaidAt ?? DateTime.UtcNow).Date, p.Currency, apply, MethodFor(endpoint.Provider),
-                            $"{endpoint.Provider}:{p.ExternalRef}", bankGl, arControl, new Dictionary<Guid, decimal> { [invoice.Id] = apply }, token), ct);
-                    msg.ResultReceiptId = receipt.Id; msg.Status = "Processed"; msg.LastError = p.Amount > apply ? $"Overpayment of {p.Amount - apply:N2} not applied; refund or allocate manually." : null;
-                }
+                    if (p.Status == "Failed")
+                    {
+                        msg.Status = "Processed";
+                        msg.LastError = "Provider reported the payment as failed; nothing posted.";
+                        msg.NextAttemptAt = null;
+                    }
+                    else if (p.Status == "Pending")
+                    {
+                        msg.Status = "Pending";
+                        msg.NextAttemptAt = null;
+                    }
+                    else
+                    {
+                        var companyId = msg.CompanyId;
+                        var invoice = await _db.ArInvoices
+                            .Where(i => i.CompanyId == companyId && i.InvoiceNo == p.Reference &&
+                                i.Status != InvoiceStatus.Cancelled && i.Status != InvoiceStatus.Draft)
+                            .FirstOrDefaultAsync(token)
+                            ?? throw new InvalidOperationException($"No open invoice with number '{p.Reference}'.");
+                        if (invoice.Currency != p.Currency)
+                            throw new InvalidOperationException($"Currency {p.Currency} does not match the invoice currency {invoice.Currency}.");
+
+                        var apply = Math.Min(p.Amount, invoice.Outstanding);
+                        if (apply <= 0) throw new InvalidOperationException("The invoice is already settled.");
+                        if (!Guid.TryParse(endpoint.SettlementBankGlAccountId, out var bankGl))
+                            throw new InvalidOperationException("No settlement bank account is configured for this integration.");
+                        var arAccountText = await _settings.GetAsync(companyId, "integrations.arControlAccountId", token);
+                        if (!Guid.TryParse(arAccountText, out var arControl))
+                            throw new InvalidOperationException("Set the company setting integrations.arControlAccountId to the trade debtors account.");
+
+                        var receipt = await _ar.ReceiveAndAllocateAsync(companyId, invoice.CustomerId,
+                            (p.PaidAt ?? DateTime.UtcNow).Date, p.Currency, apply, MethodFor(endpoint.Provider),
+                            $"{endpoint.Provider}:{p.ExternalRef}", bankGl, arControl,
+                            new Dictionary<Guid, decimal> { [invoice.Id] = apply }, token);
+                        msg.ResultReceiptId = receipt.Id;
+                        msg.Status = "Processed";
+                        msg.NextAttemptAt = null;
+                        msg.LastError = p.Amount > apply
+                            ? $"Overpayment of {p.Amount - apply:N2} not applied; refund or allocate manually."
+                            : null;
+                    }
+
+                    await _db.SaveChangesAsync(token);
+                    return true;
+                }, ct);
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                msg.LastError = ex.Message;
-                msg.NextAttemptAt = WebhookSignature.NextAttempt(msg.Attempts - 1, DateTime.UtcNow);
-                msg.Status = msg.NextAttemptAt == null ? "DeadLetter" : "Failed";
+                // The posting transaction has rolled back. Persist the retry/dead-letter outcome
+                // separately so a failed posting never leaves a half-written ledger transaction.
+                _db.ChangeTracker.Clear();
+                var failedMessage = await _db.IntegrationMessages.IgnoreQueryFilters()
+                    .SingleOrDefaultAsync(m => m.Id == msg.Id && m.CompanyId == msg.CompanyId, ct);
+                if (failedMessage == null) return;
+
+                failedMessage.Attempts = msg.Attempts;
+                failedMessage.LastError = ex.Message[..Math.Min(ex.Message.Length, 2000)];
+                failedMessage.NextAttemptAt = WebhookSignature.NextAttempt(failedMessage.Attempts - 1, DateTime.UtcNow);
+                failedMessage.Status = failedMessage.NextAttemptAt == null ? "DeadLetter" : "Failed";
+                await _db.SaveChangesAsync(ct);
+                msg.Status = failedMessage.Status;
+                msg.NextAttemptAt = failedMessage.NextAttemptAt;
+                msg.LastError = failedMessage.LastError;
             }
-            await _db.SaveChangesAsync(ct);
         }
 
         /// <summary>Retries failed messages whose back-off has elapsed. Run by the background scheduler.</summary>
         public async Task<int> RetryDueAsync(Guid companyId, CancellationToken ct = default)
         {
-            var due = await _db.IntegrationMessages.Where(m => m.CompanyId == companyId && m.Status == "Failed" && m.NextAttemptAt != null && m.NextAttemptAt <= DateTime.UtcNow).ToListAsync(ct);
-            var n = 0;
-            foreach (var m in due)
+            var now = DateTime.UtcNow;
+            var dueIds = await _db.IntegrationMessages
+                .Where(m => m.CompanyId == companyId &&
+                    (m.Status == "Failed" || m.Status == "Processing") &&
+                    m.NextAttemptAt != null && m.NextAttemptAt <= now)
+                .OrderBy(m => m.NextAttemptAt)
+                .Select(m => m.Id)
+                .Take(100)
+                .ToListAsync(ct);
+
+            var processed = 0;
+            foreach (var id in dueIds)
             {
-                var endpoint = await _db.IntegrationEndpoints.FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == m.Provider, ct);
-                if (endpoint == null || !_adapters.TryGetValue(endpoint.Provider, out var adapter)) continue;
-                await ProcessAsync(m, adapter.Parse(m.PayloadJson), endpoint, ct); n++;
+                // Atomic compare-and-set claim: multiple scheduler instances may see the same
+                // due IDs, but only one can move a message from Failed to Processing.
+                var claimed = await _db.IntegrationMessages
+                    .Where(m => m.Id == id && m.CompanyId == companyId &&
+                        (m.Status == "Failed" || m.Status == "Processing") &&
+                        m.NextAttemptAt != null && m.NextAttemptAt <= now)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(m => m.Status, "Processing")
+                        .SetProperty(m => m.NextAttemptAt, now.AddMinutes(10)), ct);
+                if (claimed == 0) continue;
+
+                var message = await _db.IntegrationMessages
+                    .SingleOrDefaultAsync(m => m.Id == id && m.CompanyId == companyId, ct);
+                if (message == null) continue;
+
+                var endpoint = await _db.IntegrationEndpoints
+                    .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.Provider == message.Provider && e.IsActive, ct);
+                if (endpoint == null || !_adapters.TryGetValue(message.Provider, out var adapter))
+                {
+                    message.Status = "Failed";
+                    message.NextAttemptAt = now.AddMinutes(5);
+                    message.LastError = "The integration endpoint is missing, inactive, or has no registered provider adapter.";
+                    await _db.SaveChangesAsync(ct);
+                    continue;
+                }
+
+                try
+                {
+                    await ProcessAsync(message, adapter.Parse(message.PayloadJson), endpoint, ct);
+                    processed++;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    message.Attempts++;
+                    message.LastError = ex.Message[..Math.Min(ex.Message.Length, 2000)];
+                    message.NextAttemptAt = WebhookSignature.NextAttempt(message.Attempts - 1, DateTime.UtcNow);
+                    message.Status = message.NextAttemptAt == null ? "DeadLetter" : "Failed";
+                    await _db.SaveChangesAsync(ct);
+                }
             }
-            return n;
+            return processed;
         }
 
         /// <summary>Puts a dead-lettered message back in the queue after the cause has been fixed (e.g. the invoice now exists).</summary>
@@ -204,17 +295,82 @@ namespace ApexERP.Application.Services
         /// <summary>Provider transactions the bank never received, or receipts with no provider message: the integration-to-ledger reconciliation (spec 25.3).</summary>
         public async Task<object> ReconcileAsync(Guid companyId, DateTime from, DateTime to, CancellationToken ct = default)
         {
-            var msgs = await _db.IntegrationMessages.Where(m => m.CompanyId == companyId && m.CreatedAt >= from && m.CreatedAt <= to).ToListAsync(ct);
-            var receiptIds = msgs.Where(m => m.ResultReceiptId != null).Select(m => m.ResultReceiptId!.Value).ToList();
-            var receipts = await _db.ArReceipts.Where(r => r.CompanyId == companyId && receiptIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, ct);
+            if (to < from) throw new InvalidOperationException("The reconciliation end date must be on or after the start date.");
+
+            var msgs = await _db.IntegrationMessages
+                .Where(m => m.CompanyId == companyId && m.CreatedAt >= from && m.CreatedAt <= to)
+                .ToListAsync(ct);
+            var receiptIds = msgs.Where(m => m.ResultReceiptId != null)
+                .Select(m => m.ResultReceiptId!.Value).Distinct().ToList();
+            var receipts = await _db.ArReceipts
+                .Where(r => r.CompanyId == companyId && receiptIds.Contains(r.Id))
+                .ToDictionaryAsync(r => r.Id, ct);
+
+            // Also look for provider-tagged receipts that have no corresponding integration message.
+            // Search by receipt date so a late-arriving webhook does not hide an older orphaned receipt.
+            var providerReceipts = await _db.ArReceipts
+                .Where(r => r.CompanyId == companyId && r.ReceiptDate >= from.Date &&
+                    r.ReceiptDate < to.Date.AddDays(1) && r.Reference != null)
+                .Select(r => new { r.Id, r.Reference, r.ReceiptNo, r.ReceiptDate, r.Amount, r.Currency })
+                .ToListAsync(ct);
+            var taggedReceipts = providerReceipts
+                .Select(r =>
+                {
+                    var separator = r.Reference!.IndexOf(':');
+                    if (separator <= 0) return null;
+                    var provider = r.Reference[..separator];
+                    var externalRef = r.Reference[(separator + 1)..];
+                    return Providers.Contains(provider, StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(externalRef)
+                        ? new { r.Id, r.Reference, r.ReceiptNo, r.ReceiptDate, r.Amount, r.Currency, Provider = Providers.First(p => p.Equals(provider, StringComparison.OrdinalIgnoreCase)), ExternalRef = externalRef }
+                        : null;
+                })
+                .Where(r => r != null)
+                .ToList();
+            var externalRefs = taggedReceipts.Select(r => r!.ExternalRef).Distinct().ToList();
+            var matchingMessages = new List<(string Provider, string ExternalRef)>();
+            if (externalRefs.Count > 0)
+            {
+                var rows = await _db.IntegrationMessages
+                    .Where(m => m.CompanyId == companyId && externalRefs.Contains(m.ExternalRef))
+                    .Select(m => new { m.Provider, m.ExternalRef })
+                    .ToListAsync(ct);
+                matchingMessages = rows.Select(x => (x.Provider, x.ExternalRef)).ToList();
+            }
+            var knownMessageKeys = matchingMessages
+                .Select(m => $"{m.Provider.ToUpperInvariant()}:{m.ExternalRef}")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var unlinkedReceipts = taggedReceipts
+                .Where(r => r != null && !knownMessageKeys.Contains($"{r.Provider}:{r.ExternalRef}"))
+                .Select(r => new { r!.Id, r.ReceiptNo, r.Reference, r.ReceiptDate, r.Amount, r.Currency })
+                .ToList();
+
+            var paidMessagesWithoutReceipt = msgs
+                .Where(m => m.Status == "Processed" && m.ResultReceiptId == null &&
+                    _adapters.TryGetValue(m.Provider, out var adapter) &&
+                    SafeIsPaid(adapter, m.PayloadJson))
+                .Select(m => new { m.Id, m.Provider, m.ExternalRef, m.Status, m.LastError })
+                .ToList();
+
             return new
             {
                 From = from, To = to, Messages = msgs.Count,
                 Processed = msgs.Count(m => m.Status == "Processed"), Pending = msgs.Count(m => m.Status == "Pending"),
+                Processing = msgs.Count(m => m.Status == "Processing"),
                 Failed = msgs.Count(m => m.Status == "Failed"), DeadLetter = msgs.Count(m => m.Status == "DeadLetter"),
                 PostedTotal = receipts.Values.Sum(r => r.Amount),
-                NeedsAttention = msgs.Where(m => m.Status is "Failed" or "DeadLetter").Select(m => new { m.Id, m.Provider, m.ExternalRef, m.Status, m.LastError, m.Attempts }).ToList()
+                UnlinkedReceipts = unlinkedReceipts,
+                PaidMessagesWithoutReceipt = paidMessagesWithoutReceipt,
+                NeedsAttention = msgs.Where(m => m.Status is "Failed" or "DeadLetter" or "Processing")
+                    .Select(m => new { m.Id, m.Provider, m.ExternalRef, m.Status, m.LastError, m.Attempts, m.NextAttemptAt })
+                    .ToList()
             };
+        }
+
+        private static bool SafeIsPaid(IPaymentProviderAdapter adapter, string payload)
+        {
+            try { return adapter.Parse(payload).Status == "Paid"; }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException) { return false; }
         }
     }
 }

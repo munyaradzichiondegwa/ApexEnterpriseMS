@@ -24,14 +24,21 @@ namespace ApexERP.Application.Services
         public async Task SetAsync(Guid companyId, string key, string value, Guid? userId, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("A setting key is required.");
+            if (key.StartsWith("ipsas24.statement.issue:", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("IPSAS 24 issued-statement records are immutable and cannot be changed through generic company settings.");
             var row = await _db.CompanySettings.FirstOrDefaultAsync(s => s.CompanyId == companyId && s.Key == key, ct);
             if (row == null) _db.CompanySettings.Add(new CompanySetting { CompanyId = companyId, Key = key, Value = value, CreatedBy = userId });
             else { row.Value = value; row.UpdatedBy = userId; row.UpdatedAt = DateTime.UtcNow; }
             await _db.SaveChangesAsync(ct);
         }
 
-        public Task<List<CompanySetting>> ListAsync(Guid companyId, CancellationToken ct = default) =>
-            _db.CompanySettings.Where(s => s.CompanyId == companyId).OrderBy(s => s.Key).ToListAsync(ct);
+        public async Task<List<CompanySetting>> ListAsync(Guid companyId, CancellationToken ct = default)
+        {
+            var rows = await _db.CompanySettings.Where(s => s.CompanyId == companyId)
+                .OrderBy(s => s.Key).ToListAsync(ct);
+            return rows.Where(s => !s.Key.StartsWith("ipsas24.statement.issue:",
+                StringComparison.OrdinalIgnoreCase)).ToList();
+        }
 
         // Well-known keys
         public const string AllowSelfApproval = "controls.allowSelfApproval";

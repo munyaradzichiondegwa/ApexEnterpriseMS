@@ -28,6 +28,7 @@ export function hasAnyInModule(granted: readonly string[] | null | undefined, mo
 /** Navigation path -> API module whose permissions unlock it (null = every signed-in user). */
 export const PATH_MODULES: Record<string, string | null> = {
   "/dashboard": null,
+  "/organisation": "organisation",
   "/gl": "gl",
   "/ar": "ar",
   "/ap": "ap",

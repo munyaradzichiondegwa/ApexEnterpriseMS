@@ -69,12 +69,15 @@ builder.Services.AddSingleton(new JournalControlOptions
 
 // ---- Application services (all scoped: one DbContext per request) ----
 builder.Services.AddScoped<GlPostingService>();
+builder.Services.AddScoped<FxRevaluationService>();
 builder.Services.AddScoped<ArService>();
 builder.Services.AddScoped<ApService>();
 builder.Services.AddScoped<InventoryService>();
 builder.Services.AddScoped<FixedAssetService>();
 builder.Services.AddScoped<PayrollService>();
 builder.Services.AddScoped<TaxComplianceService>();
+builder.Services.AddScoped<ZimbabweDswtWithholdingRegisterService>();
+builder.Services.AddScoped<ZimbabweDswtFilingWorkflowService>();
 builder.Services.AddScoped<ReportingService>();
 builder.Services.AddScoped<ManufacturingService>();
 builder.Services.AddScoped<SupplyChainService>();
@@ -126,6 +129,7 @@ builder.Services.AddScoped<PeriodCloseService>();
 builder.Services.AddScoped<EvidenceService>();
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<StatutoryRateService>();
+builder.Services.AddScoped<StatutoryPackService>();
 builder.Services.AddScoped<IntegrationService>();
 builder.Services.AddHostedService<ApexERP.API.Jobs.ScheduledJobRunner>();
 
@@ -406,33 +410,36 @@ app.Use(async (context, next) =>
 app.UseCors("Frontend");
 app.UseAuthentication();
 
-// ---- Tenant resolution middleware ----
-// The signed tenant_id and company_id claims must describe a real, active
-// company belonging to an active customer organisation. Never trust a tenant
-// identifier supplied in a request header or query string.
+// ---- Tenant and company membership revalidation ----
+// The signed claims are not sufficient by themselves: account lockout/deactivation, membership
+// revocation, role/permission changes and tenant/company deactivation must take effect on the next request.
 app.Use(async (context, next) =>
 {
-    if (context.User.Identity?.IsAuthenticated == true)
+    var allowsAnonymous = context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null;
+    if (!allowsAnonymous &&
+        context.User.Identity?.IsAuthenticated == true &&
+        context.User.FindFirst("platform_admin")?.Value != "true")
     {
+        var subject = context.User.FindFirst("sub") ??
+                      context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+        var roleName = context.User.FindFirst("role") ??
+                       context.User.FindFirst(System.Security.Claims.ClaimTypes.Role);
+        var tokenPermissions = context.User.FindFirst("permissions")?.Value;
         if (!Guid.TryParse(context.User.FindFirst("company_id")?.Value, out var companyId) ||
-            !Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId))
+            !Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId) ||
+            !Guid.TryParse(subject?.Value, out var userId) ||
+            !Guid.TryParse(context.User.FindFirst("role_id")?.Value, out var roleId) ||
+            string.IsNullOrWhiteSpace(roleName?.Value) ||
+            string.IsNullOrWhiteSpace(tokenPermissions))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
 
         var dbContext = context.RequestServices.GetRequiredService<ApexErpDbContext>();
-        bool tenantIsActive;
-        using (dbContext.SystemAccessScope("tenant resolution: validate signed token identities"))
-        {
-            var companyBelongsToTenant = await dbContext.Companies.IgnoreQueryFilters()
-                .AnyAsync(c => c.Id == companyId && c.TenantId == tenantId && c.IsActive, context.RequestAborted);
-            tenantIsActive = companyBelongsToTenant &&
-                await dbContext.CustomerOrganisations.IgnoreQueryFilters()
-                    .AnyAsync(t => t.Id == tenantId && t.IsActive, context.RequestAborted);
-        }
-
-        if (!tenantIsActive)
+        var valid = await TenantMembershipValidator.IsValidAsync(
+            dbContext, userId, tenantId, companyId, roleId, roleName.Value, tokenPermissions, context.RequestAborted);
+        if (!valid)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
@@ -440,15 +447,8 @@ app.Use(async (context, next) =>
 
         dbContext.CurrentTenantId = tenantId;
         dbContext.CurrentCompanyId = companyId;
+        dbContext.CurrentUserId = userId;
         dbContext.CurrentIpAddress = context.Connection.RemoteIpAddress?.ToString();
-
-        if (Guid.TryParse(
-                (context.User.FindFirst("sub") ??
-                 context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier))?.Value,
-                out var userId))
-        {
-            dbContext.CurrentUserId = userId;
-        }
         await TenantSession.RefreshAsync(dbContext, context.RequestAborted);
     }
 

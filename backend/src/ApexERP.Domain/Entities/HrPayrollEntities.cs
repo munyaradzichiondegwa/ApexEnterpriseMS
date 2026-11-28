@@ -7,6 +7,7 @@ namespace ApexERP.Domain.Entities
     public class Department : TenantEntity
     {
         public string Name { get; set; } = string.Empty;
+        public bool IsActive { get; set; } = true;
         public Guid? ManagerId { get; set; }
         public Guid? CostCentreId { get; set; }
         public Guid? BranchId { get; set; }
@@ -38,6 +39,7 @@ namespace ApexERP.Domain.Entities
     {
         public int PeriodMonth { get; set; }
         public int PeriodYear { get; set; }
+        public string Currency { get; set; } = "USD";
         public PayrollRunStatus Status { get; set; } = PayrollRunStatus.Draft;
         public Guid? ApprovedBy { get; set; }
         public DateTime? ApprovedAt { get; set; }

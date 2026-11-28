@@ -15,6 +15,8 @@ namespace ApexERP.Domain.Entities
         public bool IsActive { get; set; } = true;
         public bool IsBankAccount { get; set; }
         public bool IsControlAccount { get; set; }
+        /// <summary>True only for foreign-currency monetary items subject to IAS 21 closing-rate revaluation.</summary>
+        public bool IsMonetary { get; set; }
 
         /// <summary>Running balance in functional currency, maintained by GlPostingService.</summary>
         public decimal CurrentBalance { get; set; }
@@ -111,6 +113,8 @@ namespace ApexERP.Domain.Entities
         /// <summary>Grants & NGO (Module 15): auto-tags this line to a grant so expenditure rolls up
         /// into that grant's budget-vs-actual and donor reporting automatically.</summary>
         public Guid? GrantId { get; set; }
+        /// <summary>Tax-code provenance for tax journal legs; null for non-tax and code-less WHT legs.</summary>
+        public Guid? TaxCodeId { get; set; }
     }
 
     /// <summary>Daily exchange rates (ZIMRA official + manual override) used for FX translation.</summary>
@@ -121,6 +125,10 @@ namespace ApexERP.Domain.Entities
         public DateTime RateDate { get; set; }
         public decimal Rate { get; set; }
         public bool IsManualOverride { get; set; }
+        public string RateSource { get; set; } = "Unspecified";
+        public string? SourceReference { get; set; }
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
     }
 
     public class TaxCode : TenantEntity
@@ -131,6 +139,7 @@ namespace ApexERP.Domain.Entities
         public TaxType Type { get; set; }
         public bool IsActive { get; set; } = true;
         public DateTime EffectiveFrom { get; set; }
+        public DateTime? EffectiveTo { get; set; }
     }
 
     /// <summary>ZIMRA PAYE tax bands, stored with effective date ranges so annual budget changes

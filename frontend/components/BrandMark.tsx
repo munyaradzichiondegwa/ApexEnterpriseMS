@@ -6,16 +6,15 @@ type BrandMarkProps = {
   className?: string;
 };
 
-/** ApexERP brand mark based on the supplied product specification artwork. */
+/** ApexERP mark: the blue mountain/A and orange rising arrow used in the README hero artwork. */
 export default function BrandMark({ compact = false, inverse = true, className = "" }: BrandMarkProps) {
   const wordColor = inverse ? "text-white" : "text-[#19385d]";
   const taglineColor = inverse ? "text-[#a9c7d8]" : "text-[#55718b]";
   return (
     <div className={`inline-flex items-center gap-2.5 ${className}`} aria-label="ApexERP">
-      <svg viewBox="0 0 64 52" role="img" aria-hidden="true" className={compact ? "h-8 w-9 shrink-0" : "h-12 w-14 shrink-0"}>
-        <path d="M4 46 24 7l18 31h-11L24 23 14 43z" fill="#1597d4" />
-        <path d="m25 43 23-38 10 9-6 6-3-3-17 28z" fill="#f28b28" />
-        <path d="m18 37 6-12 7 12z" fill="#19385d" opacity=".18" />
+      <svg viewBox="0 0 64 52" role="img" aria-hidden="true" className={compact ? "h-8 w-10 shrink-0" : "h-12 w-14 shrink-0"}>
+        <path d="M3 46 23 8 38 31 46 18 61 46H44L37 34 30 46Z" fill="#1597d4" />
+        <path d="m27 29 17-16-3-1 17-9-7 19-2-4-18 18Z" fill="#f28b28" />
       </svg>
       <span className="min-w-0">
         <span className={`block font-extrabold tracking-tight leading-none ${wordColor} ${compact ? "text-base" : "text-2xl"}`}>APEXERP</span>

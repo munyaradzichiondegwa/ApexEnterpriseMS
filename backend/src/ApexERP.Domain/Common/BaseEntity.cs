@@ -61,7 +61,8 @@ namespace ApexERP.Domain.Common
         Prepayment,
         Revenue,
         Impairment,
-        Provision
+        Provision,
+        FxRevaluation
     }
 
     /// <summary>
@@ -245,6 +246,53 @@ namespace ApexERP.Domain.Common
         Cancelled
     }
 
+    public enum PublicSectorBudgetAllocationStatus
+    {
+        Draft,
+        PendingApproval,
+        Approved,
+        Rejected
+    }
+
+    public enum PublicSectorBudgetVersionKind
+    {
+        Original,
+        Revised
+    }
+
+    /// <summary>Explains the nature of an authorised change from the original to final budget.</summary>
+    public enum PublicSectorBudgetAmendmentNature
+    {
+        ReallocationWithinBudget,
+        OtherAuthorisedFactors,
+        Mixed
+    }
+
+    public enum PublicSectorBudgetVersionStatus
+    {
+        Draft,
+        PendingApproval,
+        Approved,
+        Rejected,
+        Superseded
+    }
+
+    public enum PublicSectorBudgetReconciliationType
+    {
+        Basis,
+        Timing,
+        Entity,
+        Presentation
+    }
+
+    public enum PublicSectorBudgetReconciliationStatus
+    {
+        Draft,
+        PendingApproval,
+        Approved,
+        Rejected
+    }
+
     public enum GrantStatus
     {
         Active,
@@ -271,6 +319,10 @@ namespace ApexERP.Domain.Common
         Accrual,
         Cash
     }
+
+    public enum PublicSectorBudgetActualEventKind { CashReceipt, CashPayment }
+    public enum PublicSectorBudgetActualSourceKind { BankTransaction, ArReceipt, ApPayment }
+    public enum PublicSectorBudgetActualStatus { Draft, PendingCertification, Certified, Rejected, Reversed }
 
     /// <summary>Which business process raised an <c>ExceptionItem</c>.</summary>
     public enum ExceptionCategory

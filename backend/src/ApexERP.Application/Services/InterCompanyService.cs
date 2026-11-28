@@ -156,10 +156,16 @@ namespace ApexERP.Application.Services
         /// </summary>
         public async Task<MirrorOutcome> TryMirrorAsync(Guid fromCompanyId, Guid arInvoiceId, Guid? userId, CancellationToken ct = default)
         {
-            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
-            var invoice = await _db.ArInvoices.IgnoreQueryFilters().Include(i => i.Customer)
-                .FirstOrDefaultAsync(i => i.Id == arInvoiceId && i.CompanyId == fromCompanyId, ct)
-                ?? throw new InvalidOperationException("Source AR invoice not found.");
+            ArInvoice invoice;
+            // The source invoice lookup is the only preliminary read that may need the explicit
+            // cross-company RLS scope. CreateMirrorPostingAsync opens its own scope for the target
+            // company; exception resolution and the rest of this method stay in caller scope.
+            using (_db.CrossTenantScope())
+            {
+                invoice = await _db.ArInvoices.IgnoreQueryFilters().Include(i => i.Customer)
+                    .FirstOrDefaultAsync(i => i.Id == arInvoiceId && i.CompanyId == fromCompanyId, ct)
+                    ?? throw new InvalidOperationException("Source AR invoice not found.");
+            }
 
             if (invoice.Customer?.LinkedCompanyId == null)
                 return new MirrorOutcome("NotApplicable", null, null, null);

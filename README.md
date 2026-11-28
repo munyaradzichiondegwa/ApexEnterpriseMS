@@ -63,6 +63,7 @@ ApexERP runs real, working business logic across all 16 core ERP modules, not UI
 - [Financial Reporting](#financial-reporting)
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
+- [Product architecture and consolidation acceptance register](docs/PRODUCT_ARCHITECTURE_ROADMAP.md)
 - [Getting Started](#getting-started)
 - [Configuration and Secrets](#configuration-and-secrets)
 - [Security and Multi-Tenancy](#security-and-multi-tenancy)
@@ -420,11 +421,11 @@ Each integration is isolated behind a service boundary, so a production credenti
 |---|---|
 | ZIMRA FDMS fiscal signing | Crypto and offline queue implemented. A production device certificate requires ZIMRA registration. |
 | ZIMRA e-filing (VAT/PAYE portal submission) | Calculations complete. The portal submission call is a placeholder. |
-| EcoCash / OneMoney / PayNow | Payment methods modelled. Confirmation webhook not yet wired. |
+| EcoCash / OneMoney / PayNow / ZimSwitch / bank APIs | Provider-neutral HMAC-signed webhook intake, replay protection, duplicate-delivery protection, atomic AR receipt + GL posting, retry/dead-letter handling and reconciliation implemented. Provider-specific protocols, credentials and live sandbox certification remain pending. |
 | ZimSwitch direct debit | Not implemented. Bank statement CSV import with auto-matching is available instead. |
-| SMS OTP / TOTP two-factor auth | Fields exist on the user model. Verification flow not yet wired into login. |
+| SMS OTP / TOTP two-factor auth | TOTP login challenge, authenticator setup, and single-use recovery codes are implemented. SMS delivery/OTP provider integration remains pending. |
 | Redis-backed refresh tokens | Currently issued as signed JWTs. Redis-backed rotation planned. |
-| RabbitMQ / Hangfire scheduling | Payroll runs, depreciation batches, and FDMS retries are callable on demand via the API. Scheduled automation not yet wired. |
+| Background scheduling | Hosted scheduler runs accrual reversal, prepayment amortisation, revenue recognition, control tests, nightly reconciliation and integration retries. Tenant lifecycle jobs are dispatched to a separately configured worker; production worker deployment remains an operational acceptance item. |
 | PPDPA public e-tendering portal | Bid timestamping, late-bid rejection, and weighted scoring implemented. Public vendor self-registration site not built. |
 | Barcode / RFID hardware | Matching logic implemented. Physical scanner/reader integration pending. |
 | S3, Meilisearch, SignalR | Not yet implemented. |
@@ -449,7 +450,6 @@ The GitHub Actions workflow (`.github/workflows/build.yml`) builds and tests the
 
 The authoritative schema is always the committed EF Core migrations. `scripts/export-schema.sh` writes them out as one idempotent SQL script (`backend/database/schema.generated.sql`) for DBAs and audits. The older hand-written `schema.sql` was removed because it drifted.
 
-**Repository snapshot:** 12 commits · 0 stars · 0 forks · MIT licence
 
 ---
 
@@ -457,10 +457,10 @@ The authoritative schema is always the committed EF Core migrations. `scripts/ex
 
 Not yet done (details and rationale in [docs/AUDIT_REMEDIATION.md](docs/AUDIT_REMEDIATION.md)):
 
-- Refresh-token rotation with server-side revocation, two-factor authentication, login rate limiting and lockout
+- Login rate limiting and lockout; production SMS OTP provider integration
 - Month-end close checklist, bank-reconciliation exception workflow with approvals, and three-way-match controls in procurement
-- Scheduled automation (payroll, depreciation, FDMS retries) and idempotency keys on the API
-- Request DTOs in place of binding entities directly, and PostgreSQL row-level security as a second tenant barrier
+- Production deployment and monitoring of the external tenant lifecycle worker
+- Complete request DTO coverage for remaining endpoints; production RLS activation requires a least-privilege runtime database role
 - React Native mobile apps, predictive analytics and AI-assisted insights, a vendor self-service portal, and an API marketplace
 
 ---
