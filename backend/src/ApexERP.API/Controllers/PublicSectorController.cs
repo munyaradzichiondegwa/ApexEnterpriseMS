@@ -29,6 +29,9 @@ namespace ApexERP.API.Controllers
     public record CreateCashSourceSubmissionRequest(Guid ExpectedCashSourceId, int RecordCount,
         decimal ControlTotal, decimal OpeningBalance, decimal ClosingBalance, string Currency, string EvidenceReference);
     public record ReviewCashSourceSubmissionRequest(bool Accepted, string? ReviewNote);
+    public record CreateCashSourceReconciliationLineRequest(Guid SourceRecordId, string SourceReference,
+        Guid? BudgetExecutionActualId, bool IsExcluded, string? ExclusionReason);
+    public record ReviewCashSourceRecordReconciliationRequest(bool Accepted, string? ReviewNote);
 
     public record CommitRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, bool AllowOverride, string? OverrideReason = null);
     public record SubmitBudgetOverrideApprovalRequest(Guid FundCentreId, Guid PurchaseOrderId, decimal Amount, string Reason);
@@ -475,6 +478,47 @@ namespace ApexERP.API.Controllers
                 req.Accepted, req.ReviewNote, ct)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
+
+        // Transaction-level source-to-actual reconciliation. Source control totals are reviewed
+        // first; these rows then prove that every source record is allocated or explicitly excluded.
+        [HttpGet("cash-source-submissions/{id}/reconciliation-lines")]
+        [HasPermission(Permissions.ReportsFinancialRead)]
+        public async Task<IActionResult> GetCashSourceReconciliationLines(Guid id, CancellationToken ct)
+        {
+            if (!await _db.PublicSectorCashSourceSubmissions.AnyAsync(x =>
+                x.Id == id && x.CompanyId == CompanyId, ct)) return NotFound();
+            return Ok(await _publicSector.GetCashSourceReconciliationLinesAsync(CompanyId, id, ct));
+        }
+
+        [HttpPost("cash-source-submissions/{id}/reconciliation-lines")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> AddCashSourceReconciliationLine(Guid id,
+            CreateCashSourceReconciliationLineRequest req, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.AddCashSourceReconciliationLineAsync(CompanyId, id,
+                req.SourceRecordId, req.SourceReference, req.BudgetExecutionActualId,
+                req.IsExcluded, req.ExclusionReason, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("cash-source-submissions/{id}/record-reconciliation/submit")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> SubmitCashSourceRecordReconciliation(Guid id, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.SubmitCashSourceRecordReconciliationAsync(CompanyId, id, UserId, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("cash-source-submissions/{id}/record-reconciliation/review")]
+        [HasPermission(Permissions.PublicSectorBudgetOverride)]
+        public async Task<IActionResult> ReviewCashSourceRecordReconciliation(Guid id,
+            ReviewCashSourceRecordReconciliationRequest req, CancellationToken ct)
+        {
+            try { return Ok(await _publicSector.ReviewCashSourceRecordReconciliationAsync(CompanyId, id,
+                UserId, req.Accepted, req.ReviewNote, ct)); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
 
         // ---- IPSAS 24: source-backed cash budget actuals ----
 
