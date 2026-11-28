@@ -3233,6 +3233,72 @@ namespace ApexERP.Application.Services
         }
 
 
+
+        private async Task<decimal?> CalculateWhtRemittanceBudgetAmountAsync(Guid companyId,
+            BankTransaction source, Guid budgetGlAccountId, Guid budgetFundCentreId,
+            Guid? budgetCostCentreId, CancellationToken ct)
+        {
+            if (!source.JournalEntryId.HasValue) return null;
+            var whtAccountIds = await _db.TaxAccountMappings.Where(x => x.CompanyId == companyId &&
+                x.Purpose == "AP-WHT-PAYABLE" && x.TaxType == TaxType.WHT &&
+                !x.TaxCodeId.HasValue && x.Status == TaxConfigurationStatus.Approved)
+                .Select(x => x.GlAccountId).Distinct().ToListAsync(ct);
+            var whtJournalLines = await _db.JournalLines.Where(x =>
+                x.JournalEntryId == source.JournalEntryId.Value && whtAccountIds.Contains(x.GlAccountId) &&
+                x.Debit > x.Credit).ToListAsync(ct);
+            var details = await _db.SettlementComponentAllocations.Where(x =>
+                x.CompanyId == companyId && x.SettlementKind == "TX" &&
+                x.SettlementAllocationId == source.Id).ToListAsync(ct);
+            if (whtJournalLines.Count == 0)
+            {
+                if (details.Count > 0)
+                    throw new InvalidOperationException("WHT remittance allocation has no matching WHT payable debit journal line.");
+                return null;
+            }
+            if (source.Debit <= 0m || source.Credit != 0m || details.Count == 0 ||
+                details.Sum(x => x.AmountApplied) != source.Debit)
+                throw new InvalidOperationException("WHT bank remittance must be fully allocated to posted WHT tax components.");
+
+            var components = await _db.InvoiceTaxComponents.Where(x => x.CompanyId == companyId &&
+                x.InvoiceKind == "AP" && details.Select(d => d.TaxComponentId!.Value).Contains(x.Id)).ToListAsync(ct);
+            if (components.Count != details.Count || components.Any(x => x.TaxType != TaxType.WHT))
+                throw new InvalidOperationException("WHT remittance allocations contain missing or non-WHT tax components.");
+            var invoices = await _db.ApInvoices.Where(x => x.CompanyId == companyId &&
+                components.Select(t => t.InvoiceId).Distinct().Contains(x.Id)).ToListAsync(ct);
+            if (invoices.Count != components.Select(x => x.InvoiceId).Distinct().Count())
+                throw new InvalidOperationException("A remitted WHT component has no company AP invoice.");
+
+            foreach (var accountGroup in details.GroupBy(d => components.Single(t => t.Id == d.TaxComponentId).GlAccountId))
+            {
+                var lines = whtJournalLines.Where(x => x.GlAccountId == accountGroup.Key).ToList();
+                var allocated = accountGroup.Sum(x => x.AmountApplied);
+                if (lines.Count != 1 || lines[0].Debit - lines[0].Credit != allocated)
+                    throw new InvalidOperationException("WHT remittance component amounts do not match one exact debit journal line per payable account.");
+            }
+            if (whtJournalLines.Count != details.Select(d => components.Single(t => t.Id == d.TaxComponentId).GlAccountId).Distinct().Count() ||
+                whtJournalLines.Sum(x => x.Debit - x.Credit) != source.Debit)
+                throw new InvalidOperationException("The WHT payable journal lines do not reconcile exactly to the bank remittance.");
+
+            decimal budgetAmount = 0m;
+            foreach (var detail in details)
+            {
+                var component = components.Single(x => x.Id == detail.TaxComponentId);
+                var invoice = invoices.Single(x => x.Id == component.InvoiceId);
+                var prior = await _db.SettlementComponentAllocations.Where(x =>
+                    x.CompanyId == companyId && x.SettlementKind == "TX" &&
+                    x.TaxComponentId == component.Id && x.SettlementAllocationId != source.Id)
+                    .SumAsync(x => (decimal?)x.AmountApplied, ct) ?? 0m;
+                if (prior + details.Where(x => x.TaxComponentId == component.Id).Sum(x => x.AmountApplied) > component.Amount)
+                    throw new InvalidOperationException("WHT remittances exceed the original posted WHT component balance.");
+                var dimension = await ResolveSettlementComponentDimensionAsync(companyId, "TX",
+                    invoice.Id, invoice.FundCentreId ?? Guid.Empty, detail, source.TransactionDate, ct);
+                if (dimension.Included && dimension.GlAccountId == budgetGlAccountId &&
+                    dimension.FundCentreId == budgetFundCentreId && dimension.CostCentreId == budgetCostCentreId)
+                    budgetAmount += detail.AmountApplied;
+            }
+            return budgetAmount;
+        }
+
         private async Task<PublicSectorTaxBudgetPolicy> GetApprovedTaxBudgetPolicyAsync(
             Guid companyId, InvoiceTaxComponent component, DateTime settlementDate, CancellationToken ct)
         {
