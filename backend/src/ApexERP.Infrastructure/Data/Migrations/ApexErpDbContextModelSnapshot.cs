@@ -3690,6 +3690,48 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<Guid>("CompanyId").HasColumnType("uuid");
+                    b.Property<int>("FinancialYear").HasColumnType("integer");
+                    b.Property<Guid>("BudgetVersionId").HasColumnType("uuid");
+                    b.Property<Guid>("BudgetVersionLineId").HasColumnType("uuid");
+                    b.Property<Guid>("FundCentreId").HasColumnType("uuid");
+                    b.Property<Guid>("GlAccountId").HasColumnType("uuid");
+                    b.Property<Guid?>("CostCentreId").HasColumnType("uuid");
+                    b.Property<int>("EventKind").HasColumnType("integer");
+                    b.Property<int>("SourceKind").HasColumnType("integer");
+                    b.Property<Guid>("SourceRecordId").HasColumnType("uuid");
+                    b.Property<string>("SourceReference").IsRequired().HasColumnType("text");
+                    b.Property<DateTime>("SourceDate").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("EffectiveDate").HasColumnType("timestamp with time zone");
+                    b.Property<string>("Currency").IsRequired().HasColumnType("text");
+                    b.Property<decimal>("Amount").HasColumnType("numeric(20,6)");
+                    b.Property<decimal>("ExchangeRateToBudgetCurrency").HasColumnType("numeric(20,10)");
+                    b.Property<int>("CashFlowSection").HasColumnType("integer");
+                    b.Property<int>("Status").HasColumnType("integer");
+                    b.Property<Guid?>("ReversalOfId").HasColumnType("uuid");
+                    b.Property<Guid?>("CertifiedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("CertifiedAt").HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedBy").HasColumnType("uuid");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("BudgetVersionLineId");
+                    b.HasIndex("FundCentreId");
+                    b.HasIndex("GlAccountId");
+                    b.HasIndex("CompanyId", "SourceKind", "SourceRecordId")
+                        .IsUnique().HasDatabaseName("UX_PublicSectorBudgetExecutionActual_Source");
+                    b.HasIndex("BudgetVersionId", "EffectiveDate");
+                    b.ToTable("PublicSectorBudgetExecutionActuals", t =>
+                        {
+                            t.HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_Amount", "\"Amount\" > 0");
+                            t.HasCheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", b =>
                 {
                     b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
@@ -7654,6 +7696,33 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasOne("ApexERP.Domain.Entities.CustomerOrganisation", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ApexERP.Domain.Entities.PublicSectorBudgetExecutionActual", b =>
+                {
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersion", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.PublicSectorBudgetVersionLine", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetVersionLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.FundCentre", null)
+                        .WithMany()
+                        .HasForeignKey("FundCentreId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ApexERP.Domain.Entities.GlAccount", null)
+                        .WithMany()
+                        .HasForeignKey("GlAccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
