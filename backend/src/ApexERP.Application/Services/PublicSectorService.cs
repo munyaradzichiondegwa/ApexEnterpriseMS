@@ -491,6 +491,91 @@ namespace ApexERP.Application.Services
             return item;
         }
 
+        public async Task<IReadOnlyList<PublicSectorCashSourceSubmission>> GetCashSourceSubmissionsAsync(
+            Guid companyId, Guid budgetVersionId, CancellationToken ct = default)
+        {
+            return await _db.PublicSectorCashSourceSubmissions
+                .Where(x => x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId)
+                .OrderBy(x => x.PeriodStart).ThenBy(x => x.CreatedAt).ToListAsync(ct);
+        }
+
+        public async Task<PublicSectorCashSourceSubmission> CreateCashSourceSubmissionAsync(
+            Guid companyId, Guid expectedSourceId, int recordCount, decimal controlTotal,
+            decimal openingBalance, decimal closingBalance, string currency,
+            string evidenceReference, Guid actorId, CancellationToken ct = default)
+        {
+            if (recordCount < 0 || string.IsNullOrWhiteSpace(currency) || currency.Trim().Length != 3 ||
+                string.IsNullOrWhiteSpace(evidenceReference))
+                throw new InvalidOperationException("A non-negative record count, three-letter currency and evidence reference are required.");
+
+            var source = await _db.PublicSectorExpectedCashSources.FirstOrDefaultAsync(x =>
+                x.Id == expectedSourceId && x.CompanyId == companyId && x.Status == "Approved", ct)
+                ?? throw new InvalidOperationException("An approved expected cash source is required before submitting source controls.");
+            if (await _db.PublicSectorCashSourceSubmissions.AnyAsync(x =>
+                x.CompanyId == companyId && x.ExpectedCashSourceId == source.Id, ct))
+                throw new InvalidOperationException("A period submission already exists for this expected source.");
+
+            var item = new PublicSectorCashSourceSubmission
+            {
+                CompanyId = companyId, ExpectedCashSourceId = source.Id, BudgetVersionId = source.BudgetVersionId,
+                PeriodStart = source.EffectiveFrom, PeriodEnd = source.EffectiveTo, RecordCount = recordCount,
+                ControlTotal = controlTotal, OpeningBalance = openingBalance, ClosingBalance = closingBalance,
+                Currency = currency.Trim().ToUpperInvariant(), EvidenceReference = evidenceReference.Trim(),
+                Status = "Draft", CreatedBy = actorId
+            };
+            _db.PublicSectorCashSourceSubmissions.Add(item);
+            _audit.Record(companyId, actorId, "PublicSectorCashSourceSubmission.Created", "PublicSector",
+                nameof(PublicSectorCashSourceSubmission), item.Id, null,
+                new { item.ExpectedCashSourceId, item.BudgetVersionId, item.PeriodStart, item.PeriodEnd,
+                    item.RecordCount, item.ControlTotal, item.OpeningBalance, item.ClosingBalance,
+                    item.Currency, item.EvidenceReference });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorCashSourceSubmission> SubmitCashSourceSubmissionAsync(
+            Guid companyId, Guid submissionId, Guid actorId, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorCashSourceSubmissions.FirstOrDefaultAsync(x =>
+                x.Id == submissionId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Cash source submission not found.");
+            if (item.Status != "Draft" || item.CreatedBy != actorId)
+                throw new InvalidOperationException("Only the preparer may submit a draft cash source submission.");
+            item.Status = "PendingReview";
+            item.SubmittedBy = actorId;
+            item.SubmittedAt = DateTime.UtcNow;
+            _audit.Record(companyId, actorId, "PublicSectorCashSourceSubmission.Submitted", "PublicSector",
+                nameof(PublicSectorCashSourceSubmission), item.Id, new { Status = "Draft" },
+                new { item.Status, item.SubmittedBy, item.SubmittedAt });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
+        public async Task<PublicSectorCashSourceSubmission> ReviewCashSourceSubmissionAsync(
+            Guid companyId, Guid submissionId, Guid reviewerId, bool accepted,
+            string? reviewNote, CancellationToken ct = default)
+        {
+            var item = await _db.PublicSectorCashSourceSubmissions.FirstOrDefaultAsync(x =>
+                x.Id == submissionId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Cash source submission not found.");
+            if (item.Status != "PendingReview")
+                throw new InvalidOperationException("Only a pending cash source submission can be reviewed.");
+            if (item.CreatedBy == reviewerId || item.SubmittedBy == reviewerId)
+                throw new InvalidOperationException("The preparer or submitter cannot independently review their own cash source submission.");
+            if (!accepted && string.IsNullOrWhiteSpace(reviewNote))
+                throw new InvalidOperationException("A reason is required when rejecting a cash source submission.");
+
+            item.Status = accepted ? "Reviewed" : "Rejected";
+            item.ReviewedBy = reviewerId;
+            item.ReviewedAt = DateTime.UtcNow;
+            item.ReviewNote = string.IsNullOrWhiteSpace(reviewNote) ? null : reviewNote.Trim();
+            _audit.Record(companyId, reviewerId, "PublicSectorCashSourceSubmission.Reviewed", "PublicSector",
+                nameof(PublicSectorCashSourceSubmission), item.Id, new { Status = "PendingReview" },
+                new { item.Status, item.ReviewedBy, item.ReviewedAt, item.ReviewNote });
+            await _db.SaveChangesAsync(ct);
+            return item;
+        }
+
         public async Task<BudgetComparisonReport> GetBudgetComparisonAsync(Guid companyId, int financialYear,
             CancellationToken ct = default)
         {
