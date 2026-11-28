@@ -507,82 +507,99 @@ public sealed class ZimbabweDswtFilingWorkflowService
         }, ct);
     }
 
-    public async Task<ZimbabweDswtFiling> MarkSubmittedAsync(
+    public Task<ZimbabweDswtFiling> MarkSubmittedAsync(
         Guid companyId, Guid filingId, ZimbabweDswtFilingSubmissionRequest request, CancellationToken ct = default)
     {
         if (request.SubmittedAt == default || string.IsNullOrWhiteSpace(request.SubmissionReference) ||
             string.IsNullOrWhiteSpace(request.EvidenceReference))
             throw new ArgumentException("A submission date, TaRMS reference and evidence reference are required.");
-        var filing = await FindAsync(companyId, filingId, ct);
-        if (filing.Status != ZimbabweDswtFilingStatus.Prepared)
-            throw new InvalidOperationException("Only a prepared filing can be marked as submitted.");
-        var reference = request.SubmissionReference.Trim();
-        if (await _db.ZimbabweDswtFilings.AnyAsync(x =>
-            x.CompanyId == companyId && x.Id != filingId && x.SubmissionReference == reference, ct))
-            throw new InvalidOperationException("The TaRMS submission reference is already recorded for this company.");
-        filing.SubmittedAt = request.SubmittedAt;
-        filing.SubmittedBy = _db.CurrentUserId;
-        filing.SubmissionReference = reference;
-        filing.SubmissionEvidenceReference = request.EvidenceReference.Trim();
-        filing.Status = ZimbabweDswtFilingStatus.Submitted;
-        _audit.Record(companyId, _db.CurrentUserId, "Dswt.FilingSubmittedManually", "Tax",
-            nameof(ZimbabweDswtFiling), filing.Id, null,
-            new { filing.SubmittedAt, filing.SubmissionReference, filing.SubmissionEvidenceReference, filing.SubmissionChannel });
-        await _db.SaveChangesAsync(ct);
-        return filing;
+        return TransitionAsync(companyId, filingId, async (filing, token) =>
+        {
+            if (filing.Status != ZimbabweDswtFilingStatus.Prepared)
+                throw new InvalidOperationException("Only a prepared filing can be marked as submitted.");
+            var reference = request.SubmissionReference.Trim();
+            if (await _db.ZimbabweDswtFilings.AnyAsync(x =>
+                x.CompanyId == companyId && x.Id != filingId && x.SubmissionReference == reference, token))
+                throw new InvalidOperationException("The TaRMS submission reference is already recorded for this company.");
+            filing.SubmittedAt = request.SubmittedAt;
+            filing.SubmittedBy = _db.CurrentUserId;
+            filing.SubmissionReference = reference;
+            filing.SubmissionEvidenceReference = request.EvidenceReference.Trim();
+            filing.Status = ZimbabweDswtFilingStatus.Submitted;
+            _audit.Record(companyId, _db.CurrentUserId, "Dswt.FilingSubmittedManually", "Tax",
+                nameof(ZimbabweDswtFiling), filing.Id, null,
+                new { filing.SubmittedAt, filing.SubmissionReference, filing.SubmissionEvidenceReference, filing.SubmissionChannel });
+        }, ct);
     }
 
-    public async Task<ZimbabweDswtFiling> RecordAcknowledgementAsync(
+    public Task<ZimbabweDswtFiling> RecordAcknowledgementAsync(
         Guid companyId, Guid filingId, ZimbabweDswtFilingAcknowledgementRequest request, CancellationToken ct = default)
     {
         if (request.AcknowledgedAt == default || string.IsNullOrWhiteSpace(request.AcknowledgementReference) ||
             string.IsNullOrWhiteSpace(request.EvidenceReference))
             throw new ArgumentException("An acknowledgement date, reference and evidence reference are required.");
-        var filing = await FindAsync(companyId, filingId, ct);
-        if (filing.Status != ZimbabweDswtFilingStatus.Submitted)
-            throw new InvalidOperationException("Only a manually submitted filing can receive a TaRMS acknowledgement.");
-        if (filing.SubmittedAt.HasValue && request.AcknowledgedAt < filing.SubmittedAt.Value)
-            throw new InvalidOperationException("The acknowledgement cannot precede submission.");
-        filing.AcknowledgedAt = request.AcknowledgedAt;
-        filing.AcknowledgementReference = request.AcknowledgementReference.Trim();
-        filing.AcknowledgementEvidenceReference = request.EvidenceReference.Trim();
-        filing.Status = request.Accepted
-            ? ZimbabweDswtFilingStatus.Acknowledged
-            : ZimbabweDswtFilingStatus.Rejected;
-        _audit.Record(companyId, _db.CurrentUserId,
-            request.Accepted ? "Dswt.FilingAcknowledged" : "Dswt.FilingRejected", "Tax",
-            nameof(ZimbabweDswtFiling), filing.Id, null,
-            new { filing.AcknowledgedAt, request.Accepted, filing.AcknowledgementReference, filing.AcknowledgementEvidenceReference });
-        await _db.SaveChangesAsync(ct);
-        return filing;
+        return TransitionAsync(companyId, filingId, (filing, token) =>
+        {
+            if (filing.Status != ZimbabweDswtFilingStatus.Submitted)
+                throw new InvalidOperationException("Only a manually submitted filing can receive a TaRMS acknowledgement.");
+            if (filing.SubmittedAt.HasValue && request.AcknowledgedAt < filing.SubmittedAt.Value)
+                throw new InvalidOperationException("The acknowledgement cannot precede submission.");
+            filing.AcknowledgedAt = request.AcknowledgedAt;
+            filing.AcknowledgementReference = request.AcknowledgementReference.Trim();
+            filing.AcknowledgementEvidenceReference = request.EvidenceReference.Trim();
+            filing.Status = request.Accepted
+                ? ZimbabweDswtFilingStatus.Acknowledged
+                : ZimbabweDswtFilingStatus.Rejected;
+            _audit.Record(companyId, _db.CurrentUserId,
+                request.Accepted ? "Dswt.FilingAcknowledged" : "Dswt.FilingRejected", "Tax",
+                nameof(ZimbabweDswtFiling), filing.Id, null,
+                new { filing.AcknowledgedAt, request.Accepted, filing.AcknowledgementReference, filing.AcknowledgementEvidenceReference });
+            return Task.CompletedTask;
+        }, ct);
     }
 
-    public async Task<ZimbabweDswtFiling> ConfirmPaymentAsync(
+    public Task<ZimbabweDswtFiling> ConfirmPaymentAsync(
         Guid companyId, Guid filingId, ZimbabweDswtFilingPaymentRequest request, CancellationToken ct = default)
     {
         if (request.PaidAt == default || string.IsNullOrWhiteSpace(request.PaymentReference) ||
             string.IsNullOrWhiteSpace(request.EvidenceReference))
             throw new ArgumentException("A payment date, bank/ZIMRA payment reference and evidence reference are required.");
-        var filing = await FindAsync(companyId, filingId, ct);
-        if (filing.Status != ZimbabweDswtFilingStatus.Acknowledged)
-            throw new InvalidOperationException("Payment can only be confirmed for an acknowledged return.");
-        if (filing.TaxAmount <= 0 || request.Amount <= 0 || request.Amount != filing.TaxAmount)
-            throw new InvalidOperationException("The evidenced payment amount must exactly equal the DSWT return tax amount.");
-        if (!string.Equals(request.Currency?.Trim(), filing.Currency, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The payment currency must match the declared return currency.");
-        if (filing.AcknowledgedAt.HasValue && request.PaidAt < filing.AcknowledgedAt.Value)
-            throw new InvalidOperationException("The payment date cannot precede the TaRMS acknowledgement.");
-        filing.PaymentConfirmedAt = request.PaidAt;
-        filing.PaymentReference = request.PaymentReference.Trim();
-        filing.PaymentAmount = request.Amount;
-        filing.PaymentCurrency = request.Currency.Trim().ToUpperInvariant();
-        filing.PaymentEvidenceReference = request.EvidenceReference.Trim();
-        filing.Status = ZimbabweDswtFilingStatus.PaymentConfirmed;
-        _audit.Record(companyId, _db.CurrentUserId, "Dswt.FilingPaymentConfirmed", "Tax",
-            nameof(ZimbabweDswtFiling), filing.Id, null,
-            new { filing.PaymentConfirmedAt, filing.PaymentReference, filing.PaymentAmount, filing.PaymentCurrency, filing.PaymentEvidenceReference });
-        await _db.SaveChangesAsync(ct);
-        return filing;
+        return TransitionAsync(companyId, filingId, (filing, token) =>
+        {
+            if (filing.Status != ZimbabweDswtFilingStatus.Acknowledged)
+                throw new InvalidOperationException("Payment can only be confirmed for an acknowledged return.");
+            if (filing.TaxAmount <= 0 || request.Amount <= 0 || request.Amount != filing.TaxAmount)
+                throw new InvalidOperationException("The evidenced payment amount must exactly equal the DSWT return tax amount.");
+            if (!string.Equals(request.Currency?.Trim(), filing.Currency, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The payment currency must match the declared return currency.");
+            if (filing.AcknowledgedAt.HasValue && request.PaidAt < filing.AcknowledgedAt.Value)
+                throw new InvalidOperationException("The payment date cannot precede the TaRMS acknowledgement.");
+            filing.PaymentConfirmedAt = request.PaidAt;
+            filing.PaymentReference = request.PaymentReference.Trim();
+            filing.PaymentAmount = request.Amount;
+            filing.PaymentCurrency = request.Currency.Trim().ToUpperInvariant();
+            filing.PaymentEvidenceReference = request.EvidenceReference.Trim();
+            filing.Status = ZimbabweDswtFilingStatus.PaymentConfirmed;
+            _audit.Record(companyId, _db.CurrentUserId, "Dswt.FilingPaymentConfirmed", "Tax",
+                nameof(ZimbabweDswtFiling), filing.Id, null,
+                new { filing.PaymentConfirmedAt, filing.PaymentReference, filing.PaymentAmount, filing.PaymentCurrency, filing.PaymentEvidenceReference });
+            return Task.CompletedTask;
+        }, ct);
+    }
+
+    private Task<ZimbabweDswtFiling> TransitionAsync(
+        Guid companyId, Guid filingId,
+        Func<ZimbabweDswtFiling, CancellationToken, Task> transition,
+        CancellationToken ct)
+    {
+        return _db.InTransactionAsync(async token =>
+        {
+            await _db.AcquireTransactionLockAsync($"dswt-filing-transition:{companyId:N}:{filingId:N}", token);
+            var filing = await FindAsync(companyId, filingId, token);
+            await transition(filing, token);
+            await _db.SaveChangesAsync(token);
+            return filing;
+        }, ct);
     }
 
     public Task<ZimbabweDswtFiling?> GetAsync(Guid companyId, Guid filingId, CancellationToken ct = default) =>
