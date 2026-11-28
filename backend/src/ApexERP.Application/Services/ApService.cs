@@ -390,6 +390,21 @@ namespace ApexERP.Application.Services
 
             payment.JournalEntryId = je.Id;
             _db.ApPayments.Add(payment);
+            if (payment.BankAccountId.HasValue)
+            {
+                _db.BankTransactions.Add(new BankTransaction
+                {
+                    CompanyId = companyId,
+                    BankAccountId = payment.BankAccountId.Value,
+                    TransactionDate = paymentDate,
+                    Description = $"AP payment {paymentNo}",
+                    Debit = amount,
+                    Credit = 0m,
+                    Reference = paymentNo,
+                    IsReconciled = false,
+                    JournalEntryId = je.Id
+                });
+            }
             await _db.SaveChangesAsync(ct);
             return payment;
         }
