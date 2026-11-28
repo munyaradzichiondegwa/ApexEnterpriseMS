@@ -34,12 +34,26 @@ The law's collection mechanics are explicit: the intermediary withholds from the
 
 There is a public interpretive inconsistency: a ZIMRA Head of Technical Services interview reported by The Herald on 16 January 2026 described the recipient as the person who pays the tax. That statement does not alter the statutory withholding workflow or ZIMRA Public Notice 05/2026. The system must therefore record both the statutory withholding mechanics and the commercial contract's agreed gross-up/pass-through treatment. Do not automatically add the tax as a customer surcharge.
 
+## AP and bank settlement accounting
+
+Where a Zimbabwe intermediary deducts DSWT from a gross foreign-service payment, the AP settlement must be represented at the gross amount debited from the payer's bank account. The supplier receives the net remittance; the intermediary withholds and remits the difference. For a USD 100 gross payment at 15.5%, the AP/bank settlement is USD 100, the supplier's net remittance is USD 84.50 and DSWT withheld is USD 15.50.
+
+ApexERP must not:
+- reduce the AP settlement to the supplier's net amount while also clearing the full gross invoice;
+- post the same DSWT amount as a second expense or a second payable when it is already included in the gross bank debit; or
+- infer a withholding from a payment amount alone without intermediary evidence.
+
+The AP reconciliation control therefore requires a posted AP payment for the same supplier, currency and gross amount, and requires the payment to retain its originating company bank account. A unique company-scoped link prevents one AP payment from being reconciled to multiple DSWT records. The existing AP payment journal remains Dr AP / Cr Bank for the gross settlement; the DSWT register separately preserves the net supplier remittance and withholding evidence.
+
+This is not a blanket accounting conclusion for every contractual arrangement. If a contract requires a gross-up or the bank debits a different amount, record the actual bank evidence and obtain tax/accounting approval before configuring a different journal treatment.
+
 ## ApexERP implementation status
 
 - The pure evaluator applies the published 15.5% rate for suppliers not registered for VAT in Zimbabwe and the 3/23 tax fraction for registered suppliers.
 - A company-scoped DSWT register stores intermediary payment reference, supplier/intermediary identity, country, currency, gross amount, rate, withheld amount, net supplier remittance, service classification, VAT status, tax period, certificate, remittance date and evidence reference.
 - The register has a unique `(CompanyId, PaymentReference)` key and uses the existing fail-closed company query filter and PostgreSQL RLS pattern.
 - The register service validates the tax decision and evidence, supports certificate issuance and ZIMRA remittance status, and produces a monthly company-scoped register.
+- AP reconciliation links a DSWT record to a posted AP payment only when supplier, currency, gross amount and originating bank account agree. The link is unique per company/AP payment.
 - This register is not yet a GL posting, an AP payment automation, a TaRMS filing integration or a ZIMRA-approved return. No journal is posted by this service.
 
 ## Accounting design decisions
