@@ -298,12 +298,16 @@ namespace ApexERP.Application.Services
                     x.EffectiveDate >= actualVersion.PeriodStart && x.EffectiveDate < actualVersion.PeriodEnd)
                     .ToListAsync(ct);
                 var capturedSourceIds = cashActuals.Select(x => x.SourceRecordId).Distinct().ToArray();
-                var postedBankMovements = _db.BankTransactions.Where(x => x.CompanyId == companyId &&
-                    x.TransactionDate >= actualVersion.PeriodStart && x.TransactionDate < actualVersion.PeriodEnd &&
-                    x.JournalEntryId.HasValue && _db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
-                        j.CompanyId == companyId && j.Status == JournalStatus.Posted));
-                var uncapturedMovements = await postedBankMovements.CountAsync(x =>
-                    !x.IsReconciled || !capturedSourceIds.Contains(x.Id), ct);
+                // Every bank-statement movement in the budget period must be accounted for.
+                // Unreconciled, unlinked and unposted movements are exceptions too; filtering
+                // them out would make source coverage appear complete when cash evidence is missing.
+                var periodBankMovements = _db.BankTransactions.Where(x => x.CompanyId == companyId &&
+                    x.TransactionDate >= actualVersion.PeriodStart && x.TransactionDate < actualVersion.PeriodEnd);
+                var uncapturedMovements = await periodBankMovements.CountAsync(x =>
+                    !x.IsReconciled || !x.JournalEntryId.HasValue ||
+                    !_db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
+                        j.CompanyId == companyId && j.Status == JournalStatus.Posted) ||
+                    !capturedSourceIds.Contains(x.Id), ct);
                 var pendingCashActuals = cashActuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
                 var invalidCertifiedCashActuals = await _db.PublicSectorBudgetExecutionActuals.Where(x =>
                         x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id &&
