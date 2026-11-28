@@ -1029,6 +1029,10 @@ namespace ApexERP.Infrastructure.Data.Migrations
 
                     b.HasIndex("SupplierId");
 
+                    b.HasIndex("VatInputAccountId");
+
+                    b.HasIndex("WhtPayableAccountId");
+
                     b.HasIndex("CompanyId", "InvoiceNo")
                         .IsUnique();
 
@@ -1635,6 +1639,8 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerId");
+
+                    b.HasIndex("VatOutputAccountId");
 
                     b.HasIndex("FundCentreId");
 
