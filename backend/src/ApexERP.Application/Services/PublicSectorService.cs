@@ -768,7 +768,8 @@ namespace ApexERP.Application.Services
         public async Task<PublicSectorCashSourceSubmission> CreateCashSourceSubmissionAsync(
             Guid companyId, Guid expectedSourceId, int recordCount, decimal controlTotal,
             decimal openingBalance, decimal closingBalance, string currency,
-            string evidenceReference, Guid actorId, CancellationToken ct = default)
+            string evidenceReference, Guid actorId, CancellationToken ct = default,
+            string? revisionReason = null)
         {
             if (recordCount < 0 || string.IsNullOrWhiteSpace(currency) || currency.Trim().Length != 3 ||
                 string.IsNullOrWhiteSpace(evidenceReference))
@@ -780,9 +781,17 @@ namespace ApexERP.Application.Services
             var previousSubmission = await _db.PublicSectorCashSourceSubmissions
                 .Where(x => x.CompanyId == companyId && x.ExpectedCashSourceId == source.Id)
                 .OrderByDescending(x => x.SubmissionRevision).FirstOrDefaultAsync(ct);
-            if (previousSubmission != null && previousSubmission.Status != "Rejected" &&
-                previousSubmission.RecordLevelStatus != "Rejected")
-                throw new InvalidOperationException("An active source submission already exists. A new revision is allowed only after the prior source-control or record-level reconciliation was rejected.");
+            if (previousSubmission != null)
+            {
+                var previousCanBeSuperseded = previousSubmission.Status == "Rejected" ||
+                    previousSubmission.RecordLevelStatus == "Rejected" ||
+                    (previousSubmission.Status == "Reviewed" &&
+                        previousSubmission.RecordLevelStatus != "PendingReview");
+                if (!previousCanBeSuperseded)
+                    throw new InvalidOperationException("A source submission is still in draft or review. Complete or reject that review before preparing a new revision.");
+                if (string.IsNullOrWhiteSpace(revisionReason))
+                    throw new InvalidOperationException("A documented reason is required for every replacement source-submission revision.");
+            }
 
             if (controlTotal < 0m)
                 throw new InvalidOperationException("A source activity control total cannot be negative.");
@@ -805,10 +814,18 @@ namespace ApexERP.Application.Services
             };
             _db.PublicSectorCashSourceSubmissions.Add(item);
             _audit.Record(companyId, actorId, "PublicSectorCashSourceSubmission.Created", "PublicSector",
-                nameof(PublicSectorCashSourceSubmission), item.Id, null,
+                nameof(PublicSectorCashSourceSubmission), item.Id,
+                previousSubmission == null ? null : new
+                {
+                    PreviousSubmissionId = previousSubmission.Id,
+                    previousSubmission.SubmissionRevision,
+                    previousSubmission.Status,
+                    previousSubmission.RecordLevelStatus
+                },
                 new { item.ExpectedCashSourceId, item.BudgetVersionId, item.SubmissionRevision, item.PeriodStart, item.PeriodEnd,
                     item.RecordCount, item.ControlTotal, item.OpeningBalance, item.ClosingBalance,
-                    item.Currency, item.EvidenceReference });
+                    item.Currency, item.EvidenceReference,
+                    RevisionReason = string.IsNullOrWhiteSpace(revisionReason) ? null : revisionReason.Trim() });
             await _db.SaveChangesAsync(ct);
             return item;
         }
