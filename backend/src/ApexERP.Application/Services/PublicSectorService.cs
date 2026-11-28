@@ -40,6 +40,199 @@ namespace ApexERP.Application.Services
         }
 
 
+        public sealed record BudgetVersionLineInput(Guid FundCentreId, Guid GlAccountId, Guid? CostCentreId,
+            string Description, string ClassificationCode, decimal Amount);
+        public sealed record BudgetComparisonLine(int LineNumber, string Description, string FundCentreCode,
+            string FundCentreName, string AccountCode, string AccountName, string ClassificationCode,
+            decimal OriginalBudget, decimal? FinalBudget, decimal? ActualOnComparableBasis,
+            decimal? Variance, decimal? VariancePercent, string? OriginalToFinalExplanation);
+        public sealed record BudgetComparisonReport(Guid OriginalBudgetVersionId, Guid? FinalBudgetVersionId,
+            int FinancialYear, string Currency, string AccountingBasis, string ClassificationBasis,
+            string EntityScope, DateTime PeriodStart, DateTime PeriodEnd, bool FinalBudgetAvailable,
+            bool ComparableActualsAvailable, string ComparabilityMessage,
+            IReadOnlyList<BudgetComparisonLine> Lines,
+            IReadOnlyList<PublicSectorBudgetReconciliation> Reconciliations);
+
+        public async Task<PublicSectorBudgetVersion> CreateBudgetVersionAsync(Guid companyId, int financialYear,
+            PublicSectorBudgetVersionKind kind, string currency, AccountingBasis accountingBasis,
+            string classificationBasis, string entityScope, DateTime periodStart, DateTime periodEnd,
+            string authorityReference, string? amendmentReason, IReadOnlyCollection<BudgetVersionLineInput> lines,
+            Guid actorId, CancellationToken ct = default)
+        {
+            if (financialYear < 2000 || financialYear > 2200 || periodStart >= periodEnd ||
+                periodStart.Year > financialYear || periodEnd.Year < financialYear ||
+                string.IsNullOrWhiteSpace(currency) || currency.Trim().Length != 3 ||
+                string.IsNullOrWhiteSpace(classificationBasis) || string.IsNullOrWhiteSpace(entityScope) ||
+                string.IsNullOrWhiteSpace(authorityReference) || lines.Count == 0)
+                throw new InvalidOperationException("A valid reporting year, period, currency, classification, entity scope, authority reference and at least one budget line are required.");
+            if (kind == PublicSectorBudgetVersionKind.Revised && string.IsNullOrWhiteSpace(amendmentReason))
+                throw new InvalidOperationException("A revised budget requires an explanation of changes from the original budget.");
+            if (lines.Any(x => x.Amount < 0 || string.IsNullOrWhiteSpace(x.Description) || string.IsNullOrWhiteSpace(x.ClassificationCode)))
+                throw new InvalidOperationException("Budget lines require non-negative amounts, descriptions and classification codes.");
+
+            var originalExists = await _db.PublicSectorBudgetVersions.AnyAsync(x =>
+                x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                x.Kind == PublicSectorBudgetVersionKind.Original &&
+                x.Status != PublicSectorBudgetVersionStatus.Rejected, ct);
+            if (kind == PublicSectorBudgetVersionKind.Original && originalExists)
+                throw new InvalidOperationException("Only one original budget version is permitted for a company and financial year.");
+            if (kind == PublicSectorBudgetVersionKind.Revised && !await _db.PublicSectorBudgetVersions.AnyAsync(x =>
+                x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                x.Kind == PublicSectorBudgetVersionKind.Original && x.Status == PublicSectorBudgetVersionStatus.Approved, ct))
+                throw new InvalidOperationException("A revised budget can only be created after the original budget has been approved.");
+
+            var versionNumber = (await _db.PublicSectorBudgetVersions
+                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear && x.Kind == kind)
+                .Select(x => (int?)x.VersionNumber).MaxAsync(ct) ?? 0) + 1;
+
+            foreach (var line in lines)
+            {
+                if (!await _db.FundCentres.AnyAsync(x => x.Id == line.FundCentreId &&
+                    x.CompanyId == companyId && x.FinancialYear == financialYear, ct))
+                    throw new InvalidOperationException("Every budget line must reference a fund centre in the same company and financial year.");
+                if (!await _db.GlAccounts.AnyAsync(x => x.Id == line.GlAccountId && x.CompanyId == companyId &&
+                    x.IsActive && (x.Type == GlAccountType.Income || x.Type == GlAccountType.Expense), ct))
+                    throw new InvalidOperationException("Budget lines must map to an active income or expense GL account in the same company.");
+                if (line.CostCentreId.HasValue && !await _db.CostCentres.AnyAsync(x =>
+                    x.Id == line.CostCentreId.Value && x.CompanyId == companyId && x.IsActive, ct))
+                    throw new InvalidOperationException("A budget line references an inactive or foreign cost centre.");
+            }
+
+            var version = new PublicSectorBudgetVersion
+            {
+                CompanyId = companyId, FinancialYear = financialYear, VersionNumber = versionNumber,
+                Kind = kind, Currency = currency.Trim().ToUpperInvariant(), AccountingBasis = accountingBasis,
+                ClassificationBasis = classificationBasis.Trim(), EntityScope = entityScope.Trim(),
+                PeriodStart = periodStart, PeriodEnd = periodEnd, AuthorityReference = authorityReference.Trim(),
+                AmendmentReason = amendmentReason?.Trim(), CreatedBy = actorId,
+                Lines = lines.Select((line, index) => new PublicSectorBudgetVersionLine
+                {
+                    CompanyId = companyId, FundCentreId = line.FundCentreId, GlAccountId = line.GlAccountId,
+                    CostCentreId = line.CostCentreId, LineNumber = index + 1, Description = line.Description.Trim(),
+                    ClassificationCode = line.ClassificationCode.Trim(), Amount = line.Amount, CreatedBy = actorId
+                }).ToList()
+            };
+            _db.PublicSectorBudgetVersions.Add(version);
+            _audit.Record(companyId, actorId, "PublicSectorBudgetVersion.Created", "PublicSector",
+                nameof(PublicSectorBudgetVersion), version.Id, null,
+                new { version.FinancialYear, version.Kind, version.VersionNumber, version.Currency,
+                    version.AccountingBasis, version.ClassificationBasis, version.EntityScope,
+                    version.AuthorityReference, LineCount = version.Lines.Count });
+            await _db.SaveChangesAsync(ct);
+            return version;
+        }
+
+        public async Task MarkBudgetVersionPendingAsync(Guid companyId, Guid versionId, Guid workflowId,
+            CancellationToken ct = default)
+        {
+            var version = await _db.PublicSectorBudgetVersions.Include(x => x.Lines).FirstOrDefaultAsync(x =>
+                x.Id == versionId && x.CompanyId == companyId, ct)
+                ?? throw new InvalidOperationException("Budget version not found.");
+            if (version.Status != PublicSectorBudgetVersionStatus.Draft)
+                throw new InvalidOperationException("Only a draft budget version can be submitted for approval.");
+            var total = version.Lines.Sum(x => x.Amount);
+            var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x =>
+                x.Id == workflowId && x.CompanyId == companyId && x.RequestType == "PublicSectorBudgetVersion" &&
+                x.ReferenceId == version.Id && x.Amount == total && x.Status == WorkflowStatus.Pending, ct)
+                ?? throw new InvalidOperationException("A matching pending approval workflow is required.");
+            version.ApprovalWorkflowId = workflow.Id;
+            version.Status = PublicSectorBudgetVersionStatus.PendingApproval;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        public async Task<PublicSectorBudgetVersion> FinaliseBudgetVersionApprovalAsync(Guid companyId,
+            Guid versionId, Guid actorId, CancellationToken ct = default)
+        {
+            return await _db.InTransactionAsync(async token =>
+            {
+                var version = await _db.PublicSectorBudgetVersions.Include(x => x.Lines).FirstOrDefaultAsync(x =>
+                    x.Id == versionId && x.CompanyId == companyId, token)
+                    ?? throw new InvalidOperationException("Budget version not found.");
+                if (version.Status != PublicSectorBudgetVersionStatus.PendingApproval || !version.ApprovalWorkflowId.HasValue)
+                    throw new InvalidOperationException("Only a pending budget version with an approval workflow can be approved.");
+                var workflow = await _db.WorkflowRequests.Include(x => x.Approvals).FirstOrDefaultAsync(x =>
+                    x.Id == version.ApprovalWorkflowId.Value && x.CompanyId == companyId &&
+                    x.RequestType == "PublicSectorBudgetVersion" && x.ReferenceId == version.Id &&
+                    x.Status == WorkflowStatus.Approved && x.Approvals.Any(a => a.Approved && a.ApproverId == actorId), token)
+                    ?? throw new InvalidOperationException("The independent budget approval workflow has not been approved.");
+                if (workflow.SubmittedBy == actorId)
+                    throw new InvalidOperationException("The budget submitter cannot finalise their own approval.");
+                if (version.Kind == PublicSectorBudgetVersionKind.Revised &&
+                    !await _db.PublicSectorBudgetVersions.AnyAsync(x => x.CompanyId == companyId &&
+                        x.FinancialYear == version.FinancialYear && x.Kind == PublicSectorBudgetVersionKind.Original &&
+                        x.Status == PublicSectorBudgetVersionStatus.Approved, token))
+                    throw new InvalidOperationException("The original budget must remain approved before a revised budget can be approved.");
+                version.Status = PublicSectorBudgetVersionStatus.Approved;
+                version.ApprovedBy = actorId;
+                version.ApprovedAt = DateTime.UtcNow;
+                _audit.Record(companyId, actorId, "PublicSectorBudgetVersion.Approved", "PublicSector",
+                    nameof(PublicSectorBudgetVersion), version.Id,
+                    new { Status = PublicSectorBudgetVersionStatus.PendingApproval },
+                    new { version.Status, version.ApprovedBy, version.ApprovedAt, version.ApprovalWorkflowId,
+                        version.Kind, version.VersionNumber, Total = version.Lines.Sum(x => x.Amount) });
+                await _db.SaveChangesAsync(token);
+                return version;
+            }, ct);
+        }
+
+        public async Task<BudgetComparisonReport> GetBudgetComparisonAsync(Guid companyId, int financialYear,
+            CancellationToken ct = default)
+        {
+            if (financialYear < 2000 || financialYear > 2200)
+                throw new InvalidOperationException("A valid financial year is required.");
+            var original = await _db.PublicSectorBudgetVersions.Include(x => x.Lines)
+                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                    x.Kind == PublicSectorBudgetVersionKind.Original && x.Status == PublicSectorBudgetVersionStatus.Approved)
+                .OrderBy(x => x.VersionNumber).FirstOrDefaultAsync(ct)
+                ?? throw new InvalidOperationException("An approved original budget is required before the IPSAS 24 comparison can be produced.");
+            var final = await _db.PublicSectorBudgetVersions.Include(x => x.Lines)
+                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                    x.Kind == PublicSectorBudgetVersionKind.Revised && x.Status == PublicSectorBudgetVersionStatus.Approved)
+                .OrderByDescending(x => x.VersionNumber).FirstOrDefaultAsync(ct);
+
+            var comparable = original.AccountingBasis == AccountingBasis.Accrual &&
+                original.PeriodStart == (final?.PeriodStart ?? original.PeriodStart) &&
+                original.PeriodEnd == (final?.PeriodEnd ?? original.PeriodEnd);
+            var rows = new List<BudgetComparisonLine>();
+            foreach (var line in original.Lines.OrderBy(x => x.LineNumber))
+            {
+                var account = await _db.GlAccounts.FirstAsync(x => x.Id == line.GlAccountId && x.CompanyId == companyId, ct);
+                var fund = await _db.FundCentres.FirstAsync(x => x.Id == line.FundCentreId && x.CompanyId == companyId, ct);
+                var finalLine = final?.Lines.FirstOrDefault(x => x.FundCentreId == line.FundCentreId &&
+                    x.GlAccountId == line.GlAccountId && x.CostCentreId == line.CostCentreId &&
+                    x.ClassificationCode == line.ClassificationCode);
+                decimal? actual = null;
+                if (comparable)
+                {
+                    var raw = await _db.JournalLines.Where(l => l.GlAccountId == line.GlAccountId &&
+                        l.FundCentreId == line.FundCentreId && l.CostCentreId == line.CostCentreId &&
+                        l.JournalEntry!.CompanyId == companyId &&
+                        l.JournalEntry.EntryDate >= original.PeriodStart && l.JournalEntry.EntryDate < original.PeriodEnd &&
+                        (l.JournalEntry.Status == JournalStatus.Posted || l.JournalEntry.Status == JournalStatus.Reversed))
+                        .SumAsync(l => account.Type == GlAccountType.Income ? l.BaseCredit - l.BaseDebit : l.BaseDebit - l.BaseCredit, ct);
+                    actual = raw;
+                }
+                var finalAmount = finalLine?.Amount;
+                var variance = finalAmount.HasValue && actual.HasValue ? finalAmount.Value - actual.Value : (decimal?)null;
+                rows.Add(new BudgetComparisonLine(line.LineNumber, line.Description, fund.Code, fund.Name,
+                    account.Code, account.Name, line.ClassificationCode, line.Amount, finalAmount, actual,
+                    variance, finalAmount.HasValue && actual.HasValue && finalAmount.Value != 0m
+                        ? Math.Round(variance!.Value / finalAmount.Value * 100m, 2) : null,
+                    finalLine == null ? "No corresponding line in the final approved budget." :
+                        final?.AmendmentReason));
+            }
+
+            var reconciliations = await _db.PublicSectorBudgetReconciliations
+                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear)
+                .OrderBy(x => x.Type).ThenBy(x => x.Description).ToListAsync(ct);
+            return new BudgetComparisonReport(original.Id, final?.Id, financialYear, original.Currency,
+                original.AccountingBasis.ToString(), original.ClassificationBasis, original.EntityScope,
+                original.PeriodStart, original.PeriodEnd, final != null, comparable,
+                comparable ? "Accrual-basis ledger actuals are comparable only where the approved budget period and entity scope match the ledger reporting scope." :
+                    "Comparable-basis actuals are not derived from accrual GL postings for this budget. Load and approve actuals on the budget basis and complete the IPSAS 24 reconciliation before issuing the statement.",
+                rows, reconciliations);
+        }
+
         public async Task<PublicSectorBudgetAllocation> CreateBudgetAllocationAsync(Guid companyId, Guid fundCentreId,
             Guid glAccountId, Guid? costCentreId, int financialYear, decimal amount, Guid actorId, CancellationToken ct = default)
         {
