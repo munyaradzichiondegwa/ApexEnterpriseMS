@@ -1,4 +1,5 @@
 using ApexERP.Application.Services;
+using ApexERP.Domain.Entities;
 using Xunit;
 
 namespace ApexERP.Tests;
