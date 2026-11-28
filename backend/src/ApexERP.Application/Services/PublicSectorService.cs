@@ -310,8 +310,8 @@ namespace ApexERP.Application.Services
                     x.StatementEntityScope == reconciliationEntityScope &&
                     x.Type == type && x.StatementSection == statementSection.Trim() &&
                     x.Status != PublicSectorBudgetReconciliationStatus.Rejected).ToListAsync(ct);
-                if (existingSectionRows.Count > 0)
-                    throw new InvalidOperationException("Only one reconciliation row per budget version, statement period, entity, category and section is permitted. Reject the existing row before replacing it.");
+                if (existingSectionRows.Any(x => x.SourceFingerprint == sourceFingerprint))
+                    throw new InvalidOperationException("A reconciliation for this category and section already exists for the current source fingerprint. Use its existing approval workflow.");
             }
             // Cash-budget actuals are on the budget's cash basis. Revenue/expense adjustments
             // reconcile those comparable amounts to accrual financial-statement actuals;
@@ -2078,7 +2078,8 @@ namespace ApexERP.Application.Services
                     x.Type == type && string.Equals(x.StatementSection, section, StringComparison.OrdinalIgnoreCase));
                 if (candidate == null) return false;
                 var rowsForCategory = reconciliations.Where(x => x.Type == type &&
-                    string.Equals(x.StatementSection, section, StringComparison.OrdinalIgnoreCase)).ToList();
+                    string.Equals(x.StatementSection, section, StringComparison.OrdinalIgnoreCase) &&
+                    x.SourceFingerprint == candidate.SourceFingerprint).ToList();
                 var noDifferenceRows = rowsForCategory.Where(x => x.IsNoDifferenceAttestation).ToList();
                 var adjustmentRows = rowsForCategory.Where(x => !x.IsNoDifferenceAttestation).ToList();
                 if (candidate.ExpectedAdjustment == 0m)
