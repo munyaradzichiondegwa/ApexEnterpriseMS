@@ -145,6 +145,22 @@ namespace ApexERP.Domain.Entities
         public bool IsExcluded { get; set; }
         public string? ExclusionReason { get; set; }
     }
+    
+    /// <summary>Independent attestation that the expected cash-source register is complete for
+    /// the approved budget reporting entity and period. Certification freezes additions to the register.</summary>
+    public class PublicSectorExpectedCashSourceRegisterAttestation : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public int ExpectedSourceCount { get; set; }
+        public string EntityScope { get; set; } = string.Empty;
+        public string EvidenceReference { get; set; } = string.Empty;
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? CertifiedBy { get; set; }
+        public DateTime? CertifiedAt { get; set; }
+        public string? ReviewNote { get; set; }
+    }
 
     /// <summary>
     /// Independent period-level declaration that no cash source activity occurred.
