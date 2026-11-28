@@ -56,6 +56,7 @@ namespace ApexERP.Domain.Entities
         public int LineNumber { get; set; }
         public string Description { get; set; } = string.Empty;
         public string ClassificationCode { get; set; } = string.Empty;
+        public string? TreasuryClassificationCode { get; set; }
         public string? NoteReference { get; set; }
         public decimal Amount { get; set; }
     }
