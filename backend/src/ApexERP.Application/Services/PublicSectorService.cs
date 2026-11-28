@@ -52,6 +52,10 @@ namespace ApexERP.Application.Services
             decimal OriginalBudget, decimal? FinalBudget, decimal? ActualOnComparableBasis,
             decimal? Variance, decimal? VariancePercent, string? OriginalToFinalExplanation,
             Guid BudgetVersionLineId);
+        public sealed record BudgetFinancialStatementReconciliation(bool Required, bool Complete, string Message,
+            decimal? ComparableRevenueActual, decimal RevenueAdjustment, decimal? FinancialStatementRevenueActual,
+            bool RevenueCovered, decimal? ComparableExpenseActual, decimal ExpenseAdjustment,
+            decimal? FinancialStatementExpenseActual, bool ExpenseCovered);
         public sealed record BudgetComparisonReport(Guid OriginalBudgetVersionId, Guid? FinalBudgetVersionId,
             int FinancialYear, string Currency, string AccountingBasis, string ClassificationBasis,
             string EntityScope, DateTime PeriodStart, DateTime PeriodEnd, bool FinalBudgetAvailable,
@@ -59,7 +63,8 @@ namespace ApexERP.Application.Services
             IReadOnlyList<BudgetComparisonLine> Lines,
             IReadOnlyList<PublicSectorBudgetReconciliation> Reconciliations,
             IReadOnlyList<PublicSectorBudgetVarianceExplanation> VarianceExplanations,
-            bool VarianceExplanationsComplete, bool OriginalToFinalExplanationsComplete);
+            bool VarianceExplanationsComplete, bool OriginalToFinalExplanationsComplete,
+            BudgetFinancialStatementReconciliation FinancialStatementReconciliation);
 
         public async Task<PublicSectorBudgetVersion> CreateBudgetVersionAsync(Guid companyId, int financialYear,
             PublicSectorBudgetVersionKind kind, string currency, AccountingBasis accountingBasis,
@@ -1670,11 +1675,52 @@ namespace ApexERP.Application.Services
                     explanation.Status == "Approved" && explanation.VarianceAmount == line.Variance!.Value));
             var originalToFinalExplanationsComplete = final!.Kind != PublicSectorBudgetVersionKind.Revised ||
                 (final.AmendmentNature.HasValue && !string.IsNullOrWhiteSpace(final.AmendmentReason));
+
+            var comparableRevenueActual = comparable
+                ? rows.Where(x => x.AccountType == GlAccountType.Income.ToString()).Sum(x => x.ActualOnComparableBasis ?? 0m)
+                : (decimal?)null;
+            var comparableExpenseActual = comparable
+                ? rows.Where(x => x.AccountType == GlAccountType.Expense.ToString()).Sum(x => x.ActualOnComparableBasis ?? 0m)
+                : (decimal?)null;
+            var revenueReconciliationRows = reconciliations.Where(x =>
+                string.Equals(x.StatementSection, "Revenue", StringComparison.OrdinalIgnoreCase)).ToList();
+            var expenseReconciliationRows = reconciliations.Where(x =>
+                string.Equals(x.StatementSection, "Expense", StringComparison.OrdinalIgnoreCase)).ToList();
+            var revenueHasAdjustment = revenueReconciliationRows.Any(x => x.RevenueAmount != 0m);
+            var expenseHasAdjustment = expenseReconciliationRows.Any(x => x.ExpenseAmount != 0m);
+            var revenueHasNoDifference = revenueReconciliationRows.Any(x => x.IsNoDifferenceAttestation);
+            var expenseHasNoDifference = expenseReconciliationRows.Any(x => x.IsNoDifferenceAttestation);
+            var revenueCovered = (revenueHasAdjustment || revenueHasNoDifference) &&
+                !(revenueHasAdjustment && revenueHasNoDifference);
+            var expenseCovered = (expenseHasAdjustment || expenseHasNoDifference) &&
+                !(expenseHasAdjustment && expenseHasNoDifference);
+            var revenueAdjustment = revenueReconciliationRows.Sum(x => x.RevenueAmount);
+            var expenseAdjustment = expenseReconciliationRows.Sum(x => x.ExpenseAmount);
+            var financialStatementReconciliationRequired = original.AccountingBasis == AccountingBasis.Cash;
+            var financialStatementReconciliationComplete = comparable &&
+                (!financialStatementReconciliationRequired || (revenueCovered && expenseCovered));
+            var financialStatementReconciliationMessage = !comparable
+                ? "Comparable budget actuals are not available, so the financial-statement reconciliation cannot be completed."
+                : !financialStatementReconciliationRequired
+                    ? "Accrual-basis actuals are already on the financial-statement basis. No separate basis reconciliation is required unless an approved difference is recorded."
+                    : financialStatementReconciliationComplete
+                        ? "Revenue and expense actuals on the budget's cash basis are reconciled to financial-statement actuals using independently approved adjustments or explicit no-difference attestations."
+                        : $"Cash-basis budget actuals require approved financial-statement reconciliation for: {string.Join(" and ", new[] { !revenueCovered ? "Revenue" : null, !expenseCovered ? "Expense" : null }.Where(x => x != null))}.";
+            var financialStatementReconciliation = new BudgetFinancialStatementReconciliation(
+                financialStatementReconciliationRequired, financialStatementReconciliationComplete,
+                financialStatementReconciliationMessage, comparableRevenueActual, revenueAdjustment,
+                financialStatementReconciliationComplete && comparableRevenueActual.HasValue
+                    ? comparableRevenueActual.Value + revenueAdjustment : null,
+                revenueCovered, comparableExpenseActual, expenseAdjustment,
+                financialStatementReconciliationComplete && comparableExpenseActual.HasValue
+                    ? comparableExpenseActual.Value + expenseAdjustment : null,
+                expenseCovered);
+
             return new BudgetComparisonReport(original.Id, final.Id, financialYear, original.Currency,
                 original.AccountingBasis.ToString(), original.ClassificationBasis, original.EntityScope,
                 original.PeriodStart, original.PeriodEnd, true, comparable,
                 comparabilityMessage, rows, reconciliations, varianceExplanations, explanationComplete,
-                originalToFinalExplanationsComplete);
+                originalToFinalExplanationsComplete, financialStatementReconciliation);
         }
 
 
