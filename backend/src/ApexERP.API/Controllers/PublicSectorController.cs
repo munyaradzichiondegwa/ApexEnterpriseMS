@@ -1301,7 +1301,8 @@ namespace ApexERP.API.Controllers
                 x.StatementEntityScope == statementEntityName &&
                 (x.StatementSection == "Operating" || x.StatementSection == "Investing" ||
                  x.StatementSection == "Financing") &&
-                x.Status == PublicSectorBudgetReconciliationStatus.Approved).ToListAsync(ct);
+                x.Status == PublicSectorBudgetReconciliationStatus.Approved)
+                .OrderBy(x => x.StatementSection).ThenBy(x => x.Id).ToListAsync(ct);
             var adjustments = new List<PublicSectorBudgetReconciliation>();
             var invalidApprovedAdjustments = 0;
             foreach (var adjustment in approvedAdjustments)
