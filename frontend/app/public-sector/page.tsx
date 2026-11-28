@@ -623,7 +623,7 @@ export default function PublicSectorPage() {
                   <tbody>{cashSourceSubmissions.map((submission: any) => {
                     const source = expectedCashSources.find((x: any) => x.id === submission.expectedCashSourceId);
                     return <tr key={submission.id}>
-                      <td>{source?.sourceCode ?? submission.expectedCashSourceId}</td>
+                      <td>{source?.sourceCode ?? submission.expectedCashSourceId} · Rev {submission.submissionRevision ?? 1}</td>
                       <td>{submission.recordCount} / {submission.currency} {fmt(submission.controlTotal)}</td>
                       <td>{submission.status}</td><td>{submission.recordLevelStatus}</td>
                       <td className="flex gap-1 flex-wrap">
