@@ -1454,10 +1454,10 @@ namespace ApexERP.Application.Services
                 {
                     if (certifiedActual.ReversalOfId.HasValue)
                     {
-                        var original = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
+                        var reversalTarget = await _db.PublicSectorBudgetExecutionActuals.FirstOrDefaultAsync(x =>
                             x.Id == certifiedActual.ReversalOfId.Value && x.CompanyId == companyId, ct);
-                        if (original == null || original.Status != PublicSectorBudgetActualStatus.Reversed ||
-                            original.Amount != certifiedActual.Amount || original.EventKind == certifiedActual.EventKind ||
+                        if (reversalTarget == null || reversalTarget.Status != PublicSectorBudgetActualStatus.Reversed ||
+                            reversalTarget.Amount != certifiedActual.Amount || reversalTarget.EventKind == certifiedActual.EventKind ||
                             string.IsNullOrWhiteSpace(certifiedActual.ReversalReason))
                             invalidCertifiedCashActuals++;
                     }
