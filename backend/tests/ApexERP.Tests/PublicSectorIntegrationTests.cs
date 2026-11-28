@@ -749,6 +749,88 @@ namespace ApexERP.Tests
             Assert.Contains(explainedReport.VarianceExplanations, x => x.Id == varianceExplanation.Id);
         }
 
+
+        [PostgresFact]
+        public async Task Ipsas24_original_budget_is_final_budget_when_no_revision_is_approved()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var accountId = Guid.NewGuid();
+            var versionId = Guid.NewGuid();
+            var lineId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "No Revision MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-NR",
+                    Name = "No Revision Vote", Level = FundCentreLevel.Vote,
+                    FinancialYear = 2026, AppropriationAmount = 100m
+                });
+                seed.GlAccounts.Add(new GlAccount
+                {
+                    Id = accountId, CompanyId = companyId, Code = "5100",
+                    Name = "Operating Expense", SubType = "EC-01",
+                    Type = GlAccountType.Expense, Currency = "USD", IsActive = true
+                });
+                seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
+                {
+                    Id = versionId, CompanyId = companyId, FinancialYear = 2026,
+                    VersionNumber = 1, Kind = PublicSectorBudgetVersionKind.Original,
+                    Status = PublicSectorBudgetVersionStatus.Approved, Currency = "USD",
+                    AccountingBasis = AccountingBasis.Accrual, ClassificationBasis = "EC-01",
+                    EntityScope = "No Revision MDA",
+                    PeriodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    PeriodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    AuthorityReference = "Appropriation Act 2026",
+                    ApprovedBy = Guid.NewGuid(), ApprovedAt = DateTime.UtcNow
+                });
+                seed.PublicSectorBudgetVersionLines.Add(new PublicSectorBudgetVersionLine
+                {
+                    Id = lineId, CompanyId = companyId, BudgetVersionId = versionId,
+                    FundCentreId = fundCentreId, GlAccountId = accountId, LineNumber = 1,
+                    Description = "Operating expense", ClassificationCode = "EC-01", Amount = 100m
+                });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 1,
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 2, 1),
+                    Status = PeriodStatus.Open
+                });
+                var journal = new JournalEntry
+                {
+                    CompanyId = companyId, EntryNo = "JE-NO-REVISION",
+                    Description = "Actual expenditure", EntryDate = new DateTime(2026, 6, 30),
+                    PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                };
+                seed.JournalEntries.Add(journal);
+                seed.JournalLines.Add(new JournalLine
+                {
+                    JournalEntryId = journal.Id, GlAccountId = accountId,
+                    FundCentreId = fundCentreId, Debit = 40m, Credit = 0m,
+                    BaseDebit = 40m, BaseCredit = 0m
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var report = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.True(report.FinalBudgetAvailable);
+            Assert.Equal(versionId, report.FinalBudgetVersionId);
+            var line = Assert.Single(report.Lines);
+            Assert.Equal(100m, line.OriginalBudget);
+            Assert.Equal(100m, line.FinalBudget);
+            Assert.Equal(40m, line.ActualOnComparableBasis);
+            Assert.Equal(60m, line.Variance);
+        }
+
         [PostgresFact]
         public async Task Ipsas24_cash_basis_budget_does_not_mislabel_accrual_gl_as_comparable_actuals()
         {
