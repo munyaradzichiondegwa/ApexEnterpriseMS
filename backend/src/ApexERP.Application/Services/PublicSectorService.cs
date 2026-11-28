@@ -81,6 +81,12 @@ namespace ApexERP.Application.Services
                 x.Kind == PublicSectorBudgetVersionKind.Original && x.Status == PublicSectorBudgetVersionStatus.Approved, ct))
                 throw new InvalidOperationException("A revised budget can only be created after the original budget has been approved.");
 
+            var duplicateDimension = lines.GroupBy(x =>
+                $"{x.FundCentreId:N}|{x.GlAccountId:N}|{x.CostCentreId?.ToString("N") ?? "none"}|{x.ClassificationCode.Trim()}",
+                StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1);
+            if (duplicateDimension)
+                throw new InvalidOperationException("A budget version cannot contain duplicate fund centre, account, cost centre and classification dimensions.");
+
             var versionNumber = (await _db.PublicSectorBudgetVersions
                 .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear && x.Kind == kind)
                 .Select(x => (int?)x.VersionNumber).MaxAsync(ct) ?? 0) + 1;
@@ -90,9 +96,13 @@ namespace ApexERP.Application.Services
                 if (!await _db.FundCentres.AnyAsync(x => x.Id == line.FundCentreId &&
                     x.CompanyId == companyId && x.FinancialYear == financialYear, ct))
                     throw new InvalidOperationException("Every budget line must reference a fund centre in the same company and financial year.");
-                if (!await _db.GlAccounts.AnyAsync(x => x.Id == line.GlAccountId && x.CompanyId == companyId &&
-                    x.IsActive && (x.Type == GlAccountType.Income || x.Type == GlAccountType.Expense), ct))
-                    throw new InvalidOperationException("Budget lines must map to an active income or expense GL account in the same company.");
+                var account = await _db.GlAccounts.FirstOrDefaultAsync(x => x.Id == line.GlAccountId &&
+                    x.CompanyId == companyId && x.IsActive &&
+                    (x.Type == GlAccountType.Income || x.Type == GlAccountType.Expense), ct)
+                    ?? throw new InvalidOperationException("Budget lines must map to an active income or expense GL account in the same company.");
+                if (string.IsNullOrWhiteSpace(account.SubType) ||
+                    !string.Equals(account.SubType.Trim(), line.ClassificationCode.Trim(), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Each budget classification code must match the selected GL account's configured SubType classification.");
                 if (line.CostCentreId.HasValue && !await _db.CostCentres.AnyAsync(x =>
                     x.Id == line.CostCentreId.Value && x.CompanyId == companyId && x.IsActive, ct))
                     throw new InvalidOperationException("A budget line references an inactive or foreign cost centre.");
@@ -266,7 +276,12 @@ namespace ApexERP.Application.Services
                     x.Kind == PublicSectorBudgetVersionKind.Revised && x.Status == PublicSectorBudgetVersionStatus.Approved)
                 .OrderByDescending(x => x.VersionNumber).FirstOrDefaultAsync(ct);
 
+            var companyProfile = await _db.Companies.Where(x => x.Id == companyId)
+                .Select(x => new { x.Name, x.FunctionalCurrency }).FirstOrDefaultAsync(ct);
             var comparable = original.AccountingBasis == AccountingBasis.Accrual &&
+                companyProfile != null &&
+                string.Equals(original.EntityScope.Trim(), companyProfile.Name.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(original.Currency, companyProfile.FunctionalCurrency, StringComparison.OrdinalIgnoreCase) &&
                 (final == null || (final.AccountingBasis == original.AccountingBasis &&
                     final.PeriodStart == original.PeriodStart && final.PeriodEnd == original.PeriodEnd &&
                     final.Currency == original.Currency && final.ClassificationBasis == original.ClassificationBasis &&
