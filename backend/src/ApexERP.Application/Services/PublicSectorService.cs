@@ -202,16 +202,27 @@ namespace ApexERP.Application.Services
         public async Task<PublicSectorBudgetReconciliation> CreateBudgetReconciliationAsync(Guid companyId,
             int financialYear, PublicSectorBudgetReconciliationType type, string description, string statementSection,
             decimal operatingAmount, decimal investingAmount, decimal financingAmount, string supportingReference,
-            Guid actorId, CancellationToken ct = default)
+            Guid actorId, CancellationToken ct = default, decimal revenueAmount = 0m, decimal expenseAmount = 0m)
         {
             if (financialYear < 2000 || financialYear > 2200 || string.IsNullOrWhiteSpace(description) ||
                 string.IsNullOrWhiteSpace(statementSection) || string.IsNullOrWhiteSpace(supportingReference) ||
-                (operatingAmount == 0m && investingAmount == 0m && financingAmount == 0m))
+                (revenueAmount == 0m && expenseAmount == 0m && operatingAmount == 0m &&
+                    investingAmount == 0m && financingAmount == 0m))
                 throw new InvalidOperationException("A valid year, description, statement section, supporting reference and non-zero reconciliation amount are required.");
+            var approvedBudget = await _db.PublicSectorBudgetVersions.Where(x =>
+                    x.CompanyId == companyId && x.FinancialYear == financialYear &&
+                    x.Status == PublicSectorBudgetVersionStatus.Approved)
+                .OrderByDescending(x => x.Kind).ThenByDescending(x => x.VersionNumber)
+                .FirstOrDefaultAsync(ct)
+                ?? throw new InvalidOperationException("An approved IPSAS 24 budget version is required before recording a reconciliation.");
+            if (approvedBudget.AccountingBasis == AccountingBasis.Cash &&
+                (revenueAmount != 0m || expenseAmount != 0m))
+                throw new InvalidOperationException("Cash-basis IPSAS 24 reconciliations must reconcile net cash flows by operating, investing and financing activities; revenue and expense reconciliation totals apply to accrual-basis budgets only.");
             var reconciliation = new PublicSectorBudgetReconciliation
             {
                 CompanyId = companyId, FinancialYear = financialYear, Type = type,
                 Description = description.Trim(), StatementSection = statementSection.Trim(),
+                RevenueAmount = revenueAmount, ExpenseAmount = expenseAmount,
                 OperatingAmount = operatingAmount, InvestingAmount = investingAmount,
                 FinancingAmount = financingAmount, SupportingReference = supportingReference.Trim(),
                 Status = PublicSectorBudgetReconciliationStatus.Draft, CreatedBy = actorId
@@ -220,7 +231,8 @@ namespace ApexERP.Application.Services
             _audit.Record(companyId, actorId, "PublicSectorBudgetReconciliation.Created", "PublicSector",
                 nameof(PublicSectorBudgetReconciliation), reconciliation.Id, null,
                 new { reconciliation.FinancialYear, reconciliation.Type, reconciliation.Description,
-                    reconciliation.StatementSection, reconciliation.OperatingAmount,
+                    reconciliation.StatementSection, reconciliation.RevenueAmount,
+                    reconciliation.ExpenseAmount, reconciliation.OperatingAmount,
                     reconciliation.InvestingAmount, reconciliation.FinancingAmount,
                     reconciliation.SupportingReference });
             await _db.SaveChangesAsync(ct);
@@ -235,7 +247,8 @@ namespace ApexERP.Application.Services
                 ?? throw new InvalidOperationException("Budget reconciliation row not found.");
             if (item.Status != PublicSectorBudgetReconciliationStatus.Draft)
                 throw new InvalidOperationException("Only a draft reconciliation row can be submitted for approval.");
-            var approvalAmount = Math.Abs(item.OperatingAmount) + Math.Abs(item.InvestingAmount) + Math.Abs(item.FinancingAmount);
+            var approvalAmount = Math.Abs(item.RevenueAmount) + Math.Abs(item.ExpenseAmount) +
+                Math.Abs(item.OperatingAmount) + Math.Abs(item.InvestingAmount) + Math.Abs(item.FinancingAmount);
             var workflow = await _db.WorkflowRequests.FirstOrDefaultAsync(x =>
                 x.Id == workflowId && x.CompanyId == companyId && x.RequestType == "PublicSectorBudgetReconciliation" &&
                 x.ReferenceId == item.Id && x.Amount == approvalAmount && x.Status == WorkflowStatus.Pending, ct)
