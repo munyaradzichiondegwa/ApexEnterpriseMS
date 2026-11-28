@@ -3939,7 +3939,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.HasIndex("PolicyId");
                     b.HasIndex("CompanyId", "CommitmentId", "Status", "EventDate")
                         .HasDatabaseName("IX_ModifiedCashLedger_CommitmentStatusDate");
-                    b.HasIndex("CompanyId", "PolicyId", "SourceEventId", "EventKind").IsUnique()
+                    b.HasIndex("CompanyId", "SourceEventId", "EventKind").IsUnique()
                         .HasDatabaseName("UX_ModifiedCashLedger_SourceEvent");
                     b.ToTable("ModifiedCashRecognitionLedgerEvents", t =>
                         {
