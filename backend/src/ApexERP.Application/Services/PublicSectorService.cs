@@ -1182,6 +1182,8 @@ namespace ApexERP.Application.Services
                     x.CompanyId == companyId && x.BudgetVersionId == actualVersion.Id &&
                     x.EffectiveDate >= actualVersion.PeriodStart && x.EffectiveDate < actualVersion.PeriodEnd)
                     .ToListAsync(ct);
+                var reviewedExclusions = await GetReviewedCashSourceExclusionsAsync(
+                    companyId, actualVersion.Id, ct);
                 if (cashActuals.Count == 0)
                 {
                     var zeroAttestation = await _db.PublicSectorCashPeriodAttestations.FirstOrDefaultAsync(x =>
@@ -1218,8 +1220,6 @@ namespace ApexERP.Application.Services
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
                 // A source record may instead be explicitly excluded, with a mandatory reason,
                 // in the latest record-level reconciliation revision independently reviewed.
-                var reviewedExclusions = await GetReviewedCashSourceExclusionsAsync(
-                    companyId, actualVersion.Id, ct);
                 var excludedBankSourceIds = reviewedExclusions.Where(x => x.SourceKind == "BankAccount")
                     .Select(x => x.SourceRecordId).Distinct().ToArray();
                 var excludedArReceiptIds = reviewedExclusions.Where(x => x.SourceKind == "ReceivablesControl")
