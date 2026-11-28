@@ -2755,11 +2755,13 @@ namespace ApexERP.Application.Services
             {
                 var directRates = await _db.ExchangeRates.Where(x =>
                     x.CompanyId == companyId && x.FromCurrency.ToUpper() == sourceCurrency &&
-                    x.ToCurrency.ToUpper() == budgetCurrency && x.RateDate <= sourceDate && x.Rate > 0m)
+                    x.ToCurrency.ToUpper() == budgetCurrency && x.RateDate <= sourceDate && x.Rate > 0m &&
+                    x.ApprovedBy.HasValue && x.ApprovedAt.HasValue)
                     .ToListAsync(ct);
                 var inverseRates = await _db.ExchangeRates.Where(x =>
                     x.CompanyId == companyId && x.FromCurrency.ToUpper() == budgetCurrency &&
-                    x.ToCurrency.ToUpper() == sourceCurrency && x.RateDate <= sourceDate && x.Rate > 0m)
+                    x.ToCurrency.ToUpper() == sourceCurrency && x.RateDate <= sourceDate && x.Rate > 0m &&
+                    x.ApprovedBy.HasValue && x.ApprovedAt.HasValue)
                     .ToListAsync(ct);
                 var selected = ExchangeRateResolver.SelectEffectiveRate(directRates, inverseRates, sourceDate);
                 if (selected == null)
@@ -2791,6 +2793,22 @@ namespace ApexERP.Application.Services
                 ExchangeRateToBudgetCurrency = rateToBudget, ExchangeRateDate = rateDate,
                 ExchangeRateSource = rateSource, ExchangeRateSourceReference = rateSourceReference,
                 ExchangeRateIsInverse = inverseRate,
+                ExchangeRateApprovedBy = inverseRate || !string.Equals(sourceCurrency, budgetCurrency, StringComparison.Ordinal)
+                    ? await _db.ExchangeRates.Where(x => x.CompanyId == companyId &&
+                        x.FromCurrency.ToUpper() == (inverseRate ? budgetCurrency : sourceCurrency) &&
+                        x.ToCurrency.ToUpper() == (inverseRate ? sourceCurrency : budgetCurrency) &&
+                        x.RateDate.Date == rateDate && x.RateSource == rateSource &&
+                        x.SourceReference == rateSourceReference)
+                        .Select(x => x.ApprovedBy).FirstOrDefaultAsync(ct)
+                    : null,
+                ExchangeRateApprovedAt = inverseRate || !string.Equals(sourceCurrency, budgetCurrency, StringComparison.Ordinal)
+                    ? await _db.ExchangeRates.Where(x => x.CompanyId == companyId &&
+                        x.FromCurrency.ToUpper() == (inverseRate ? budgetCurrency : sourceCurrency) &&
+                        x.ToCurrency.ToUpper() == (inverseRate ? sourceCurrency : budgetCurrency) &&
+                        x.RateDate.Date == rateDate && x.RateSource == rateSource &&
+                        x.SourceReference == rateSourceReference)
+                        .Select(x => x.ApprovedAt).FirstOrDefaultAsync(ct)
+                    : null,
                 CashFlowSection = cashFlowSection, Status = PublicSectorBudgetActualStatus.Draft,
                 CreatedBy = actorId
             };
@@ -2801,7 +2819,8 @@ namespace ApexERP.Application.Services
                     actual.EventKind, actual.SourceKind, actual.SourceRecordId, actual.SourceReference,
                     actual.SourceDate, actual.EffectiveDate, actual.Currency, actual.SourceAmount, actual.Amount,
                     actual.ExchangeRateToBudgetCurrency, actual.ExchangeRateDate, actual.ExchangeRateSource,
-                    actual.ExchangeRateSourceReference, actual.ExchangeRateIsInverse, actual.CashFlowSection });
+                    actual.ExchangeRateSourceReference, actual.ExchangeRateIsInverse,
+                    actual.ExchangeRateApprovedBy, actual.ExchangeRateApprovedAt, actual.CashFlowSection });
             await _db.SaveChangesAsync(ct);
             return actual;
         }
@@ -2855,6 +2874,8 @@ namespace ApexERP.Application.Services
                     ExchangeRateSource = original.ExchangeRateSource,
                     ExchangeRateSourceReference = original.ExchangeRateSourceReference,
                     ExchangeRateIsInverse = original.ExchangeRateIsInverse,
+                    ExchangeRateApprovedBy = original.ExchangeRateApprovedBy,
+                    ExchangeRateApprovedAt = original.ExchangeRateApprovedAt,
                     CashFlowSection = original.CashFlowSection,
                     ReversalOfId = original.Id,
                     ReversalReason = reason.Trim(),
@@ -2988,7 +3009,8 @@ namespace ApexERP.Application.Services
                     !actual.ExchangeRateIsInverse &&
                     actual.ExchangeRateDate?.Date == actual.SourceDate.Date &&
                     string.Equals(actual.ExchangeRateSource, "IDENTITY", StringComparison.Ordinal) &&
-                    !string.IsNullOrWhiteSpace(actual.ExchangeRateSourceReference);
+                    !string.IsNullOrWhiteSpace(actual.ExchangeRateSourceReference) &&
+                    !actual.ExchangeRateApprovedBy.HasValue && !actual.ExchangeRateApprovedAt.HasValue;
 
             if (!actual.ExchangeRateDate.HasValue ||
                 string.IsNullOrWhiteSpace(actual.ExchangeRateSource) ||
@@ -3006,6 +3028,9 @@ namespace ApexERP.Application.Services
                 x.RateDate.Date == actual.ExchangeRateDate.Value.Date &&
                 x.RateSource == actual.ExchangeRateSource &&
                 x.SourceReference == actual.ExchangeRateSourceReference &&
+                x.ApprovedBy.HasValue && x.ApprovedAt.HasValue &&
+                x.ApprovedBy == actual.ExchangeRateApprovedBy &&
+                x.ApprovedAt == actual.ExchangeRateApprovedAt &&
                 x.Rate > 0m, ct);
             if (rate == null) return false;
             var effectiveRate = actual.ExchangeRateIsInverse ? 1m / rate.Rate : rate.Rate;
