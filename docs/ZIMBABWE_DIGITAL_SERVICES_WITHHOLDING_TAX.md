@@ -1,6 +1,6 @@
 # Zimbabwe Digital Services Withholding Tax (DSWT) — implementation basis
 
-**Status:** Rules evaluator implemented; accounting integration and ZIMRA operational confirmation remain release gates.
+**Status:** Rules evaluator and company-scoped withholding evidence register implemented. GL posting, AP cash-settlement integration, return export/submission and ZIMRA confirmation remain release gates.
 
 ## Authoritative sources reviewed
 
@@ -16,7 +16,8 @@
 - Supplier not VAT-registered in Zimbabwe: 15.5% of the payment amount.
 - Supplier VAT-registered in Zimbabwe: tax fraction 3/23.
 - Intermediary issues a withholding certificate and maintains payment records.
-- ZIMRA Public Notice 05/2026 states the intermediary return is due by the 10th and payment by the 15th of the following month.
+- The ordinary monthly filing/payment cycle remains: return by the 10th and payment by the 15th of the following month, subject to the applicable statutory calendar and ZIMRA notices.
+- Operational update: Public Notices 23/2026 and 34/2026 said DSWT returns had to be filed manually while TaRMS was not configured. Public Notice 50/2026 (4 September 2026) superseded that interim process: the DSWT return is now available in TaRMS. The taxpayer must first register the new tax type in TaRMS (Taxpayer Information → Taxpayer Profile → Tax Type → New Tax Type); pending returns are then generated from the registration effective date. Earlier manual returns should also be completed in TaRMS to clear pending-return flags.
 - Physical goods are excluded and remain subject to import VAT/customs treatment.
 - Local suppliers are excluded.
 - Zero-rated/exempt services retain their ordinary treatment.
@@ -28,6 +29,14 @@
 The law's collection mechanics are explicit: the intermediary withholds from the amount being remitted to the foreign supplier and remits it to ZIMRA. The supplier receives a certificate and, if VAT-registered, claims the withholding as a credit against its VAT return. The Ministry describes this as a VAT collection mechanism rather than a new tax on all cardholders.
 
 There is a public interpretive inconsistency: a ZIMRA Head of Technical Services interview reported by The Herald on 16 January 2026 described the recipient as the person who pays the tax. That statement does not alter the statutory withholding workflow or ZIMRA Public Notice 05/2026. The system must therefore record both the statutory withholding mechanics and the commercial contract's agreed gross-up/pass-through treatment. Do not automatically add the tax as a customer surcharge.
+
+## ApexERP implementation status
+
+- The pure evaluator applies the published 15.5% rate for suppliers not registered for VAT in Zimbabwe and the 3/23 tax fraction for registered suppliers.
+- A company-scoped DSWT register stores intermediary payment reference, supplier/intermediary identity, country, currency, gross amount, rate, withheld amount, net supplier remittance, service classification, VAT status, tax period, certificate, remittance date and evidence reference.
+- The register has a unique `(CompanyId, PaymentReference)` key and uses the existing fail-closed company query filter and PostgreSQL RLS pattern.
+- The register service validates the tax decision and evidence, supports certificate issuance and ZIMRA remittance status, and produces a monthly company-scoped register.
+- This register is not yet a GL posting, an AP payment automation, a TaRMS filing integration or a ZIMRA-approved return. No journal is posted by this service.
 
 ## Accounting design decisions
 
@@ -42,7 +51,7 @@ There is a public interpretive inconsistency: a ZIMRA Head of Technical Services
 ## Open production gates
 
 - ZIMRA confirmation of the treatment where a supplier is registered but the customer/recipient also claims input VAT.
-- Confirm exact due-date configuration against any subsequent ZIMRA notice.
+- Confirm the tax agent's TaRMS tax-type registration, effective date and generated return periods; implement a validated TaRMS-ready return export against the current form schema.
 - Approved GL accounts, tax-code mapping, certificate numbering, monthly return and reconciliation workflow.
 - Bank/intermediary statement integration and source evidence.
 - Tax counsel review of legal incidence versus commercial pass-through/gross-up.
