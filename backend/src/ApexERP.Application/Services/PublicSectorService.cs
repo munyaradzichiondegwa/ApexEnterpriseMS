@@ -429,7 +429,7 @@ namespace ApexERP.Application.Services
             if (effectiveFrom < version.PeriodStart || effectiveTo > version.PeriodEnd)
                 throw new InvalidOperationException("The expected source effective period must be contained within the approved budget reporting period.");
 
-            var kind = sourceKind.Trim();
+            var kind = ExpectedCashSourceKinds.Single(x => string.Equals(x, sourceKind.Trim(), StringComparison.OrdinalIgnoreCase));
             var code = sourceCode.Trim();
             if (await _db.PublicSectorExpectedCashSources.AnyAsync(x =>
                 x.CompanyId == companyId && x.BudgetVersionId == budgetVersionId &&
