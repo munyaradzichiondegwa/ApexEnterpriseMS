@@ -1064,7 +1064,10 @@ export default function PublicSectorPage() {
                     <option value="Entity">Entity difference</option><option value="Presentation">Presentation difference</option>
                   </select>
                   <select className="input" required value={budgetReconciliationDraft.statementSection}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, statementSection: e.target.value })}>
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft,
+                      statementSection: e.target.value, revenueAmount: 0, expenseAmount: 0,
+                      operatingAmount: 0, investingAmount: 0, financingAmount: 0,
+                      isNoDifferenceAttestation: false })}>
                     <option value="Revenue">Total revenue</option><option value="Expense">Total expense</option>
                     <option value="Operating">Net cash flows — operating</option>
                     <option value="Investing">Net cash flows — investing</option>
@@ -1073,26 +1076,23 @@ export default function PublicSectorPage() {
                   <input className="input" required placeholder="Description of difference"
                     value={budgetReconciliationDraft.description}
                     onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, description: e.target.value })} />
-                  <input className="input" type="number" step="0.01" placeholder="Revenue adjustment to financial statements"
+                  {budgetReconciliationDraft.statementSection === "Revenue" && <input className="input" type="number" step="0.01" placeholder="Revenue adjustment to financial statements"
                     disabled={budgetReconciliationDraft.isNoDifferenceAttestation}
                     value={budgetReconciliationDraft.revenueAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, revenueAmount: Number(e.target.value) })} />
-                  <input className="input" type="number" step="0.01" placeholder="Expense adjustment to financial statements"
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, revenueAmount: Number(e.target.value) })} />}
+                  {budgetReconciliationDraft.statementSection === "Expense" && <input className="input" type="number" step="0.01" placeholder="Expense adjustment to financial statements"
                     disabled={budgetReconciliationDraft.isNoDifferenceAttestation}
                     value={budgetReconciliationDraft.expenseAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, expenseAmount: Number(e.target.value) })} />
-                  <input className="input" type="number" step="0.01" placeholder="Operating cash-flow adjustment"
-                    disabled={budgetReconciliationDraft.isNoDifferenceAttestation}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, expenseAmount: Number(e.target.value) })} />}
+                  {budgetReconciliationDraft.statementSection === "Operating" && <input className="input" type="number" step="0.01" placeholder="Operating cash-flow adjustment"
                     value={budgetReconciliationDraft.operatingAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, operatingAmount: Number(e.target.value) })} />
-                  <input className="input" type="number" step="0.01" placeholder="Investing cash-flow adjustment"
-                    disabled={budgetReconciliationDraft.isNoDifferenceAttestation}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, operatingAmount: Number(e.target.value) })} />}
+                  {budgetReconciliationDraft.statementSection === "Investing" && <input className="input" type="number" step="0.01" placeholder="Investing cash-flow adjustment"
                     value={budgetReconciliationDraft.investingAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, investingAmount: Number(e.target.value) })} />
-                  <input className="input" type="number" step="0.01" placeholder="Financing cash-flow adjustment"
-                    disabled={budgetReconciliationDraft.isNoDifferenceAttestation}
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, investingAmount: Number(e.target.value) })} />}
+                  {budgetReconciliationDraft.statementSection === "Financing" && <input className="input" type="number" step="0.01" placeholder="Financing cash-flow adjustment"
                     value={budgetReconciliationDraft.financingAmount}
-                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, financingAmount: Number(e.target.value) })} />
+                    onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft, financingAmount: Number(e.target.value) })} />}
                   {["Revenue", "Expense"].includes(budgetReconciliationDraft.statementSection) && <label className="flex items-center gap-2 text-sm md:col-span-3">
                     <input type="checkbox" checked={budgetReconciliationDraft.isNoDifferenceAttestation}
                       onChange={(e) => setBudgetReconciliationDraft({ ...budgetReconciliationDraft,
