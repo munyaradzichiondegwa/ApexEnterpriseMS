@@ -400,6 +400,9 @@ namespace ApexERP.Infrastructure.Data
                 .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.SourceRecordId, x.BudgetExecutionActualId })
                 .IsUnique().HasDatabaseName("UX_CashSourceReconciliationLine_Allocation");
             modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
+                .HasIndex(x => x.BudgetExecutionActualId)
+                .HasDatabaseName("IX_PublicSectorCashSourceReconciliationLines_BudgetExecutionActualId");
+            modelBuilder.Entity<PublicSectorCashSourceReconciliationLine>()
                 .HasIndex(x => new { x.CompanyId, x.CashSourceSubmissionId, x.BudgetExecutionActualId }).IsUnique()
                 .HasFilter("\"BudgetExecutionActualId\" IS NOT NULL")
                 .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
