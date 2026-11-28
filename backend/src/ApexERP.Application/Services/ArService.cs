@@ -22,7 +22,7 @@ namespace ApexERP.Application.Services
 
         public async Task<ArInvoice> CreateInvoiceAsync(Guid companyId, Guid customerId, DateTime invoiceDate,
             string currency, decimal exchangeRate, IEnumerable<ArInvoiceLineRequest> lineRequests,
-            Guid vatControlAccountId, Guid? grantId = null, CancellationToken ct = default)
+            Guid vatControlAccountId, Guid? grantId = null, CancellationToken ct = default, Guid? fundCentreId = null)
         {
             var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == customerId && c.CompanyId == companyId, ct)
                 ?? throw new InvalidOperationException("Customer not found.");
@@ -73,6 +73,7 @@ namespace ApexERP.Application.Services
                 Outstanding = subtotal + vatTotal,
                 Status = InvoiceStatus.Draft,
                 GrantId = grantId,
+                FundCentreId = fundCentreId,
                 Lines = lines
             };
             _db.ArInvoices.Add(invoice);
@@ -98,7 +99,7 @@ namespace ApexERP.Application.Services
             };
             foreach (var group in invoice.Lines.GroupBy(l => l.GlAccountId))
                 glLines.Add(new GlLineRequest(group.Key, 0, group.Sum(l => l.LineSubtotal), invoice.Currency, invoice.ExchangeRate, null,
-                    "Sales income", null, invoice.GrantId));
+                    "Sales income", invoice.FundCentreId, invoice.GrantId));
             if (invoice.VatAmount > 0)
                 glLines.Add(new GlLineRequest(vatOutputAccountId, 0, invoice.VatAmount, invoice.Currency, invoice.ExchangeRate, null, "VAT output"));
 
