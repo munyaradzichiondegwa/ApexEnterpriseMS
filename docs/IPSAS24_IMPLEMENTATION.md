@@ -240,3 +240,16 @@ Verification on PR head `1291dd73f9798b7231109b29227828570f7150a4`:
 A certified nil-return is not, by itself, proof that the expected source population is complete. Before the period can be closed or a statutory comparison issued, the entity needs an approved register of expected source systems/accounts for the reporting entity and period. Each expected source must then have a period submission with independently reviewable record counts, control totals, currency, opening/closing balances and evidence. A source absent from the register or lacking a reviewed submission must remain *unknown/incomplete*, never be inferred as zero.
 
 The expected-source register and source-submission/reconciliation workflow remain outstanding. They require tenant-scoped entities, independent approval/review, immutable final states, database constraints and migration coverage; the existing cash-period attestation is not a substitute for those controls.
+
+
+### Expected cash-source register: first implementation slice
+
+The branch now includes a company-scoped expected cash-source register linked to an approved cash-basis budget version:
+
+- Supported source categories are bank accounts, receivables control, payables control and cashbook.
+- Each entry records a source code/name, optional source identifier, required/optional flag and effective dates contained within the approved budget period.
+- Entries follow Draft → PendingApproval → Approved. The preparer/submitter cannot approve their own entry.
+- The register has a unique company + budget-version + source-kind + source-code key, a budget-version foreign key, a period check constraint, tenant query filtering and a PostgreSQL trigger preventing deletion or mutation after approval.
+- Read, create, submit and approve API routes are available under `/api/v1/public-sector/expected-cash-sources`.
+
+This is a register-management slice, not yet a complete source-close control. It does not yet capture period submissions, source record counts/control totals, opening/closing balances, evidence packages, record-level mapping to budget actuals, approved exclusions or independent period close. Until those controls are implemented, the register must not be used to certify period completeness or unlock nil-return/budget comparison on its own.
