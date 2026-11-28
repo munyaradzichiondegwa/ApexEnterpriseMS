@@ -22,6 +22,61 @@ namespace ApexERP.Domain.Entities
     }
 
     /// <summary>
+    /// Versioned, authority-approved budget used for IPSAS 24 original/final comparison.
+    /// Original and revised budgets are separate immutable approval snapshots.
+    /// </summary>
+    public class PublicSectorBudgetVersion : TenantEntity
+    {
+        public int FinancialYear { get; set; }
+        public int VersionNumber { get; set; }
+        public PublicSectorBudgetVersionKind Kind { get; set; }
+        public PublicSectorBudgetVersionStatus Status { get; set; } = PublicSectorBudgetVersionStatus.Draft;
+        public string Currency { get; set; } = "USD";
+        public AccountingBasis AccountingBasis { get; set; }
+        public string ClassificationBasis { get; set; } = string.Empty;
+        public string EntityScope { get; set; } = string.Empty;
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+        public string AuthorityReference { get; set; } = string.Empty;
+        public string? AmendmentReason { get; set; }
+        public Guid? ApprovalWorkflowId { get; set; }
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+        public ICollection<PublicSectorBudgetVersionLine> Lines { get; set; } = new List<PublicSectorBudgetVersionLine>();
+    }
+
+    /// <summary>One approved budget line, mapped to the chart of accounts and government vote.</summary>
+    public class PublicSectorBudgetVersionLine : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public Guid FundCentreId { get; set; }
+        public Guid GlAccountId { get; set; }
+        public Guid? CostCentreId { get; set; }
+        public int LineNumber { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string ClassificationCode { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+    }
+
+    /// <summary>
+    /// Reconciliation adjustment between comparable budget actuals and the amounts in the
+    /// accrual-basis financial statements. Categories follow IPSAS 24 paragraph 47.
+    /// </summary>
+    public class PublicSectorBudgetReconciliation : TenantEntity
+    {
+        public int FinancialYear { get; set; }
+        public PublicSectorBudgetReconciliationType Type { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string StatementSection { get; set; } = string.Empty;
+        public decimal OperatingAmount { get; set; }
+        public decimal InvestingAmount { get; set; }
+        public decimal FinancingAmount { get; set; }
+        public string SupportingReference { get; set; } = string.Empty;
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+    }
+
+    /// <summary>
     /// Approved appropriation distribution to an expense GL account and optional cost centre.
     /// Draft and pending allocations are excluded from budget-versus-actual reporting.
     /// </summary>
