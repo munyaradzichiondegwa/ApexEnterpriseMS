@@ -465,16 +465,39 @@ namespace ApexERP.Application.Services
                 _ => throw new InvalidOperationException("Unsupported cash-flow section.")
             };
             var expected = statementActual - budgetActual;
+            var expectedSources = await _db.PublicSectorExpectedCashSources.Where(x =>
+                x.CompanyId == companyId && x.BudgetVersionId == version.Id).OrderBy(x => x.Id).ToListAsync(ct);
+            var latestSubmissions = (await _db.PublicSectorCashSourceSubmissions.Where(x =>
+                    x.CompanyId == companyId && x.BudgetVersionId == version.Id).ToListAsync(ct))
+                .GroupBy(x => x.ExpectedCashSourceId)
+                .Select(group => group.OrderByDescending(x => x.SubmissionRevision).First())
+                .OrderBy(x => x.ExpectedCashSourceId).ToList();
+            var registerAttestation = await _db.PublicSectorExpectedCashSourceRegisterAttestations
+                .Where(x => x.CompanyId == companyId && x.BudgetVersionId == version.Id)
+                .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+            var reviewedExclusions = await GetReviewedCashSourceExclusionsAsync(companyId, version.Id, ct);
             var fingerprintMaterial = new StringBuilder()
                 .Append(version.Id.ToString("N")).Append('|')
                 .Append(version.PeriodStart.ToString("O")).Append('|')
                 .Append(version.PeriodEnd.ToString("O")).Append('|')
                 .Append(companyName).Append('|').Append(section).Append('|')
+                .Append(cashFlow.NetProfit).Append('|')
                 .Append(cashFlow.NetCashFromOperating).Append('|')
                 .Append(cashFlow.NetCashFromInvesting).Append('|')
                 .Append(cashFlow.NetCashFromFinancing).Append('|')
                 .Append(cashFlow.CashAtStart).Append('|').Append(cashFlow.CashAtEnd).Append('|')
                 .Append(cashFlow.ReconciliationDifference).Append('|')
+                .AppendJoin(';', cashFlow.OperatingAdjustments.Select(x => $"{x.Label}:{x.Amount}")).Append('|')
+                .AppendJoin(';', cashFlow.InvestingActivities.Select(x => $"{x.Label}:{x.Amount}")).Append('|')
+                .AppendJoin(';', cashFlow.FinancingActivities.Select(x => $"{x.Label}:{x.Amount}")).Append('|')
+                .AppendJoin(';', expectedSources.Select(x =>
+                    $"{x.Id:N}:{x.SourceKind}:{x.SourceCode}:{x.SourceName}:{x.SourceIdentifier}:{x.IsRequired}:{x.EffectiveFrom:O}:{x.EffectiveTo:O}:{x.Status}")).Append('|')
+                .AppendJoin(';', latestSubmissions.Select(x =>
+                    $"{x.Id:N}:{x.ExpectedCashSourceId:N}:{x.SubmissionRevision}:{x.PeriodStart:O}:{x.PeriodEnd:O}:{x.RecordCount}:{x.ControlTotal}:{x.OpeningBalance}:{x.ClosingBalance}:{x.Currency}:{x.EvidenceReference}:{x.Status}:{x.RecordLevelStatus}:{x.ReviewedBy}:{x.ReviewedAt:O}:{x.RecordLevelReviewedBy}:{x.RecordLevelReviewedAt:O}")).Append('|')
+                .Append(registerAttestation == null ? "no-register-attestation" :
+                    $"{registerAttestation.Id:N}:{registerAttestation.ExpectedSourceCount}:{registerAttestation.EntityScope}:{registerAttestation.EvidenceReference}:{registerAttestation.Status}:{registerAttestation.CertifiedBy}:{registerAttestation.CertifiedAt:O}").Append('|')
+                .AppendJoin(';', reviewedExclusions.OrderBy(x => x.SourceKind).ThenBy(x => x.SourceRecordId)
+                    .Select(x => $"{x.SourceKind}:{x.SourceRecordId:N}")).Append('|')
                 .AppendJoin(';', actuals.OrderBy(x => x.Id).Select(x =>
                     $"{x.Id:N}:{x.SourceKind}:{x.SourceRecordId:N}:{x.EventKind}:{x.CashFlowSection}:{x.SourceReference}:{x.SourceDate:O}:{x.EffectiveDate:O}:{x.Currency}:{x.SourceAmount}:{x.Amount}:{x.ExchangeRateToBudgetCurrency}:{x.ExchangeRateDate:O}:{x.ExchangeRateSource}:{x.ExchangeRateSourceReference}"))
                 .ToString();
