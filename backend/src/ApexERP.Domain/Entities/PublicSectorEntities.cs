@@ -327,6 +327,7 @@ namespace ApexERP.Domain.Entities
         public CashFlowCategory CashFlowSection { get; set; }
         public PublicSectorBudgetActualStatus Status { get; set; } = PublicSectorBudgetActualStatus.Draft;
         public Guid? ReversalOfId { get; set; }
+        public string? ReversalReason { get; set; }
         public Guid? CertifiedBy { get; set; }
         public DateTime? CertifiedAt { get; set; }
     }
