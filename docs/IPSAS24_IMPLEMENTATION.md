@@ -32,3 +32,57 @@
 - Budget versions and lines are tenant-filtered and covered by PostgreSQL RLS through the shared CompanyId policy.
 - Approved versions are not edited in place through the API; changes are represented as a new revised version with an authority reference and amendment explanation.
 - Existing PublicSectorBudgetAllocations remain in place for operational appropriation controls. The IPSAS 24 versioned statement is a separate reporting ledger; it does not silently reinterpret legacy expense-only allocations as an original/final statutory budget.
+
+
+## Phase 2 — cash and modified-cash actuals: implementation contract
+
+The next implementation slice must introduce a separate, source-backed budget-execution actual ledger. It must not derive cash-basis actuals from accrual journal postings or infer cash paid from AP invoice status.
+
+### Source events and provenance
+
+Each captured actual must retain, at minimum:
+
+- Company/tenant, financial year, budget period and reporting entity.
+- Approved budget version and budget line (or an explicitly approved mapping to its Fund Centre, GL classification and cost centre dimensions).
+- Budget-basis event type: cash receipt, cash payment, or (only where the entity's formally approved modified-cash policy includes it) an eligible commitment/obligation.
+- Original source-system identifier and source document reference, source date, effective/value date, currency, amount and exchange-rate provenance where applicable.
+- Source record hash or immutable source snapshot reference, capture actor/time, validation status and approval workflow reference.
+- Reversal/correction linkage to the original event. Corrections must be compensating events; approved source events must not be silently edited or deleted.
+
+The source adapter must accept only records from controlled cash/bank receipt and payment processes (or approved external bank/cashbook imports) and the commitment register for specifically defined modified-cash elements. A purchase order, goods receipt, AP invoice, posted accrual journal or payment instruction is not evidence of cash settlement by itself. A commitment is not a cash flow and must be separately identified if the approved budget basis includes it.
+
+### Comparability and aggregation
+
+- Aggregate only approved, non-reversed source events within the approved budget period and on the approved budget basis.
+- Preserve receipt/payment direction and the approved budget's classification scheme. Do not net unrelated receipts and payments merely because they share a Fund Centre.
+- Enforce company, entity, period, currency and classification scope at both ingestion and report time.
+- Block statement issuance when source coverage, unresolved duplicate source IDs, unapproved mappings, missing dimensions or unapproved events remain.
+- Keep accrual-basis GL actuals and cash/modified-cash budget actuals as distinct measures with explicit basis labels.
+
+### Statement of Cash Flows reconciliation
+
+For a cash or modified-cash budget, IPSAS 24 paragraph 47 requires reconciliation of actual amounts on the budget-comparable basis to net cash flows from operating, investing and financing activities. The reconciliation must not be an arbitrary balancing journal or an unstructured set of manual amounts.
+
+The bridge must:
+1. Start with approved budget-basis actuals.
+2. Map source events to the Statement of Cash Flows activity using controlled account/cash-flow classifications.
+3. Show basis, timing, entity and presentation differences separately.
+4. Calculate each reconciliation section and the resulting bridge total from the approved source events and the approved financial-statement cash-flow result.
+5. Fail validation if any operating, investing, financing or total difference does not reconcile to zero within the configured currency precision; any permitted rounding tolerance must be explicit and audited.
+6. Preserve drill-through from every bridge amount to its source events and from each source event to its receipt/payment/commitment evidence.
+
+This follows IPSAS 24 paragraphs 47–49: for a non-accrual budget, the reconciliation target is net cash flows from operating, investing and financing activities. The standard separately identifies basis, timing and entity differences; presentation differences are also relevant where classification formats differ. See [IPSAS 24, paragraphs 47–49 (IPSASB/IFAC-hosted standard PDF)](https://ifacweb.blob.core.windows.net/publicfiles/2025-04/A33_IPSAS%2024.pdf). The UN IPSAS Finance Manual provides a worked modified-cash example in which unliquidated obligations are removed from cash flows and capital acquisitions are classified as investing: [UN IPSAS Finance Manual, Chapter 16](https://www.un.org/ipsas/Chapter16.html).
+
+### Approval and issue gates
+
+- Source-event capture/preparation and certification must be separate duties.
+- The certifier cannot be the preparer or the source-event submitter.
+- Reconciliation preparation and approval must remain independent, with all supporting evidence attached.
+- Statement issue requires approved original and final budgets (or a documented no-revision final budget), complete source coverage, approved mappings, completed cash-flow bridge, resolved material variances and reviewer sign-off.
+- A draft or pending source event, reconciliation or variance explanation must never be included in the issued statement.
+
+### Regression acceptance matrix
+
+PostgreSQL integration tests must prove: duplicate source-event rejection within a company; the same source identifier may exist in a different company; cross-company source/evidence access is denied; cash receipt/payment sign conventions; commitment inclusion only for an explicitly configured modified-cash basis; no accrual-GL substitution; reversals preserve the original audit trail; reporting-period cut-off uses the effective/value date; foreign-currency events use retained rate provenance; untagged or unmapped source events block issue; all three cash-flow sections reconcile independently; a one-cent (or currency-minor-unit) bridge difference fails; pending/unapproved items are excluded; and preparer self-approval is rejected.
+
+No modified-cash rule should be enabled by default. Each entity must configure and approve the precise commitment/obligation elements included in its budget basis, with the governing authority and effective date recorded.
