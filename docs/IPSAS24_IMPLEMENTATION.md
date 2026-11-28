@@ -262,3 +262,15 @@ The next workflow slice adds one period submission for each approved expected so
 The database enforces non-negative record counts, valid periods, three-character currency codes, uniqueness per company/expected source, restricted foreign keys and immutable reviewed/rejected submissions. The API exposes list, create, submit and review operations under `/api/v1/public-sector/cash-source-submissions`.
 
 **Important remaining limitation:** these submissions currently capture source-level control totals; they do not yet reconcile individual bank/AR/AP source record IDs to certified budget actuals or approved exclusions. They also do not yet certify that the expected-source register itself is complete. Consequently, neither a reviewed submission nor the register alone may be treated as proof that every source record has been accounted for, and no period-close or statutory-issuance gate should rely on this slice yet.
+
+### Expected-source submission verification — 28 November 2026
+
+The expected-source register and period source-submission slice are now verified together on the feature branch. GitHub Actions run [#46122871171](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46122871171) completed successfully for PR head `d4976e08888f606ddb37b7a52578c2940bda9b57`:
+
+- Backend build and PostgreSQL integration tests: passed.
+- EF migration drift, clean PostgreSQL installation, database hardening and API boot checks: passed.
+- Frontend typecheck, tests and production build: passed.
+
+The preceding run [#46122797856](https://github.com/munyaradzichiondegwa/ApexEnterpriseMS/actions/runs/46122797856) also completed successfully across all three jobs after the explicit expected-source-submission foreign-key index was aligned between the EF model, migration and model snapshot.
+
+This verification covers the register and source-level control submission workflows only. It does not change the stated boundary: record-level source-to-actual reconciliation, independently approved exclusions, certification of expected-register completeness and period-close/statutory-issuance gates remain outstanding. No production migration has been applied.
