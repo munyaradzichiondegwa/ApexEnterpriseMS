@@ -315,7 +315,7 @@ namespace ApexERP.API.Controllers
                         existing.IsManualOverride = request.IsManualOverride;
                         existing.RateSource = request.RateSource.Trim();
                         existing.SourceReference = string.IsNullOrWhiteSpace(request.SourceReference) ? null : request.SourceReference.Trim();
-                        existing.CreatedBy ??= UserId;
+                        existing.CreatedBy = UserId;
                         existing.UpdatedBy = UserId;
                         existing.ApprovedBy = null;
                         existing.ApprovedAt = null;
@@ -335,7 +335,7 @@ namespace ApexERP.API.Controllers
         public Task<IActionResult> ApproveExchangeRate(Guid id) =>
             Run(async () =>
             {
-                var rate = await _db.ExchangeRates.FirstOrDefaultAsync(x =>
+                var rate = await _db.ExchangeRates.AsNoTracking().FirstOrDefaultAsync(x =>
                     x.Id == id && x.CompanyId == CompanyId);
                 if (rate == null) return NotFound(new { error = "Exchange rate not found." });
                 if (string.IsNullOrWhiteSpace(rate.RateSource) ||
@@ -351,7 +351,7 @@ namespace ApexERP.API.Controllers
 
                 await _db.InTransactionAsync(async token =>
                 {
-                    await _db.AcquireTransactionLockAsync($"fx-rate-approval:{CompanyId:N}:{rate.Id:N}", token);
+                    await _db.AcquireTransactionLockAsync($"fx-rate:{CompanyId:N}:{rate.FromCurrency}:{rate.ToCurrency}:{rate.RateDate:yyyyMMdd}", token);
                     var current = await _db.ExchangeRates.FirstOrDefaultAsync(x =>
                         x.Id == id && x.CompanyId == CompanyId, token)
                         ?? throw new InvalidOperationException("Exchange rate not found.");
