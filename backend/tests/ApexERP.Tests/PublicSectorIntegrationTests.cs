@@ -1370,6 +1370,16 @@ namespace ApexERP.Tests
             Assert.Equal("PAY-SETTLE-001", apActual.SourceReference);
             Assert.Equal(PublicSectorBudgetActualStatus.Draft, arActual.Status);
             Assert.Equal(PublicSectorBudgetActualStatus.Draft, apActual.Status);
+
+            await service.SubmitBudgetExecutionActualAsync(companyId, arActual.Id, preparerId);
+            await service.SubmitBudgetExecutionActualAsync(companyId, apActual.Id, preparerId);
+            await service.CertifyBudgetExecutionActualAsync(companyId, arActual.Id, certifierId);
+            await service.CertifyBudgetExecutionActualAsync(companyId, apActual.Id, certifierId);
+
+            var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
+            Assert.Equal(100m, comparison.Lines.Single(x => x.GlAccountId == revenueGlId).ActualOnComparableBasis);
+            Assert.Equal(200m, comparison.Lines.Single(x => x.GlAccountId == expenseGlId).ActualOnComparableBasis);
         }
     }
 }
