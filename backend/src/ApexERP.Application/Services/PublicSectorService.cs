@@ -1892,8 +1892,8 @@ namespace ApexERP.Application.Services
                         ledger.EventDate < actualVersion.PeriodEnd &&
                         policy.CompanyId == companyId &&
                         policy.BudgetVersionId == actualVersion.Id &&
-                        policy.Status == ModifiedCashPolicyStatus.Approved &&
-                        policy.Treatment == ModifiedCashRecognitionTreatment.IncludeInBudgetActual
+                        policy.Status == ModifiedCashRecognitionPolicyStatus.Approved &&
+                        policy.Treatment == ModifiedCashBudgetTreatment.IncludeInBudgetActual
                     select new { Ledger = ledger, Policy = policy, Mapping = mapping }
                 ).ToListAsync(ct);
                 var invalidModifiedCashEvents = 0;
