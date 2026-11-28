@@ -321,9 +321,15 @@ namespace ApexERP.Domain.Entities
         public string SourceReference { get; set; } = string.Empty;
         public DateTime SourceDate { get; set; }
         public DateTime EffectiveDate { get; set; }
+        /// <summary>Original source-currency amount; Amount is the translated budget-currency amount.</summary>
         public string Currency { get; set; } = "USD";
+        public decimal SourceAmount { get; set; }
         public decimal Amount { get; set; }
         public decimal ExchangeRateToBudgetCurrency { get; set; } = 1m;
+        public DateTime? ExchangeRateDate { get; set; }
+        public string? ExchangeRateSource { get; set; }
+        public string? ExchangeRateSourceReference { get; set; }
+        public bool ExchangeRateIsInverse { get; set; }
         public CashFlowCategory CashFlowSection { get; set; }
         public PublicSectorBudgetActualStatus Status { get; set; } = PublicSectorBudgetActualStatus.Draft;
         public Guid? ReversalOfId { get; set; }
