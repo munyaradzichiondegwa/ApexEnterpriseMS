@@ -162,6 +162,23 @@ namespace ApexERP.Domain.Entities
         public string? ReviewNote { get; set; }
     }
 
+    /// <summary>Evidence-backed explanation of a final-budget-to-actual variance. The variance
+    /// amount is revalidated against the current approved comparison at submission and approval.</summary>
+    public class PublicSectorBudgetVarianceExplanation : TenantEntity
+    {
+        public Guid BudgetVersionId { get; set; }
+        public Guid BudgetVersionLineId { get; set; }
+        public decimal VarianceAmount { get; set; }
+        public string Explanation { get; set; } = string.Empty;
+        public string EvidenceReference { get; set; } = string.Empty;
+        public string Status { get; set; } = "Draft";
+        public Guid? SubmittedBy { get; set; }
+        public DateTime? SubmittedAt { get; set; }
+        public Guid? ReviewedBy { get; set; }
+        public DateTime? ReviewedAt { get; set; }
+        public string? ReviewNote { get; set; }
+    }
+
     /// <summary>
     /// Independent period-level declaration that no cash source activity occurred.
     /// This is evidence of completeness, not a mechanism for assuming missing records are zero.
