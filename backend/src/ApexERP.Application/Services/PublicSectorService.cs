@@ -1207,9 +1207,9 @@ namespace ApexERP.Application.Services
         }
 
         /// <summary>
-        /// Captures a cash-basis actual only from an independently reconciled bank movement
-        /// whose posted journal contains an exact matching budget-line classification. AR/AP
-        /// settlement allocations are not enabled until their source-to-budget mapping is complete.
+        /// Captures a cash-basis actual from a reconciled bank movement or an explicitly mapped
+        /// AR/AP invoice-line allocation. Split AR/AP sources are recorded once per budget line;
+        /// the complete allocation set must reconcile to the source amount before certification.
         /// </summary>
         public async Task<PublicSectorBudgetExecutionActual> CreateBudgetExecutionActualAsync(
             Guid companyId, Guid budgetVersionId, Guid budgetVersionLineId,
