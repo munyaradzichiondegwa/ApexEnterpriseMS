@@ -26,7 +26,9 @@ AR posting requires the VAT output account to be an active, postable liability a
 
 Migration `20261128120000_PersistArApTaxPostingAccounts` adds nullable columns so existing historical invoices remain intact; historical account IDs are not guessed or backfilled. PostgreSQL integration regressions cover valid AR/AP persistence and rejection of wrong-type or cross-company AR VAT accounts.
 
-This is a traceability foundation only. It does not yet provide effective-dated tax-code mappings, per-tax-component journal-line identity, tax settlement allocation, approved budget-treatment policy, or tax-bearing IPSAS 24 actual capture. The adapter must remain fail-closed for VAT/WHT invoices.
+AR and AP invoice posting now also validates VAT tax-code provenance before creating the journal: every VAT-bearing line must reference a company-owned, active VAT tax code effective on the invoice date; its VAT amount must agree with the configured rate within one cent; and line subtotals/VAT must reconcile to invoice headers. This is a posting-integrity control, not a replacement for persisted effective-dated tax-account mapping or tax-component journal-line identity.
+
+This remains a traceability foundation only. It does not yet provide persisted effective-dated tax-account mappings, per-tax-component journal-line identity, tax settlement allocation, approved budget-treatment policy, or tax-bearing IPSAS 24 actual capture. The adapter must remain fail-closed for VAT/WHT invoices.
 
 ## Required accounting model
 
