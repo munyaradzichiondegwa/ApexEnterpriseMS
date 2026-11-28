@@ -937,7 +937,7 @@ namespace ApexERP.Infrastructure.Data
             }
             foreach (var entry in ChangeTracker.Entries<TaxAccountMapping>())
             {
-                if (entry.State is EntityState.Modified or EntityState.Deleted &&
+                if ((entry.State is EntityState.Modified or EntityState.Deleted) &&
                     entry.Property(x => x.Status).OriginalValue == TaxConfigurationStatus.Approved)
                     throw new InvalidOperationException("Approved tax-account mappings are immutable. Create a new effective-dated version.");
             }
