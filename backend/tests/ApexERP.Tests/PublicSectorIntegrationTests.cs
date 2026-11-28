@@ -1364,7 +1364,50 @@ namespace ApexERP.Tests
                 reconciliationReviewerId, true, "Replacement source population reconciled and independently reviewed.");
             var revisedComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(revisedComparison.ComparableActualsAvailable, revisedComparison.ComparabilityMessage);
+            Assert.True(revisedComparison.FinancialStatementReconciliation.Required);
+            Assert.False(revisedComparison.FinancialStatementReconciliation.Complete);
 
+            async Task ApproveFinancialStatementReconciliationAsync(PublicSectorBudgetReconciliation item, decimal workflowAmount)
+            {
+                var workflowId = Guid.NewGuid();
+                ctx.WorkflowRequests.Add(new WorkflowRequest
+                {
+                    Id = workflowId, CompanyId = companyId, RequestType = "PublicSectorBudgetReconciliation",
+                    ReferenceId = item.Id, ReferenceTable = "PublicSectorBudgetReconciliation",
+                    SubmittedBy = reconciliationPreparerId, Amount = workflowAmount, Status = WorkflowStatus.Pending
+                });
+                await ctx.SaveChangesAsync();
+                await service.MarkBudgetReconciliationPendingAsync(companyId, item.Id, workflowId);
+                var workflow = await ctx.WorkflowRequests.SingleAsync(x => x.Id == workflowId);
+                workflow.Status = WorkflowStatus.Approved;
+                ctx.WorkflowApprovals.Add(new WorkflowApproval
+                {
+                    CompanyId = companyId, WorkflowRequestId = workflowId, Tier = 1,
+                    ApproverId = reconciliationReviewerId, Approved = true, DecidedAt = DateTime.UtcNow
+                });
+                await ctx.SaveChangesAsync();
+                await service.FinaliseBudgetReconciliationApprovalAsync(companyId, item.Id, reconciliationReviewerId);
+            }
+
+            var revenueAdjustment = await service.CreateBudgetReconciliationAsync(companyId, 2026,
+                PublicSectorBudgetReconciliationType.Basis, "Cash-to-accrual revenue reconciliation",
+                "Revenue", 0m, 0m, 0m, "WP-IPSAS24-REVENUE-BASIS", reconciliationPreparerId,
+                default, 5m, 0m);
+            await ApproveFinancialStatementReconciliationAsync(revenueAdjustment, 5m);
+            var expenseNoDifference = await service.CreateBudgetReconciliationAsync(companyId, 2026,
+                PublicSectorBudgetReconciliationType.Basis, "No difference in expense reconciliation",
+                "Expense", 0m, 0m, 0m, "WP-IPSAS24-EXPENSE-NIL", reconciliationPreparerId,
+                default, 0m, 0m, true);
+            await ApproveFinancialStatementReconciliationAsync(expenseNoDifference, 0m);
+
+            var reconciledComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.True(reconciledComparison.FinancialStatementReconciliation.Complete,
+                reconciledComparison.FinancialStatementReconciliation.Message);
+            Assert.Equal(revisedComparison.FinancialStatementReconciliation.ComparableRevenueActual!.Value + 5m,
+                reconciledComparison.FinancialStatementReconciliation.FinancialStatementRevenueActual);
+            Assert.Equal(revisedComparison.FinancialStatementReconciliation.ComparableExpenseActual,
+                reconciledComparison.FinancialStatementReconciliation.FinancialStatementExpenseActual);
+            
             // Reconciliation must also revalidate each record, not just the aggregate
             // count and control total. A changed reference on an excluded record is stale.
             var changedExcludedSource = await ctx.BankTransactions.SingleAsync(x => x.Id == unmappedBankTransactionId);
