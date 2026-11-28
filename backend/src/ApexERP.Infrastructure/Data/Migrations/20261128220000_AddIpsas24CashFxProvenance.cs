@@ -46,6 +46,30 @@ public sealed class AddIpsas24CashFxProvenance : Migration
             nullable: false,
             defaultValue: false);
 
+        migrationBuilder.AddColumn<Guid>(
+            name: "ExchangeRateApprovedBy",
+            table: "PublicSectorBudgetExecutionActuals",
+            type: "uuid",
+            nullable: true);
+
+        migrationBuilder.AddColumn<DateTime>(
+            name: "ExchangeRateApprovedAt",
+            table: "PublicSectorBudgetExecutionActuals",
+            type: "timestamp with time zone",
+            nullable: true);
+
+        migrationBuilder.AddColumn<Guid>(
+            name: "ApprovedBy",
+            table: "ExchangeRates",
+            type: "uuid",
+            nullable: true);
+
+        migrationBuilder.AddColumn<DateTime>(
+            name: "ApprovedAt",
+            table: "ExchangeRates",
+            type: "timestamp with time zone",
+            nullable: true);
+
         // Existing certified actuals are immutable at runtime. This one-time schema
         // backfill runs under the migration owner while the table's user triggers are disabled.
         migrationBuilder.Sql("ALTER TABLE \"PublicSectorBudgetExecutionActuals\" DISABLE TRIGGER USER;");
@@ -91,5 +115,9 @@ public sealed class AddIpsas24CashFxProvenance : Migration
         migrationBuilder.DropColumn(name: "ExchangeRateSource", table: "PublicSectorBudgetExecutionActuals");
         migrationBuilder.DropColumn(name: "ExchangeRateSourceReference", table: "PublicSectorBudgetExecutionActuals");
         migrationBuilder.DropColumn(name: "ExchangeRateIsInverse", table: "PublicSectorBudgetExecutionActuals");
+        migrationBuilder.DropColumn(name: "ExchangeRateApprovedBy", table: "PublicSectorBudgetExecutionActuals");
+        migrationBuilder.DropColumn(name: "ExchangeRateApprovedAt", table: "PublicSectorBudgetExecutionActuals");
+        migrationBuilder.DropColumn(name: "ApprovedBy", table: "ExchangeRates");
+        migrationBuilder.DropColumn(name: "ApprovedAt", table: "ExchangeRates");
     }
 }
