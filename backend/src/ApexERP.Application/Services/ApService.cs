@@ -163,6 +163,23 @@ namespace ApexERP.Application.Services
                 if (invoice.Status != InvoiceStatus.Draft)
                     throw new InvalidOperationException("Only draft invoices can be posted.");
 
+                if (invoice.VatAmount > 0m)
+                {
+                    var taxAccount = await _db.GlAccounts.SingleOrDefaultAsync(x =>
+                        x.Id == vatInputAccountId && x.CompanyId == companyId && x.IsActive && x.IsPostable, token);
+                    if (taxAccount == null || taxAccount.Type != GlAccountType.Asset)
+                        throw new InvalidOperationException("VAT input must post to an active, postable asset account belonging to this company.");
+                    invoice.VatInputAccountId = taxAccount.Id;
+                }
+                if (invoice.WhtAmount > 0m)
+                {
+                    var taxAccount = await _db.GlAccounts.SingleOrDefaultAsync(x =>
+                        x.Id == whtPayableAccountId && x.CompanyId == companyId && x.IsActive && x.IsPostable, token);
+                    if (taxAccount == null || taxAccount.Type != GlAccountType.Liability)
+                        throw new InvalidOperationException("WHT payable must post to an active, postable liability account belonging to this company.");
+                    invoice.WhtPayableAccountId = taxAccount.Id;
+                }
+
                 if (_match != null && invoice.PurchaseOrderId != null)
                 {
                     var result = await _match.EvaluateAndStoreAsync(companyId, invoice, token);
