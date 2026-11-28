@@ -2708,27 +2708,29 @@ namespace ApexERP.Application.Services
                     if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
                         invoiceLines.Sum(x => x.LineTotal) != invoice.Total)
                         throw new InvalidOperationException("AR invoice lines must reconcile exactly to the fully settled tax-free invoice total.");
-                    var invoiceGlAccounts = invoiceLines.Select(x => x.GlAccountId).Distinct().ToArray();
-                    if (allocation.AmountApplied < invoice.Total && invoiceGlAccounts.Length > 1)
-                        throw new InvalidOperationException("A partial AR settlement across multiple GL classifications requires explicit invoice-line allocation. The automatic adapter supports partial settlement only when the invoice has one GL classification.");
+                    var invoiceDimensions = invoiceLines.Select(x => (x.GlAccountId, x.CostCentreId)).Distinct().ToArray();
+                    if (allocation.AmountApplied < invoice.Total && invoiceDimensions.Length > 1)
+                        throw new InvalidOperationException("A partial AR settlement across multiple GL/cost-centre allocations requires explicit settlement-line allocation.");
                     var expectedByAccount = allocation.AmountApplied < invoice.Total
-                        ? invoiceGlAccounts[0] == line.GlAccountId ? allocation.AmountApplied : 0m
-                        : invoiceLines.Where(x => x.GlAccountId == line.GlAccountId).Sum(x => x.LineTotal);
+                        ? invoiceDimensions[0].GlAccountId == line.GlAccountId &&
+                            invoiceDimensions[0].CostCentreId == line.CostCentreId ? allocation.AmountApplied : 0m
+                        : invoiceLines.Where(x => x.GlAccountId == line.GlAccountId &&
+                            x.CostCentreId == line.CostCentreId).Sum(x => x.LineTotal);
                     if (invoice.FundCentreId == line.FundCentreId && expectedByAccount > 0m)
                     {
                         var postedRevenue = await _db.JournalLines.Where(x =>
                             x.JournalEntryId == invoice.JournalEntryId.Value &&
                             x.GlAccountId == line.GlAccountId && x.FundCentreId == line.FundCentreId &&
-                            x.CostCentreId == null)
+                            x.CostCentreId == line.CostCentreId)
                             .SumAsync(x => x.Credit - x.Debit, ct);
-                        if (postedRevenue != invoiceLines.Where(x => x.GlAccountId == line.GlAccountId)
-                            .Sum(x => x.LineTotal))
+                        if (postedRevenue != invoiceLines.Where(x => x.GlAccountId == line.GlAccountId &&
+                            x.CostCentreId == line.CostCentreId).Sum(x => x.LineTotal))
                             throw new InvalidOperationException("The posted AR invoice revenue journal does not support the selected GL/Fund Centre allocation.");
                         amount += expectedByAccount;
                     }
                 }
-                if (amount <= 0m || line.CostCentreId.HasValue)
-                    throw new InvalidOperationException("The selected budget line has no supported AR invoice-line allocation. Cost-centre, VAT and withholding-tax allocations require explicit line-level mapping.");
+                if (amount <= 0m)
+                    throw new InvalidOperationException("The selected budget line has no supported AR invoice-line allocation. VAT and withholding-tax allocations still require explicit tax-line mapping.");
                 var receiptBankCandidates = await _db.BankAccounts.Where(x =>
                     x.CompanyId == companyId && x.Currency == receipt.Currency &&
                     _db.JournalLines.Any(j => j.JournalEntryId == receipt.JournalEntryId.Value &&
@@ -2785,27 +2787,29 @@ namespace ApexERP.Application.Services
                     if (invoiceLines.Count == 0 || invoiceLines.Any(x => x.LineVat != 0m) ||
                         invoiceLines.Sum(x => x.LineTotal) != invoice.Total)
                         throw new InvalidOperationException("AP invoice lines must reconcile exactly to the fully settled tax-free invoice total.");
-                    var invoiceGlAccounts = invoiceLines.Select(x => x.GlAccountId).Distinct().ToArray();
-                    if (allocation.AmountApplied < invoice.Total && invoiceGlAccounts.Length > 1)
-                        throw new InvalidOperationException("A partial AP settlement across multiple GL classifications requires explicit invoice-line allocation. The automatic adapter supports partial settlement only when the invoice has one GL classification.");
+                    var invoiceDimensions = invoiceLines.Select(x => (x.GlAccountId, x.CostCentreId)).Distinct().ToArray();
+                    if (allocation.AmountApplied < invoice.Total && invoiceDimensions.Length > 1)
+                        throw new InvalidOperationException("A partial AP settlement across multiple GL/cost-centre allocations requires explicit settlement-line allocation.");
                     var expectedByAccount = allocation.AmountApplied < invoice.Total
-                        ? invoiceGlAccounts[0] == line.GlAccountId ? allocation.AmountApplied : 0m
-                        : invoiceLines.Where(x => x.GlAccountId == line.GlAccountId).Sum(x => x.LineTotal);
+                        ? invoiceDimensions[0].GlAccountId == line.GlAccountId &&
+                            invoiceDimensions[0].CostCentreId == line.CostCentreId ? allocation.AmountApplied : 0m
+                        : invoiceLines.Where(x => x.GlAccountId == line.GlAccountId &&
+                            x.CostCentreId == line.CostCentreId).Sum(x => x.LineTotal);
                     if (invoice.FundCentreId == line.FundCentreId && expectedByAccount > 0m)
                     {
                         var postedExpense = await _db.JournalLines.Where(x =>
                             x.JournalEntryId == invoice.JournalEntryId.Value &&
                             x.GlAccountId == line.GlAccountId && x.FundCentreId == line.FundCentreId &&
-                            x.CostCentreId == null)
+                            x.CostCentreId == line.CostCentreId)
                             .SumAsync(x => x.Debit - x.Credit, ct);
-                        if (postedExpense != invoiceLines.Where(x => x.GlAccountId == line.GlAccountId)
-                            .Sum(x => x.LineTotal))
+                        if (postedExpense != invoiceLines.Where(x => x.GlAccountId == line.GlAccountId &&
+                            x.CostCentreId == line.CostCentreId).Sum(x => x.LineTotal))
                             throw new InvalidOperationException("The posted AP invoice expense journal does not support the selected GL/Fund Centre allocation.");
                         amount += expectedByAccount;
                     }
                 }
-                if (amount <= 0m || line.CostCentreId.HasValue)
-                    throw new InvalidOperationException("The selected budget line has no supported AP invoice-line allocation. Cost-centre, VAT and withholding-tax allocations require explicit line-level mapping.");
+                if (amount <= 0m)
+                    throw new InvalidOperationException("The selected budget line has no supported AP invoice-line allocation. VAT and withholding-tax allocations still require explicit tax-line mapping.");
                 var paymentBankCandidates = await _db.BankAccounts.Where(x =>
                     x.CompanyId == companyId && x.Currency == payment.Currency &&
                     _db.JournalLines.Any(j => j.JournalEntryId == payment.JournalEntryId.Value &&
@@ -2875,6 +2879,9 @@ namespace ApexERP.Application.Services
                 exchangeRateApprovedBy = selected.Rate.ApprovedBy;
                 exchangeRateApprovedAt = selected.Rate.ApprovedAt;
             }
+            if (line.CostCentreId.HasValue && !await _db.CostCentres.AnyAsync(x =>
+                x.Id == line.CostCentreId.Value && x.CompanyId == companyId && x.IsActive, ct))
+                throw new InvalidOperationException("The budget line cost centre is not active in this company.");
             var budgetAmount = decimal.Round(amount * rateToBudget, 6, MidpointRounding.AwayFromZero);
             if (budgetAmount <= 0m)
                 throw new InvalidOperationException("The translated budget-currency amount rounds to zero at the ledger precision.");
