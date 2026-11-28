@@ -1864,9 +1864,9 @@ namespace ApexERP.Tests
             }
 
             var arSubmission = await service.CreateCashSourceSubmissionAsync(companyId, arExpectedSource.Id,
-                1, 130m, 0m, 130m, "USD", "AR control account statement and receipt listing", preparerId);
+                1, 130m, 0m, 30m, "USD", "AR control account statement and receipt listing", preparerId);
             var apSubmission = await service.CreateCashSourceSubmissionAsync(companyId, apExpectedSource.Id,
-                1, 260m, 0m, 260m, "USD", "AP control account statement and payment listing", preparerId);
+                1, 260m, 0m, 60m, "USD", "AP control account statement and payment listing", preparerId);
             foreach (var submission in new[] { arSubmission, apSubmission })
             {
                 await service.SubmitCashSourceSubmissionAsync(companyId, submission.Id, preparerId);
@@ -2423,6 +2423,8 @@ namespace ApexERP.Tests
             var arClosingJournalId = Guid.NewGuid();
             var apOpeningJournalId = Guid.NewGuid();
             var apClosingJournalId = Guid.NewGuid();
+            var arLateJournalId = Guid.NewGuid();
+            var apLateJournalId = Guid.NewGuid();
             var budgetVersionId = Guid.NewGuid();
             var preparerId = Guid.NewGuid();
             var sourceReviewerId = Guid.NewGuid();
@@ -2588,12 +2590,24 @@ namespace ApexERP.Tests
             await service.SubmitCashSourceSubmissionAsync(companyId, arSubmission.Id, preparerId);
             await service.SubmitCashSourceSubmissionAsync(companyId, apSubmission.Id, preparerId);
 
-            var changedArLine = await ctx.JournalLines.SingleAsync(x =>
-                x.JournalEntryId == arClosingJournalId && x.GlAccountId == arControlId);
-            changedArLine.Debit = 55m;
-            var changedApLine = await ctx.JournalLines.SingleAsync(x =>
-                x.JournalEntryId == apClosingJournalId && x.GlAccountId == apControlId);
-            changedApLine.Credit = 35m;
+            ctx.JournalEntries.AddRange(
+                new JournalEntry
+                {
+                    Id = arLateJournalId, CompanyId = companyId, EntryNo = "JE-AR-LATE",
+                    Description = "Late AR control adjustment", EntryDate = new DateTime(2026, 6, 25, 0, 0, 0, DateTimeKind.Utc),
+                    PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                },
+                new JournalEntry
+                {
+                    Id = apLateJournalId, CompanyId = companyId, EntryNo = "JE-AP-LATE",
+                    Description = "Late AP control adjustment", EntryDate = new DateTime(2026, 6, 26, 0, 0, 0, DateTimeKind.Utc),
+                    PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                });
+            ctx.JournalLines.AddRange(
+                new JournalLine { JournalEntryId = arLateJournalId, GlAccountId = arControlId, Debit = 5m, Credit = 0m, Currency = "USD" },
+                new JournalLine { JournalEntryId = arLateJournalId, GlAccountId = revenueId, Debit = 0m, Credit = 5m, Currency = "USD" },
+                new JournalLine { JournalEntryId = apLateJournalId, GlAccountId = expenseId, Debit = 5m, Credit = 0m, Currency = "USD" },
+                new JournalLine { JournalEntryId = apLateJournalId, GlAccountId = apControlId, Debit = 0m, Credit = 5m, Currency = "USD" });
             await ctx.SaveChangesAsync();
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
