@@ -1013,6 +1013,12 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("VatInputAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("WhtPayableAccountId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("VatAmount")
                         .HasColumnType("numeric(20,6)");
 
@@ -1618,6 +1624,9 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("VatOutputAccountId")
                         .HasColumnType("uuid");
 
                     b.Property<decimal>("VatAmount")
