@@ -664,6 +664,9 @@ namespace ApexERP.Application.Services
             PublicSectorCashSourceSubmission submission, ExpectedCashSourcePopulation population,
             CancellationToken ct)
         {
+            if (!AreCashSourceSubmissionBalancesReconciled(expected,
+                submission.OpeningBalance, submission.ClosingBalance, population))
+                return false;
             var lines = await _db.PublicSectorCashSourceReconciliationLines.Where(x =>
                 x.CompanyId == companyId && x.CashSourceSubmissionId == submission.Id).ToListAsync(ct);
             var groups = lines.GroupBy(x => x.SourceRecordId).ToList();
@@ -944,7 +947,8 @@ namespace ApexERP.Application.Services
                 source.EffectiveFrom, source.EffectiveTo, normalisedCurrency, ct);
             if (population.RecordIds.Count != recordCount || population.ControlTotal != controlTotal ||
                 !population.CurrencyMatches ||
-                (population.NetMovement.HasValue && openingBalance + population.NetMovement.Value != closingBalance))
+                (population.NetMovement.HasValue && openingBalance + population.NetMovement.Value != closingBalance) ||
+                !AreCashSourceSubmissionBalancesReconciled(source, openingBalance, closingBalance, population))
                 throw new InvalidOperationException("The submitted record count, control total, currency or opening-to-closing balance movement does not agree with the live registered source population.");
 
             var item = new PublicSectorCashSourceSubmission
@@ -1014,7 +1018,9 @@ namespace ApexERP.Application.Services
                 if (population.RecordIds.Count != item.RecordCount ||
                     population.ControlTotal != item.ControlTotal || !population.CurrencyMatches ||
                     (population.NetMovement.HasValue &&
-                        item.OpeningBalance + population.NetMovement.Value != item.ClosingBalance))
+                        item.OpeningBalance + population.NetMovement.Value != item.ClosingBalance) ||
+                    !AreCashSourceSubmissionBalancesReconciled(expected,
+                        item.OpeningBalance, item.ClosingBalance, population))
                     throw new InvalidOperationException("The live source population no longer agrees with the submitted record count, control total, currency or opening-to-closing balance movement.");
             }
 
@@ -1262,6 +1268,8 @@ namespace ApexERP.Application.Services
                     population.ControlTotal != submission.ControlTotal ||
                     (population.NetMovement.HasValue &&
                         submission.OpeningBalance + population.NetMovement.Value != submission.ClosingBalance) ||
+                    !AreCashSourceSubmissionBalancesReconciled(expected,
+                        submission.OpeningBalance, submission.ClosingBalance, population) ||
                     !population.RecordIds.SetEquals(lines.Select(x => x.SourceRecordId).Distinct()))
                     throw new InvalidOperationException("The live source population changed after submission; record-level reconciliation cannot be approved.");
             }
@@ -1389,6 +1397,8 @@ namespace ApexERP.Application.Services
                             population.ControlTotal != submission.ControlTotal ||
                             (population.NetMovement.HasValue &&
                                 submission.OpeningBalance + population.NetMovement.Value != submission.ClosingBalance) ||
+                            !AreCashSourceSubmissionBalancesReconciled(expected,
+                                submission.OpeningBalance, submission.ClosingBalance, population) ||
                             !population.RecordIds.SetEquals(lines))
                             throw new InvalidOperationException($"The live source population for {expected.SourceCode} changed or does not match its reviewed control totals and record-level reconciliation.");
                     }
