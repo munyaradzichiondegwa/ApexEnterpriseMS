@@ -871,9 +871,15 @@ namespace ApexERP.Infrastructure.Data
                 .HasDatabaseName("IX_BankStatementBatch_AccountPeriod");
             modelBuilder.Entity<BankStatementImportBatch>()
                 .HasCheckConstraint("CK_BankStatementBatch_Period", "\"PeriodEnd\" > \"PeriodStart\"")
-                .HasCheckConstraint("CK_BankStatementBatch_ByteLength", "\"ByteLength\" > 0")
+                .HasCheckConstraint("CK_BankStatementBatch_ByteLength", "\"ByteLength\" > 0 AND octet_length(\"OriginalBytes\") = \"ByteLength\"")
                 .HasCheckConstraint("CK_BankStatementBatch_Totals",
-                    "\"TotalDebits\" >= 0 AND \"TotalCredits\" >= 0 AND \"TransactionCount\" >= 0");
+                    "\"TotalDebits\" >= 0 AND \"TotalCredits\" >= 0 AND \"TransactionCount\" >= 0")
+                .HasCheckConstraint("CK_BankStatementBatch_Balance",
+                    "\"OpeningBalance\" + \"TotalCredits\" - \"TotalDebits\" = \"ClosingBalance\"")
+                .HasCheckConstraint("CK_BankStatementBatch_Authentication",
+                    "(\"Status\" = 0 AND \"AuthenticationMethod\" = 0 AND \"AuthenticatedBy\" IS NULL AND \"AuthenticatedAt\" IS NULL AND \"AuthenticationEvidenceReference\" IS NULL) OR (\"Status\" IN (1,2) AND \"AuthenticationMethod\" = 1 AND \"AuthenticatedBy\" IS NOT NULL AND \"AuthenticatedAt\" IS NOT NULL AND \"AuthenticationEvidenceReference\" IS NOT NULL) OR \"Status\" = 3")
+                .HasCheckConstraint("CK_BankStatementBatch_Completeness",
+                    "(\"Status\" = 2 AND \"CompletenessCertifiedBy\" IS NOT NULL AND \"CompletenessCertifiedAt\" IS NOT NULL) OR (\"Status\" <> 2 AND \"CompletenessCertifiedBy\" IS NULL AND \"CompletenessCertifiedAt\" IS NULL)");
             modelBuilder.Entity<BankStatementImportBatch>()
                 .HasOne<BankAccount>().WithMany().HasForeignKey(x => x.BankAccountId)
                 .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementBatch_BankAccount");
@@ -905,8 +911,12 @@ namespace ApexERP.Infrastructure.Data
                 .HasDatabaseName("IX_BankStatementTransaction_BatchStatus");
             modelBuilder.Entity<BankStatementImportedTransaction>()
                 .HasCheckConstraint("CK_BankStatementTransaction_Amounts",
-                    "\"Debit\" >= 0 AND \"Credit\" >= 0 AND NOT (\"Debit\" > 0 AND \"Credit\" > 0)")
-                .HasCheckConstraint("CK_BankStatementTransaction_SourceLine", "\"SourceLineNumber\" > 1");
+                    "(\"Debit\" > 0 AND \"Credit\" = 0) OR (\"Credit\" > 0 AND \"Debit\" = 0)")
+                .HasCheckConstraint("CK_BankStatementTransaction_SourceLine", "\"SourceLineNumber\" > 1")
+                .HasCheckConstraint("CK_BankStatementTransaction_Identity",
+                    "length(trim(\"ExternalTransactionId\")) > 0 AND length(\"Currency\") = 3 AND length(\"TransactionFingerprint\") = 64")
+                .HasCheckConstraint("CK_BankStatementTransaction_Review",
+                    "(\"Status\" = 0 AND \"MatchedBankTransactionId\" IS NULL AND \"MatchedBy\" IS NULL AND \"MatchedAt\" IS NULL AND \"ExclusionReason\" IS NULL AND \"ExcludedBy\" IS NULL AND \"ExcludedAt\" IS NULL) OR (\"Status\" = 1 AND \"MatchedBankTransactionId\" IS NOT NULL AND \"MatchedBy\" IS NOT NULL AND \"MatchedAt\" IS NOT NULL AND \"ExclusionReason\" IS NULL AND \"ExcludedBy\" IS NULL AND \"ExcludedAt\" IS NULL) OR (\"Status\" = 2 AND \"MatchedBankTransactionId\" IS NULL AND \"MatchedBy\" IS NULL AND \"MatchedAt\" IS NULL AND length(trim(\"ExclusionReason\")) > 0 AND \"ExcludedBy\" IS NOT NULL AND \"ExcludedAt\" IS NOT NULL)");
             modelBuilder.Entity<BankStatementImportedTransaction>()
                 .HasOne<BankStatementImportBatch>().WithMany().HasForeignKey(x => x.ImportBatchId)
                 .OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_BankStatementTransaction_Batch");
