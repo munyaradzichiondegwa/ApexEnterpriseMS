@@ -428,6 +428,28 @@ namespace ApexERP.API.Controllers
                     apPaymentIds.Contains(x.Id) && x.JournalEntryId.HasValue)
                     .Select(x => x.JournalEntryId!.Value))
                 .Distinct().ToArrayAsync(ct);
+
+            var capturedBankJournalIds = capturedBankSourceIds.Length == 0
+                ? Array.Empty<Guid>()
+                : await _db.BankTransactions.Where(x => x.CompanyId == CompanyId &&
+                        capturedBankSourceIds.Contains(x.Id) && x.JournalEntryId.HasValue)
+                    .Select(x => x.JournalEntryId!.Value).Distinct().ToArrayAsync(ct);
+            var postedArReceipts = await _db.ArReceipts.Where(x =>
+                    x.CompanyId == CompanyId && x.ReceiptDate >= version.PeriodStart &&
+                    x.ReceiptDate < version.PeriodEnd && x.JournalEntryId.HasValue &&
+                    _db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
+                        j.CompanyId == CompanyId && j.Status == JournalStatus.Posted))
+                .Select(x => new { x.Id, JournalEntryId = x.JournalEntryId!.Value }).ToListAsync(ct);
+            var postedApPayments = await _db.ApPayments.Where(x =>
+                    x.CompanyId == CompanyId && x.PaymentDate >= version.PeriodStart &&
+                    x.PaymentDate < version.PeriodEnd && x.JournalEntryId.HasValue &&
+                    _db.JournalEntries.Any(j => j.Id == x.JournalEntryId.Value &&
+                        j.CompanyId == CompanyId && j.Status == JournalStatus.Posted))
+                .Select(x => new { x.Id, JournalEntryId = x.JournalEntryId!.Value }).ToListAsync(ct);
+            var missingArSettlementCoverage = postedArReceipts.Count(x =>
+                !arReceiptIds.Contains(x.Id) && !capturedBankJournalIds.Contains(x.JournalEntryId));
+            var missingApSettlementCoverage = postedApPayments.Count(x =>
+                !apPaymentIds.Contains(x.Id) && !capturedBankJournalIds.Contains(x.JournalEntryId));
             // AR/AP actuals cover the same posted bank movement through their settlement journal.
             var periodBankMovements = _db.BankTransactions.Where(x => x.CompanyId == CompanyId &&
                 x.TransactionDate >= version.PeriodStart && x.TransactionDate < version.PeriodEnd);
@@ -474,7 +496,8 @@ namespace ApexERP.API.Controllers
             var sourceCoverageComplete = (noSourceBackedCashActuals
                     ? certifiedZeroActivity
                     : true) &&
-                uncapturedPostedMovements == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0;
+                uncapturedPostedMovements == 0 && missingArSettlementCoverage == 0 &&
+                missingApSettlementCoverage == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0;
             var operatingBridgeDifference = operatingDifference - operatingAdjustment;
             var investingBridgeDifference = investingDifference - investingAdjustment;
             var financingBridgeDifference = financingDifference - financingAdjustment;
@@ -488,6 +511,8 @@ namespace ApexERP.API.Controllers
                 NoSourceBackedCashActuals = noSourceBackedCashActuals,
                 CertifiedZeroActivityAttestationValid = certifiedZeroActivity,
                 UncapturedOrUnreconciledPostedBankMovements = uncapturedPostedMovements,
+                MissingPostedArSettlementCoverage = missingArSettlementCoverage,
+                MissingPostedApSettlementCoverage = missingApSettlementCoverage,
                 PendingOrDraftActuals = pendingActuals,
                 InvalidCertifiedActuals = invalidCertifiedActuals,
                 Reconciled = reconciled,
