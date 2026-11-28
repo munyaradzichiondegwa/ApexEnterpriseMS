@@ -41,6 +41,7 @@ export default function PublicSectorPage() {
   const [budgetReconciliations, setBudgetReconciliations] = useState<any[]>([]);
   const [budgetStatementIssues, setBudgetStatementIssues] = useState<any[]>([]);
   const [statementIssueDraft, setStatementIssueDraft] = useState({ templateAuthorityReference: "", templateVersion: "", issueReference: "" });
+  const [statementIssueDecisionDraft, setStatementIssueDecisionDraft] = useState({ evidenceReference: "", note: "" });
   const [budgetReconciliationDraft, setBudgetReconciliationDraft] = useState({
     type: "Basis", description: "", statementSection: "Operating",
     revenueAmount: 0, expenseAmount: 0, operatingAmount: 0,
@@ -289,9 +290,21 @@ export default function PublicSectorPage() {
   }
 
   async function budgetStatementIssueAction(id: string, action: "review" | "approve" | "publish") {
+    const evidenceReference = statementIssueDecisionDraft.evidenceReference.trim();
+    const note = statementIssueDecisionDraft.note.trim();
+    if (!evidenceReference || !note) {
+      setError("Provide the stage evidence reference and decision note before continuing.");
+      return;
+    }
+    const body = action === "review"
+      ? { templateVerificationReference: evidenceReference, reviewNote: note }
+      : action === "approve"
+        ? { approvalReference: evidenceReference, approvalNote: note }
+        : { publicationReference: evidenceReference, publisherNote: note };
     setError(null);
     try {
-      await api.post(`/public-sector/budget-statements/issues/${id}/${action}`);
+      await api.post(`/public-sector/budget-statements/issues/${id}/${action}`, body);
+      setStatementIssueDecisionDraft({ evidenceReference: "", note: "" });
       setMsg(action === "publish"
         ? "IPSAS 24 statement issued. The source snapshot was revalidated at publication."
         : `IPSAS 24 statement ${action} recorded. The next independent role must complete its stage.`);
@@ -1263,24 +1276,37 @@ export default function PublicSectorPage() {
                       budgetComparison.accountingBasis === "Cash" && !cashActualReconciliation?.reconciled ? "Complete the cash-flow bridge." :
                       "Prepare an immutable, source-fingerprinted issue snapshot."}>Prepare statement issue</button>
                 </form>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <input className="input" placeholder="Stage evidence reference (template verification / approval / publication)"
+                    value={statementIssueDecisionDraft.evidenceReference}
+                    onChange={(e) => setStatementIssueDecisionDraft({ ...statementIssueDecisionDraft, evidenceReference: e.target.value })} />
+                  <input className="input" placeholder="Independent decision note"
+                    value={statementIssueDecisionDraft.note}
+                    onChange={(e) => setStatementIssueDecisionDraft({ ...statementIssueDecisionDraft, note: e.target.value })} />
+                </div>
                 <div className="overflow-x-auto">
                   <table className="table-base">
-                    <thead><tr><th>Issue reference</th><th>Financial year</th><th>Template reference</th><th>Prepared</th><th>Status</th><th>Action</th></tr></thead>
+                    <thead><tr><th>Issue reference</th><th>Financial year</th><th>Template reference</th><th>Prepared</th><th>Status</th><th>Decision evidence</th><th>Action</th></tr></thead>
                     <tbody>{budgetStatementIssues.filter((item: any) => item.financialYear === year).map((item: any) => (
                       <tr key={item.id}>
                         <td>{item.issueReference}</td><td>{item.financialYear}</td>
                         <td>{item.templateAuthorityReference} · {item.templateVersion}<div className="text-xs text-amber-700">{item.templateReferenceStatus}</div></td>
                         <td>{new Date(item.preparedAt).toLocaleString()}</td><td>{item.status}</td>
+                        <td className="text-xs">
+                          {item.templateVerificationReference && <div>Template: {item.templateVerificationReference}</div>}
+                          {item.approvalReference && <div>Approval: {item.approvalReference}</div>}
+                          {item.publicationReference && <div>Publication: {item.publicationReference}</div>}
+                        </td>
                         <td>{item.status === "Draft"
-                          ? <button type="button" className="btn-secondary" onClick={() => budgetStatementIssueAction(item.id, "review")}>Review</button>
+                          ? <button type="button" className="btn-secondary" disabled={!statementIssueDecisionDraft.evidenceReference.trim() || !statementIssueDecisionDraft.note.trim()} onClick={() => budgetStatementIssueAction(item.id, "review")}>Review</button>
                           : item.status === "Reviewed"
-                            ? <button type="button" className="btn-secondary" onClick={() => budgetStatementIssueAction(item.id, "approve")}>Approve</button>
+                            ? <button type="button" className="btn-secondary" disabled={!statementIssueDecisionDraft.evidenceReference.trim() || !statementIssueDecisionDraft.note.trim()} onClick={() => budgetStatementIssueAction(item.id, "approve")}>Approve</button>
                             : item.status === "Approved"
-                              ? <button type="button" className="btn-secondary" onClick={() => budgetStatementIssueAction(item.id, "publish")}>Issue</button>
+                              ? <button type="button" className="btn-secondary" disabled={!statementIssueDecisionDraft.evidenceReference.trim() || !statementIssueDecisionDraft.note.trim()} onClick={() => budgetStatementIssueAction(item.id, "publish")}>Issue</button>
                               : item.status}</td>
                       </tr>
                     ))}
-                    {!budgetStatementIssues.some((item: any) => item.financialYear === year) && <tr><td colSpan={6} className="text-center text-slate-500">No statement issue records for this financial year.</td></tr>}</tbody>
+                    {!budgetStatementIssues.some((item: any) => item.financialYear === year) && <tr><td colSpan={7} className="text-center text-slate-500">No statement issue records for this financial year.</td></tr>}</tbody>
                   </table>
                 </div>
               </div>
