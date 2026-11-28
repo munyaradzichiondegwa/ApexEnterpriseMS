@@ -80,115 +80,49 @@ The implementation contract for this phase is:
 
 Acceptance tests must cover independent approval, approved-PO eligibility, commitment amendments, partial invoice realisation, cancellation, payment liquidation without double-counting, period cut-off, source changes after approval, duplicate mapping, exact allocation totals, tenant isolation/RLS and the cash-flow reconciliation bridge.
 
-## Period completeness — implementation boundary and remaining work
+## Period completeness and source reconciliation — implemented for supported adapters
 
-**Status: zero-activity certification is implemented; general period-completeness certification is not yet complete.**
+**Status: implemented and fail-closed for bank, AR-receipt and AP-payment source populations already held in ApexERP.**
 
-The current `PublicSectorCashPeriodAttestation` workflow is deliberately narrow:
-- It permits a nil-return only when the current counts for bank transactions, AR receipts and AP payments are all zero.
-- It re-counts those three source populations at submission and independent certification.
-- It records the budget version, period, observed counts and supporting evidence reference, and makes certified/rejected attestations immutable.
-- The cash comparison refuses to infer zero actuals when neither source-backed actuals nor a valid certified nil-return exists.
+The supported workflow now has four separately controlled stages:
 
-This is not yet a complete period-close control for periods that contain transactions. The current counts are not a source-population reconciliation: they do not establish that every eligible bank movement, AR receipt and AP payment has either been captured to an approved budget line or independently classified as an evidenced exclusion. Nor do they establish that all expected source systems, bank accounts, cashbooks, funds or reporting units have submitted their period records. A period with some captured actuals must therefore not be treated as complete merely because at least one actual exists.
+1. **Expected-source register:** company-owned bank accounts, AR control accounts and AP control accounts are registered against an approved cash budget version. Entries require independent approval. Cashbook is rejected until a dedicated adapter exists.
+2. **Period source submission:** each registered source submits its effective period, record count, control total, currency, opening/closing balances and evidence reference. The service re-reads live source populations and rejects mismatched counts, totals, currency and bank opening-to-closing movement.
+3. **Record-level reconciliation:** each source record is mapped to one or more certified budget actual allocations or one reason-coded exclusion. Source amounts, dates, currency, posted settlement journal, source kind, budget version and source identity are validated. Split AR/AP allocations must sum exactly to the underlying receipt/payment. An actual cannot be used twice in an active revision.
+4. **Register completeness certification:** an independent certifier approves the declared source population count and entity scope after every registered source has a reviewed control submission and reviewed record-level reconciliation. The database freezes additions to the register after certification.
 
-### Implemented source-coverage hardening
+The comparison and cash-flow reconciliation preview re-read the live source populations and require the latest submission revision for every registered source to remain reviewed. A missing source is not treated as zero. Fully reviewed exclusions can account for non-budget source activity without fabricating a budget actual; any resulting budget-to-financial-statement difference must still be reconciled and explained.
 
-The comparison now checks more than the existence of at least one cash actual. For each posted AR receipt and AP payment in the approved reporting period, it requires either:
-- a cash actual linked directly to that AR/AP source record; or
-- a captured bank-transaction actual whose posted settlement journal is the same journal as the AR/AP source.
+**Source-evidence boundary:** this workflow reconciles transaction records already held in ApexERP. It does not cryptographically import or authenticate an external bank or subledger export. The responsible entity must retain the original export and evidence, and the independent reviewer must compare the in-system population with that authoritative source. The completeness attestation is a management assertion supported by evidence; ApexERP cannot discover undisclosed accounts or source systems.
 
-This is in addition to the existing requirement that period bank movements be reconciled, posted and captured or represented by the same settlement journal. Pending or invalid certified actuals continue to block comparability.
+**Correction boundary:** rejected submissions can be replaced by a numbered revision. A post-review source change invalidates live comparability. A complete controlled reopen/reversal workflow for already-reviewed source populations is not yet implemented; until that is delivered, the period remains blocked rather than silently rewriting reviewed history.
 
-This closes a specific partial-capture gap in the existing source-backed workflow. It does **not** replace the expected-source register and independent source-close process described above: it cannot prove that every expected bank account/cashbook or external source system submitted a complete statement, nor can it support reason-coded exclusions for records outside the current adapters.
+### Acceptance coverage
 
-### Registered-source submission gate — implementation refinement
-
-The cash-budget-to-Statement-of-Cash-Flows reconciliation endpoint now checks the expected-source register for the selected approved cash budget version. It reports whether a register exists, whether every registered source is approved, how many required sources have independently reviewed submissions, and whether any submitted source remains unreviewed. Missing required submissions, draft/unapproved register entries, rejected submissions and pending submissions prevent source coverage from passing.
-
-This is intentionally a gate over the sources already registered; it is not proof that the register contains every bank account, cashbook, receivables/payables population or reporting unit that should be in scope. The endpoint therefore continues to report both `RecordLevelSourceReconciliationComplete` and `ExpectedSourceRegisterCompletenessCertified` as false, and the overall bridge as **not reconciled**, until both controls are implemented. A source submission's record count and control total are not yet matched to every external source row and one-or-more certified budget actual allocations (or a reason-coded, independently approved exclusion). No caller-supplied declaration or presence of one or more source entries is treated as proof of population completeness.
-
-### Record-level source reconciliation — implemented foundation
-
-The branch now has a separate record-level reconciliation lifecycle attached to each reviewed period source submission, and a separate independent certification of the complete expected-source register:
-
-- A source record is identified by its company-scoped internal source-record ID and source reference. Bank-account sources map to bank transactions; receivables-control sources map to AR receipts; payables-control sources map to AP payments. Cashbook is deliberately rejected until a dedicated adapter exists.
-- Each source record is either allocated across one or more already-certified budget execution actuals or recorded once as an exclusion with a mandatory reason. A source cannot be partly allocated and partly excluded.
-- Split AR/AP allocations are supported: the sum of the certified actual allocations must equal the underlying receipt/payment amount exactly. Bank movements map to their one certified actual.
-- The service derives the source amount, date and currency from the company-owned source record. It checks source kind, budget version, reporting period, currency, actual status, source-record identity and source reference; it does not trust caller-supplied amounts.
-- The submitted source population's distinct record count and sum of distinct source-record amounts must equal the reviewed submission's record count and control total exactly.
-- A separate reconciliation preparer submits the transaction mapping; an independent reviewer must differ from the source preparer, source reviewer and reconciliation submitter.
-- Rejected source-control or record-level submissions remain immutable history. A new numbered submission revision can be created after rejection; the comparison and register-completeness checks evaluate only the latest revision for each expected source. A certified actual can be reused in a later revision only after its earlier mapping was rejected; active mappings remain unique.
-- Reviewed reason-coded exclusions count as reconciled source coverage, but only for source records linked to posted settlement journals. A later actual cannot be created for a source record already reconciled or excluded in an active revision.
-- PostgreSQL makes mapping rows append-only and prevents mapping a certified actual more than once. Final record-reconciliation states are immutable. The cash-flow bridge now requires the record-level reconciliation to be independently reviewed for every required source.
-
-API routes:
-- `GET /api/v1/public-sector/cash-source-submissions/{id}/reconciliation-lines`
-- `POST /api/v1/public-sector/cash-source-submissions/{id}/reconciliation-lines`
-- `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/submit`
-- `POST /api/v1/public-sector/cash-source-submissions/{id}/record-reconciliation/review`
-
-### Accrual Fund Centre and cost-centre coverage — implemented
-
-For accrual-basis comparisons, the service now inspects posted/reversed GL lines on accounts included in the approved final budget. If any such actual has no Fund Centre or its Fund Centre/cost-centre combination does not match an approved final-budget dimension, comparable actuals are withheld and the report identifies the count of unmapped lines. This prevents untagged actuals from silently disappearing from the comparison. The check is scoped to GL accounts present in the approved budget; an independently approved full chart-of-accounts and reporting-entity scope inventory remains a governance requirement.
-
-### Final-budget-to-actual variance explanations — implemented
-
-The comparison API now identifies the final budget line behind each comparison row and stores an evidence-backed explanation for each non-zero comparable final-budget-to-actual variance. Explanations are prepared, submitted and independently reviewed. At submission and approval, ApexERP recalculates the current comparison and requires the recorded variance amount to remain exact. PostgreSQL prevents edits or deletion after approval/rejection; a changed actual variance can receive a new explanation while retaining the earlier explanation as audit history.
-
-Until an approved entity-specific materiality threshold is configured, the implementation deliberately requires an explanation for **every non-zero variance**, which is stricter than applying an unapproved threshold. The comparison report exposes whether all required explanations are approved, and the frontend withholds the comparison CSV export while comparable actuals or variance explanations are incomplete.
-
-API routes:
-- `POST /api/v1/public-sector/budget-variance-explanations`
-- `POST /api/v1/public-sector/budget-variance-explanations/{id}/submit`
-- `POST /api/v1/public-sector/budget-variance-explanations/{id}/review`
-
-### Expected-source register completeness certification — implemented
-
-A separate tenant-scoped attestation now records the approved budget version, reporting-entity scope, declared expected-source count and evidence reference. The preparer submits it and an independent certifier approves or rejects it. Certification re-counts the register and requires every registered source—including sources reporting nil activity—to have both an independently reviewed period control submission and an independently reviewed record-level reconciliation.
-
-The certified attestation freezes additions to the expected-source register at database level. Rejected attestations remain immutable audit history and a new attestation may be prepared; a certified register cannot be silently expanded under the same budget version. The cash-flow bridge reads the latest attestation and requires its certified status, matching source count and matching entity scope before the register-completeness gate passes.
-
-API routes:
-- `GET /api/v1/public-sector/expected-cash-sources/completeness-attestation?budgetVersionId={id}`
-- `POST /api/v1/public-sector/expected-cash-sources/completeness-attestation`
-- `POST /api/v1/public-sector/expected-cash-sources/completeness-attestation/{id}/submit`
-- `POST /api/v1/public-sector/expected-cash-sources/completeness-attestation/{id}/review`
-
-This is a management completeness attestation supported by an evidence reference and independent approval; it does not independently discover undisclosed bank accounts or external systems. The entity remains responsible for supplying a complete authoritative inventory and retaining the evidence for audit.
-
-This is a transaction-level mapping against records already present in ApexERP. It is not yet a cryptographically verified import of an external bank or subledger statement. The reviewer must compare the submitted source evidence to the original source-system export. External cashbook ingestion and independent certification that the expected-source register is complete remain outstanding.
-
-### Required completion design
-
-1. Maintain an expected-source register for each company, reporting entity and period. It must identify the bank accounts/cashbooks and AR/AP source populations in scope, with effective dates and accountable owners. The register must be independently approved before period close.
-2. Record a period-close submission for each expected source. Each submission must identify the source, period, statement/control totals, record count, opening/closing balance where applicable, evidence reference and preparer.
-3. Reconcile source populations to captured execution actuals. Every in-scope record must be either allocated exactly once to an approved budget line or linked to an independently approved, reason-coded exclusion. Duplicate, omitted, unclassified, out-of-period and cross-company records block completion.
-4. Reconcile bank/cashbook control totals to source statements and distinguish bank movements from AR/AP subledger evidence so the same settlement is not counted twice.
-5. Require independent reviewer sign-off for each source and an independent period-level certification. Preparers cannot certify their own submissions. Late-arriving or amended source records invalidate the affected certification and require controlled reopening/re-certification with an audit trail.
-6. Permit a zero-activity declaration only after all expected sources have submitted nil activity and their control evidence has been independently reviewed. Missing source submissions are **unknown**, not zero.
-7. Make budget comparison, statutory statement issuance and export fail closed while any expected source is missing, unreconciled, awaiting approval, or invalidated. Preserve a drill-through from each reported amount to the source records and evidence.
-8. Retain immutable source snapshots, certification events and compensating corrections; never silently rewrite a previously certified period.
-
-### Acceptance tests still required
-
-- Non-zero period with one omitted source record is blocked.
-- Every expected source must submit, including nil returns; a missing source cannot be interpreted as zero.
-- Exact source-to-actual coverage, duplicate detection and approved exclusion handling.
-- Bank movement linked to an AR receipt/AP payment is not double-counted.
-- Independent approval and segregation of duties at source and period level.
-- Late-arriving transaction or changed source evidence invalidates prior certification.
-- Reopening, recertification and audit-history preservation.
-- Tenant/RLS isolation, period cut-off, currency precision and clean migration/rollback.
-- Comparison, export and statutory issuance are blocked until the complete period is certified.
+PostgreSQL integration coverage includes:
+- Original/final budget comparison, no-revision treatment and tenant isolation.
+- Cash budgets not substituting accrual GL amounts for cash actuals.
+- Certified bank actuals, independent certification and late/unreconciled source detection.
+- Fully settled AR receipts and authorised AP payments, including split actual allocations.
+- Zero-activity attestations and rejection when source activity appears after submission.
+- Expected-source approval, register freeze, source submissions and independent record-level review.
+- Variance explanation preparation, independent review and invalidation when the actual variance changes.
+- EF migration drift, clean PostgreSQL installation, hardening scripts and RLS boot through CI.
 
 ## Explicit remaining controls
 
-1. For cash/modified-cash budgets, comparable actuals must be sourced from the budgetary ledger/cash and commitment records, independently certified and reconciled to the statement of cash flows. Accrual GL postings are deliberately not substituted.
-2. The current actual calculation is based on tagged posted GL journal lines. Completeness of Fund Centre tagging, entity scope and any omitted budget entities must be certified before statutory issue.
-3. Material variance explanations require preparer/reviewer sign-off and a configurable materiality threshold; an amendment reason alone is not a full statutory variance explanation.
-4. The official Zimbabwe budget classification dictionary, current Treasury template version, reporting period conventions and approved entity scope must be configured from authoritative government sources.
-5. The current statement is a functional first implementation slice, not a claim of full IPSAS compliance, Treasury certification or audit acceptance.
+
+
+1. **Modified-cash budgets:** not supported. The product does not infer commitment recognition from purchase orders, goods receipts, invoices or encumbrances. An entity-specific recognition policy, trigger, classification and liquidation/reversal treatment must be formally approved before this basis can be enabled.
+2. **Cashbook and external statement ingestion:** no dedicated cashbook adapter or cryptographically verified external bank/subledger statement import is implemented. Reviewers must compare ApexERP records with original source exports retained as evidence.
+3. **Cash FX:** cash actuals currently require the source currency to equal the approved budget currency. Cash-budget translation using approved effective-dated FX rates and immutable quote provenance is not implemented.
+4. **AR/AP control balances and classification:** transaction populations, counts, amounts and currencies are revalidated, but AR/AP opening/closing balances are not yet reconciled to GL control-account balances. Tax-bearing invoices, WHT splits and cost-centre allocation require explicit source-journal mapping; no proportional allocation is inferred.
+5. **Reporting entity and timing differences:** automatic actual capture requires the budget entity scope and reporting period to match the registered company and budget period. Comparable subsets for partial entities or different periods are not automatically calculated; manual reconciliation rows do not replace a complete entity/timing bridge.
+6. **Source corrections after review:** rejected submissions can be revised, but a full post-review reopen/reversal and recertification workflow is still required. Stale source populations block comparison in the meantime.
+7. **Accrual dimension completeness:** actuals on budgeted GL accounts with missing or unmatched Fund Centre/cost-centre dimensions block comparability. A complete approved chart-of-accounts and reporting-entity inventory is still a management acceptance responsibility.
+8. **Zimbabwe statutory configuration:** Treasury Circular No. 3 of 2025 relates to the 2024 transitional financial statements. The latest Treasury-approved 2026 template, classification dictionaries, reporting period conventions and legislative oversight aggregations must be supplied and configured before statutory issue.
+9. **Statutory issue approval:** the comparison and export gates do not constitute a signed statutory statement-issuance workflow, legal opinion, Treasury acceptance or audit opinion. The cash-flow bridge is a reconciliation preview and requires independently certified financial-statement cash-flow totals before statutory release.
+10. **Materiality:** every non-zero comparable variance currently requires an explanation. A configurable materiality threshold remains disabled until formally approved by the reporting entity.
 
 ## Data integrity
 
