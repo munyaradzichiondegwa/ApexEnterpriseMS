@@ -21,6 +21,23 @@ namespace ApexERP.Domain.Entities
         public bool IsClosed { get; set; }
     }
 
+    /// <summary>
+    /// Approved appropriation distribution to an expense GL account and optional cost centre.
+    /// Draft and pending allocations are excluded from budget-versus-actual reporting.
+    /// </summary>
+    public class PublicSectorBudgetAllocation : TenantEntity
+    {
+        public Guid FundCentreId { get; set; }
+        public Guid GlAccountId { get; set; }
+        public Guid? CostCentreId { get; set; }
+        public int FinancialYear { get; set; }
+        public decimal Amount { get; set; }
+        public PublicSectorBudgetAllocationStatus Status { get; set; } = PublicSectorBudgetAllocationStatus.Draft;
+        public Guid? ApprovalWorkflowId { get; set; }
+        public Guid? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+    }
+
     /// <summary>Encumbrance created when a PO is approved against a FundCentre: reduces the
     /// available budget immediately (Appropriation - Commitments - Actuals), released/replaced by
     /// the actual expenditure on GRN/invoice, or fully reversed on PO cancellation.</summary>
