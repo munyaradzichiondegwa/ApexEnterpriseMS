@@ -49,13 +49,13 @@ public sealed class AddIpsas24BudgetExecutionActuals : Migration
                 table.PrimaryKey("PK_PublicSectorBudgetExecutionActuals", x => x.Id);
                 table.CheckConstraint("CK_PublicSectorBudgetExecutionActual_Amount", "\"Amount\" > 0");
                 table.CheckConstraint("CK_PublicSectorBudgetExecutionActual_ExchangeRate", "\"ExchangeRateToBudgetCurrency\" > 0");
-                table.ForeignKey("FK_PublicSectorBudgetExecutionActuals_PublicSectorBudgetVersions_BudgetVersionId",
+                table.ForeignKey("FK_BudgetActual_BudgetVersion",
                     x => x.BudgetVersionId, "PublicSectorBudgetVersions", "Id", onDelete: ReferentialAction.Restrict);
-                table.ForeignKey("FK_PublicSectorBudgetExecutionActuals_PublicSectorBudgetVersionLines_BudgetVersionLineId",
+                table.ForeignKey("FK_BudgetActual_BudgetLine",
                     x => x.BudgetVersionLineId, "PublicSectorBudgetVersionLines", "Id", onDelete: ReferentialAction.Restrict);
-                table.ForeignKey("FK_PublicSectorBudgetExecutionActuals_FundCentres_FundCentreId",
+                table.ForeignKey("FK_BudgetActual_FundCentre",
                     x => x.FundCentreId, "FundCentres", "Id", onDelete: ReferentialAction.Restrict);
-                table.ForeignKey("FK_PublicSectorBudgetExecutionActuals_GlAccounts_GlAccountId",
+                table.ForeignKey("FK_BudgetActual_GlAccount",
                     x => x.GlAccountId, "GlAccounts", "Id", onDelete: ReferentialAction.Restrict);
             });
 
