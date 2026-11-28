@@ -19,7 +19,9 @@ export default function PublicSectorPage() {
   const [budgetExecutionActuals, setBudgetExecutionActuals] = useState<any[]>([]);
   const [cashActualReconciliation, setCashActualReconciliation] = useState<any | null>(null);
   const [cashBankTransactions, setCashBankTransactions] = useState<any[]>([]);
-  const [cashActualDraft, setCashActualDraft] = useState({ budgetVersionId: "", budgetVersionLineId: "", sourceRecordId: "", eventKind: "CashPayment", effectiveDate: new Date().toISOString().slice(0, 10), cashFlowSection: "Operating" });
+  const [cashArReceipts, setCashArReceipts] = useState<any[]>([]);
+  const [cashApPayments, setCashApPayments] = useState<any[]>([]);
+  const [cashActualDraft, setCashActualDraft] = useState({ budgetVersionId: "", budgetVersionLineId: "", sourceKind: "BankTransaction", sourceRecordId: "", eventKind: "CashPayment", effectiveDate: new Date().toISOString().slice(0, 10), cashFlowSection: "Operating" });
   const [budgetDraftId, setBudgetDraftId] = useState<string | null>(null);
   const [budgetDraft, setBudgetDraft] = useState({ kind: "Original", currency: "USD", accountingBasis: "Accrual", classificationBasis: "", entityScope: "", periodStart: `${year}-01-01T00:00:00.000Z`, periodEnd: `${year + 1}-01-01T00:00:00.000Z`, authorityReference: "", amendmentReason: "" });
   const [budgetLines, setBudgetLines] = useState([{ fundCentreId: "", glAccountId: "", costCentreId: null as string | null, description: "", classificationCode: "", amount: 0 }]);
@@ -108,10 +110,12 @@ export default function PublicSectorPage() {
 
   async function loadCashActuals() {
     try {
-      const [versions, actuals, accounts] = await Promise.all([
+      const [versions, actuals, accounts, receipts, payments] = await Promise.all([
         api.get(`/public-sector/budget-versions/approved?year=${year}`),
         api.get(`/public-sector/budget-execution-actuals?year=${year}`),
         api.get("/cashbank/accounts"),
+        api.get(`/ar/receipts?year=${year}`),
+        api.get(`/ap/payments?year=${year}`),
       ]);
       setApprovedBudgetVersions(versions.data.filter((v: any) => v.accountingBasis === "Cash"));
       setBudgetExecutionActuals(actuals.data);
@@ -122,6 +126,10 @@ export default function PublicSectorPage() {
       ));
       setCashBankTransactions(accountTransactions.flat().filter((t: any) =>
         t.isReconciled && t.journalEntryId && (Number(t.debit) > 0 || Number(t.credit) > 0)
+      ));
+      setCashArReceipts(receipts.data.filter((r: any) => r.journalEntryId && Number(r.amount) > 0));
+      setCashApPayments(payments.data.filter((p: any) =>
+        p.journalEntryId && p.preparedBy && p.authorisedBy && p.preparedBy !== p.authorisedBy && p.authorisedAt && Number(p.amount) > 0
       ));
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -134,7 +142,7 @@ export default function PublicSectorPage() {
     try {
       await api.post("/public-sector/budget-execution-actuals", {
         ...cashActualDraft,
-        sourceKind: "BankTransaction",
+        sourceKind: cashActualDraft.sourceKind,
         effectiveDate: `${cashActualDraft.effectiveDate}T00:00:00.000Z`,
       });
       setMsg("Cash actual captured as a draft. Submit it for independent certification.");
@@ -295,7 +303,7 @@ export default function PublicSectorPage() {
           <div className="border rounded-lg p-4 space-y-3">
             <div>
               <h3 className="font-semibold">Cash-basis budget execution actuals</h3>
-              <p className="text-xs text-slate-500">Only reconciled bank transactions linked to posted journals are selectable. The journal must match the selected budget line, Fund Centre and cost centre exactly. AR/AP settlement allocation capture and modified-cash commitments are not enabled yet.</p>
+              <p className="text-xs text-slate-500">Supported sources: reconciled bank movements, fully settled single-invoice AR receipts, and independently authorised single-invoice AP payments. AR/AP capture requires one tax-free invoice line, an explicit matching Fund Centre and GL classification, one fully applied settlement allocation, and posted source journals. Multi-line, partial, split, tax, withholding and cost-centre allocations remain blocked. Modified-cash commitments are not enabled.</p>
             </div>
             <form onSubmit={createCashActual} className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
@@ -316,10 +324,23 @@ export default function PublicSectorPage() {
                 </select>
               </div>
               <div>
-                <label className="label">Reconciled bank transaction</label>
+                <label className="label">Source record type</label>
+                <select className="input" value={cashActualDraft.sourceKind} onChange={(e) => setCashActualDraft({
+                  ...cashActualDraft, sourceKind: e.target.value, sourceRecordId: "",
+                  eventKind: e.target.value === "ArReceipt" ? "CashReceipt" : "CashPayment",
+                })}>
+                  <option value="BankTransaction">Reconciled bank movement</option>
+                  <option value="ArReceipt">AR receipt</option>
+                  <option value="ApPayment">Authorised AP payment</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">{cashActualDraft.sourceKind === "BankTransaction" ? "Reconciled bank transaction" : cashActualDraft.sourceKind === "ArReceipt" ? "Posted AR receipt" : "Independently authorised AP payment"}</label>
                 <select className="input" required value={cashActualDraft.sourceRecordId} onChange={(e) => setCashActualDraft({ ...cashActualDraft, sourceRecordId: e.target.value })}>
-                  <option value="">Select bank transaction</option>
-                  {cashBankTransactions.map((t: any) => <option key={t.id} value={t.id}>{t.reference || t.id} · {new Date(t.transactionDate).toLocaleDateString()} · debit {fmt(t.debit)} / credit {fmt(t.credit)}</option>)}
+                  <option value="">Select source record</option>
+                  {cashActualDraft.sourceKind === "BankTransaction" && cashBankTransactions.map((t: any) => <option key={t.id} value={t.id}>{t.reference || t.id} · {new Date(t.transactionDate).toLocaleDateString()} · debit {fmt(t.debit)} / credit {fmt(t.credit)}</option>)}
+                  {cashActualDraft.sourceKind === "ArReceipt" && cashArReceipts.map((r: any) => <option key={r.id} value={r.id}>{r.receiptNo} · {new Date(r.receiptDate).toLocaleDateString()} · {fmt(r.amount)} {r.currency}</option>)}
+                  {cashActualDraft.sourceKind === "ApPayment" && cashApPayments.map((p: any) => <option key={p.id} value={p.id}>{p.paymentNo} · {new Date(p.paymentDate).toLocaleDateString()} · {fmt(p.amount)} {p.currency}</option>)}
                 </select>
               </div>
               <div>
@@ -338,7 +359,7 @@ export default function PublicSectorPage() {
                 <label className="label">Budget effective date</label>
                 <input className="input" type="date" required value={cashActualDraft.effectiveDate} onChange={(e) => setCashActualDraft({ ...cashActualDraft, effectiveDate: e.target.value })} />
               </div>
-              <div className="md:col-span-3"><button className="btn-primary" disabled={!approvedBudgetVersions.length || !cashBankTransactions.length}>Capture cash actual</button></div>
+              <div className="md:col-span-3"><button className="btn-primary" disabled={!approvedBudgetVersions.length || !(cashActualDraft.sourceKind === "BankTransaction" ? cashBankTransactions.length : cashActualDraft.sourceKind === "ArReceipt" ? cashArReceipts.length : cashApPayments.length)}>Capture cash actual</button></div>
             </form>
             <div className="overflow-x-auto">
               <table className="table-base">
