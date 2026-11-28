@@ -63,6 +63,8 @@ BEGIN
               AND original."ExchangeRateSource" IS NOT DISTINCT FROM NEW."ExchangeRateSource"
               AND original."ExchangeRateSourceReference" IS NOT DISTINCT FROM NEW."ExchangeRateSourceReference"
               AND original."ExchangeRateIsInverse" = NEW."ExchangeRateIsInverse"
+              AND original."ExchangeRateApprovedBy" IS NOT DISTINCT FROM NEW."ExchangeRateApprovedBy"
+              AND original."ExchangeRateApprovedAt" IS NOT DISTINCT FROM NEW."ExchangeRateApprovedAt"
               AND original."SourceDate" = NEW."SourceDate"
               AND original."EffectiveDate" = NEW."EffectiveDate"
               AND original."SourceReference" = NEW."SourceReference"
