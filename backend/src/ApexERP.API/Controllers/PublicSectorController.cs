@@ -13,14 +13,14 @@ namespace ApexERP.API.Controllers
     public record CreateBudgetAllocationRequest(Guid FundCentreId, Guid GlAccountId, Guid? CostCentreId, int FinancialYear, decimal Amount);
 
     public record CreateBudgetVersionLineRequest(Guid FundCentreId, Guid GlAccountId, Guid? CostCentreId,
-        string Description, string ClassificationCode, decimal Amount);
+        string Description, string ClassificationCode, decimal Amount, string? NoteReference = null);
     public record CreateBudgetVersionRequest(int FinancialYear, PublicSectorBudgetVersionKind Kind, string Currency,
         AccountingBasis AccountingBasis, string ClassificationBasis, string EntityScope, DateTime PeriodStart,
         DateTime PeriodEnd, string AuthorityReference, string? AmendmentReason,
         IReadOnlyCollection<CreateBudgetVersionLineRequest> Lines,
         PublicSectorBudgetAmendmentNature? AmendmentNature = null);
     public record CreateBudgetVarianceExplanationRequest(Guid BudgetVersionId, Guid BudgetVersionLineId,
-        string Explanation, string EvidenceReference);
+        string Explanation, string EvidenceReference, string? CommentReference = null);
     public record ReviewBudgetVarianceExplanationRequest(bool Accepted, string? ReviewNote);
     public record CreateBudgetReconciliationRequest(int FinancialYear, PublicSectorBudgetReconciliationType Type,
         string Description, string StatementSection, decimal OperatingAmount, decimal InvestingAmount,
@@ -201,7 +201,7 @@ namespace ApexERP.API.Controllers
                     req.Currency, req.AccountingBasis, req.ClassificationBasis, req.EntityScope,
                     req.PeriodStart, req.PeriodEnd, req.AuthorityReference, req.AmendmentReason,
                     req.Lines.Select(x => new PublicSectorService.BudgetVersionLineInput(x.FundCentreId,
-                        x.GlAccountId, x.CostCentreId, x.Description, x.ClassificationCode, x.Amount)).ToArray(),
+                        x.GlAccountId, x.CostCentreId, x.Description, x.ClassificationCode, x.Amount, x.NoteReference)).ToArray(),
                     UserId, ct, req.AmendmentNature);
                 return Ok(version);
             }
@@ -273,7 +273,7 @@ namespace ApexERP.API.Controllers
         {
             try { return Ok(await _publicSector.CreateBudgetVarianceExplanationAsync(CompanyId,
                 req.BudgetVersionId, req.BudgetVersionLineId, req.Explanation,
-                req.EvidenceReference, UserId, ct)); }
+                req.EvidenceReference, UserId, ct, req.CommentReference)); }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         }
 
