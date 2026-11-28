@@ -590,7 +590,7 @@ namespace ApexERP.Application.Services
                     rows.Sum(x => x.Amount),
                     string.Equals(normalisedControlCurrency, currency, StringComparison.OrdinalIgnoreCase) &&
                     rows.All(x => string.Equals(x.Currency, currency, StringComparison.OrdinalIgnoreCase)),
-                    null, openingSubledger, closingSubledger, openingGl, closingGl);
+                    null, openingGl, closingGl);
             }
 
             throw new InvalidOperationException($"Source kind {expected.SourceKind} has no configured source adapter.");
