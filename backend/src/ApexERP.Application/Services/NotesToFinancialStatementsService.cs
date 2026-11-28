@@ -45,7 +45,6 @@ namespace ApexERP.Application.Services
 
         public async Task<NotesToFinancialStatementsResult> GetNotesAsync(Guid companyId, DateTime periodStart, DateTime periodEnd, CancellationToken ct = default)
         {
-            using var crossTenant = _db.CrossTenantScope();   // reads other companies on purpose (row-level security allows it only here)
             var company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == companyId, ct)
                 ?? throw new InvalidOperationException("Company not found.");
 
@@ -141,6 +140,9 @@ namespace ApexERP.Application.Services
 
         private async Task<List<RelatedPartyNoteLine>> BuildRelatedPartyNoteAsync(Guid companyId, DateTime periodStart, DateTime periodEnd, CancellationToken ct)
         {
+            // Cross-company access is needed only for the explicitly linked related-party disclosure.
+            // Keep the RLS bypass out of the other notes queries (PPE, inventory, AR/AP, segments and disclosures).
+            using var crossTenant = _db.CrossTenantScope();
             var transactions = await _db.IntercompanyTransactions.IgnoreQueryFilters()
                 .Where(t => (t.FromCompanyId == companyId || t.ToCompanyId == companyId)
                             && t.TransactionDate >= periodStart && t.TransactionDate <= periodEnd)
