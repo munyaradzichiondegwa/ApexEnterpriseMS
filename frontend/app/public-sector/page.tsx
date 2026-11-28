@@ -340,7 +340,7 @@ export default function PublicSectorPage() {
           <div className="border rounded-lg p-4 space-y-3">
             <div>
               <h3 className="font-semibold">Cash-basis budget execution actuals</h3>
-              <p className="text-xs text-slate-500">Supported sources: reconciled bank movements, fully settled AR receipts and independently authorised AP payments. AR/AP sources can be allocated across multiple fully settled, tax-free invoices and invoice GL lines by selecting the same source against each matching budget line. Capture every allocation so the amounts reconcile exactly to the receipt/payment before submitting any allocation for independent certification. Partial settlements, VAT, withholding-tax and cost-centre allocations remain blocked pending explicit line-level mapping. Modified-cash commitments are not enabled.</p>
+              <p className="text-xs text-slate-500">Supported sources: reconciled bank movements, AR receipts and independently authorised AP payments. AR/AP sources can be allocated across multiple tax-free invoices and invoice GL lines by selecting the same source against each matching budget line. Partial invoice settlements are supported when all invoice lines share one GL classification; partial settlement across multiple GL classifications, VAT, withholding-tax and cost-centre allocations remain blocked pending explicit line-level mapping. Capture every allocation so the amounts reconcile exactly to the receipt/payment before submitting any allocation for independent certification. Modified-cash commitments are not enabled.</p>
             </div>
             <form onSubmit={createCashActual} className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
