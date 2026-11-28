@@ -563,6 +563,149 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
+        public async Task Ipsas24_comparison_preserves_original_final_and_comparable_actuals_including_added_lines()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var expenseId = Guid.NewGuid();
+            var incomeId = Guid.NewGuid();
+            var addedExpenseId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "IPSAS 24 MDA", BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-IPSAS",
+                    Name = "IPSAS Vote", Level = FundCentreLevel.Vote, FinancialYear = 2026,
+                    AppropriationAmount = 1000m
+                });
+                seed.GlAccounts.AddRange(
+                    new GlAccount { Id = expenseId, CompanyId = companyId, Code = "5100", Name = "Operating Expense", Type = GlAccountType.Expense, Currency = "USD" },
+                    new GlAccount { Id = incomeId, CompanyId = companyId, Code = "4100", Name = "Service Revenue", Type = GlAccountType.Income, Currency = "USD" },
+                    new GlAccount { Id = addedExpenseId, CompanyId = companyId, Code = "5200", Name = "New Programme Expense", Type = GlAccountType.Expense, Currency = "USD" });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 1,
+                    StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 2, 1),
+                    Status = PeriodStatus.Open
+                });
+                var journal = new JournalEntry
+                {
+                    CompanyId = companyId, EntryNo = "JE-IPSAS24", Description = "Budget comparison actuals",
+                    EntryDate = new DateTime(2026, 6, 30), PeriodId = periodId,
+                    Source = JournalSource.Manual, Status = JournalStatus.Posted
+                };
+                seed.JournalEntries.Add(journal);
+                seed.JournalLines.AddRange(
+                    new JournalLine { JournalEntryId = journal.Id, GlAccountId = expenseId, Debit = 60m, Credit = 0m, BaseDebit = 60m, BaseCredit = 0m, FundCentreId = fundCentreId },
+                    new JournalLine { JournalEntryId = journal.Id, GlAccountId = incomeId, Debit = 0m, Credit = 20m, BaseDebit = 0m, BaseCredit = 20m, FundCentreId = fundCentreId },
+                    new JournalLine { JournalEntryId = journal.Id, GlAccountId = addedExpenseId, Debit = 10m, Credit = 0m, BaseDebit = 10m, BaseCredit = 0m, FundCentreId = fundCentreId });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var original = await service.CreateBudgetVersionAsync(companyId, 2026,
+                PublicSectorBudgetVersionKind.Original, "USD", AccountingBasis.Accrual,
+                "Tenant approved programme/economic classification", "Whole MDA",
+                periodStart, periodEnd, "Appropriation Act 2026", null,
+                new[]
+                {
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 100m),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 50m)
+                }, Guid.NewGuid());
+            original.Status = PublicSectorBudgetVersionStatus.Approved;
+            original.ApprovedBy = Guid.NewGuid();
+            original.ApprovedAt = DateTime.UtcNow;
+            await ctx.SaveChangesAsync();
+
+            var revised = await service.CreateBudgetVersionAsync(companyId, 2026,
+                PublicSectorBudgetVersionKind.Revised, "USD", AccountingBasis.Accrual,
+                "Tenant approved programme/economic classification", "Whole MDA",
+                periodStart, periodEnd, "Supplementary Appropriation 2026",
+                "Supplementary funding and reprioritisation approved.",
+                new[]
+                {
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Operating Expense", "EC-01", 120m),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, incomeId, null, "Service Revenue", "REV-01", 70m),
+                    new PublicSectorService.BudgetVersionLineInput(fundCentreId, addedExpenseId, null, "New Programme Expense", "EC-02", 30m)
+                }, Guid.NewGuid());
+            revised.Status = PublicSectorBudgetVersionStatus.Approved;
+            revised.ApprovedBy = Guid.NewGuid();
+            revised.ApprovedAt = DateTime.UtcNow;
+            await ctx.SaveChangesAsync();
+
+            var report = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.Equal(original.Id, report.OriginalBudgetVersionId);
+            Assert.Equal(revised.Id, report.FinalBudgetVersionId);
+            Assert.True(report.FinalBudgetAvailable);
+            Assert.True(report.ComparableActualsAvailable);
+            Assert.Equal(3, report.Lines.Count);
+            var expense = Assert.Single(report.Lines, x => x.AccountCode == "5100");
+            Assert.Equal(100m, expense.OriginalBudget);
+            Assert.Equal(120m, expense.FinalBudget);
+            Assert.Equal(60m, expense.ActualOnComparableBasis);
+            Assert.Equal(60m, expense.Variance);
+            var income = Assert.Single(report.Lines, x => x.AccountCode == "4100");
+            Assert.Equal(20m, income.ActualOnComparableBasis);
+            var added = Assert.Single(report.Lines, x => x.AccountCode == "5200");
+            Assert.Equal(0m, added.OriginalBudget);
+            Assert.Equal(30m, added.FinalBudget);
+            Assert.Equal(10m, added.ActualOnComparableBasis);
+        }
+
+        [PostgresFact]
+        public async Task Ipsas24_cash_basis_budget_does_not_mislabel_accrual_gl_as_comparable_actuals()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var fundCentreId = Guid.NewGuid();
+            var expenseId = Guid.NewGuid();
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company { Id = companyId, Name = "Cash Basis MDA", BaseCurrency = "USD", FunctionalCurrency = "USD" });
+                seed.FundCentres.Add(new FundCentre
+                {
+                    Id = fundCentreId, CompanyId = companyId, Code = "VOTE-CASH",
+                    Name = "Cash Vote", Level = FundCentreLevel.Vote, FinancialYear = 2026
+                });
+                seed.GlAccounts.Add(new GlAccount
+                {
+                    Id = expenseId, CompanyId = companyId, Code = "5300", Name = "Cash Expense",
+                    Type = GlAccountType.Expense, Currency = "USD"
+                });
+                await seed.SaveChangesAsync();
+            }
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var version = await service.CreateBudgetVersionAsync(companyId, 2026,
+                PublicSectorBudgetVersionKind.Original, "USD", AccountingBasis.Cash,
+                "Cash economic classification", "Whole MDA",
+                new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                "Appropriation Act 2026", null,
+                new[] { new PublicSectorService.BudgetVersionLineInput(fundCentreId, expenseId, null, "Cash Expense", "EC-CASH", 100m) },
+                Guid.NewGuid());
+            version.Status = PublicSectorBudgetVersionStatus.Approved;
+            version.ApprovedBy = Guid.NewGuid();
+            version.ApprovedAt = DateTime.UtcNow;
+            await ctx.SaveChangesAsync();
+
+            var report = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.False(report.ComparableActualsAvailable);
+            Assert.All(report.Lines, line => Assert.Null(line.ActualOnComparableBasis));
+            Assert.Contains("Load and approve actuals on the budget basis", report.ComparabilityMessage);
+        }
+
+        [PostgresFact]
         public async Task Dimensional_budget_variance_uses_only_approved_account_and_cost_centre_allocations()
         {
             await using var db = await TestDb.CreateAsync();
