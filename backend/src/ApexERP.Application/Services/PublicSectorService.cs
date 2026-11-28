@@ -897,21 +897,26 @@ namespace ApexERP.Application.Services
                 var batchIds = statementBatches.Select(x => x.Id).ToArray();
                 var statementRows = await _db.BankStatementImportedTransactions.Where(x =>
                     x.CompanyId == companyId && batchIds.Contains(x.ImportBatchId)).ToListAsync(ct);
+                var statementBatchById = statementBatches.ToDictionary(x => x.Id);
                 if (statementRows.Count != statementBatches.Sum(x => x.TransactionCount) ||
                     statementRows.Any(x =>
-                        (x.Status == BankStatementImportedTransactionStatus.Matched &&
-                            (!x.MatchedBankTransactionId.HasValue || !x.MatchedBy.HasValue || !x.MatchedAt.HasValue ||
-                             x.MatchedBy == statementBatches[0].UploadedBy ||
-                             x.MatchedBy == statementBatches[0].AuthenticatedBy ||
-                             x.MatchedBy == statementBatches[0].CompletenessCertifiedBy)) ||
-                        (x.Status == BankStatementImportedTransactionStatus.Excluded &&
-                            (!x.ExcludedBy.HasValue || !x.ExcludedAt.HasValue ||
-                             string.IsNullOrWhiteSpace(x.ExclusionReason) ||
-                             x.ExcludedBy == statementBatches[0].UploadedBy ||
-                             x.ExcludedBy == statementBatches[0].AuthenticatedBy ||
-                             x.ExcludedBy == statementBatches[0].CompletenessCertifiedBy)) ||
-                        (x.Status != BankStatementImportedTransactionStatus.Matched &&
-                         x.Status != BankStatementImportedTransactionStatus.Excluded)))
+                    {
+                        var sourceBatch = statementBatchById[x.ImportBatchId];
+                        return
+                            (x.Status == BankStatementImportedTransactionStatus.Matched &&
+                                (!x.MatchedBankTransactionId.HasValue || !x.MatchedBy.HasValue || !x.MatchedAt.HasValue ||
+                                 x.MatchedBy == sourceBatch.UploadedBy ||
+                                 x.MatchedBy == sourceBatch.AuthenticatedBy ||
+                                 x.MatchedBy == sourceBatch.CompletenessCertifiedBy)) ||
+                            (x.Status == BankStatementImportedTransactionStatus.Excluded &&
+                                (!x.ExcludedBy.HasValue || !x.ExcludedAt.HasValue ||
+                                 string.IsNullOrWhiteSpace(x.ExclusionReason) ||
+                                 x.ExcludedBy == sourceBatch.UploadedBy ||
+                                 x.ExcludedBy == sourceBatch.AuthenticatedBy ||
+                                 x.ExcludedBy == sourceBatch.CompletenessCertifiedBy)) ||
+                            (x.Status != BankStatementImportedTransactionStatus.Matched &&
+                             x.Status != BankStatementImportedTransactionStatus.Excluded);
+                    }))
                     throw new InvalidOperationException($"Bank source {expected.SourceCode} contains unmatched statement rows or exclusions without independent review evidence.");
                 var matched = statementRows.Where(x => x.Status == BankStatementImportedTransactionStatus.Matched)
                     .ToDictionary(x => x.Id, x => x.MatchedBankTransactionId!.Value);
