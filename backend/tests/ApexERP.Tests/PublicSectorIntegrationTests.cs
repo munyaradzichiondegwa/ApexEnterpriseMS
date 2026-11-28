@@ -556,6 +556,10 @@ namespace ApexERP.Tests
             var costCentreId = Guid.NewGuid();
             var periodId = Guid.NewGuid();
             var actorId = Guid.NewGuid();
+            var submitterId = Guid.NewGuid();
+            var approverId = Guid.NewGuid();
+            var pendingAllocationId = Guid.NewGuid();
+            var workflowId = Guid.NewGuid();
 
             await using (var seed = db.NewContext(companyId))
             {
@@ -613,10 +617,22 @@ namespace ApexERP.Tests
                     },
                     new PublicSectorBudgetAllocation
                     {
-                        CompanyId = companyId, FundCentreId = fundCentreId, GlAccountId = secondExpenseAccountId,
-                        FinancialYear = 2026, Amount = 120m,
-                        Status = PublicSectorBudgetAllocationStatus.PendingApproval
+                        Id = pendingAllocationId, CompanyId = companyId, FundCentreId = fundCentreId,
+                        GlAccountId = secondExpenseAccountId, FinancialYear = 2026, Amount = 120m,
+                        Status = PublicSectorBudgetAllocationStatus.PendingApproval, ApprovalWorkflowId = workflowId
                     });
+                seed.WorkflowRequests.Add(new WorkflowRequest
+                {
+                    Id = workflowId, CompanyId = companyId, RequestType = "PublicSectorBudgetAllocation",
+                    ReferenceId = pendingAllocationId, ReferenceTable = "PublicSectorBudgetAllocation",
+                    SubmittedBy = submitterId, Amount = 120m, FundCentreId = fundCentreId,
+                    Status = WorkflowStatus.Approved
+                });
+                seed.WorkflowApprovals.Add(new WorkflowApproval
+                {
+                    CompanyId = companyId, WorkflowRequestId = workflowId, Tier = 1,
+                    ApproverId = approverId, Approved = true
+                });
                 await seed.SaveChangesAsync();
             }
 
@@ -631,9 +647,14 @@ namespace ApexERP.Tests
             Assert.Equal(55m, line.Variance);
             Assert.Equal(68.75m, line.VariancePercent);
 
-            var pendingAllocation = await ctx.PublicSectorBudgetAllocations.SingleAsync(x => x.GlAccountId == secondExpenseAccountId);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                service.FinaliseBudgetAllocationApprovalAsync(companyId, pendingAllocation.Id, Guid.NewGuid()));
+                service.FinaliseBudgetAllocationApprovalAsync(companyId, pendingAllocationId, Guid.NewGuid()));
+            var finalised = await service.FinaliseBudgetAllocationApprovalAsync(companyId, pendingAllocationId, approverId);
+            Assert.Equal(PublicSectorBudgetAllocationStatus.Approved, finalised.Status);
+            var finalReport = await service.GetBudgetVarianceReportAsync(companyId, 2026, fundCentreId);
+            Assert.Equal(2, finalReport.Count);
+            Assert.Equal(120m, finalReport.Single(x => x.AccountCode == "5200").ApprovedBudget);
+            Assert.Equal(0m, finalReport.Single(x => x.AccountCode == "5200").PostedActuals);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.CreateBudgetAllocationAsync(companyId, fundCentreId, Guid.NewGuid(),
                     null, 2026, 10m, actorId));
