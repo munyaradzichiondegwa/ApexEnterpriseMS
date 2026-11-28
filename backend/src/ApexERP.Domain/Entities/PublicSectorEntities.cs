@@ -330,6 +330,8 @@ namespace ApexERP.Domain.Entities
         public string? ExchangeRateSource { get; set; }
         public string? ExchangeRateSourceReference { get; set; }
         public bool ExchangeRateIsInverse { get; set; }
+        public Guid? ExchangeRateApprovedBy { get; set; }
+        public DateTime? ExchangeRateApprovedAt { get; set; }
         public CashFlowCategory CashFlowSection { get; set; }
         public PublicSectorBudgetActualStatus Status { get; set; } = PublicSectorBudgetActualStatus.Draft;
         public Guid? ReversalOfId { get; set; }
