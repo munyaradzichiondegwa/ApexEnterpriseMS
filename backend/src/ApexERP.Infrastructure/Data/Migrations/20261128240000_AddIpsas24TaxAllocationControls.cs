@@ -138,7 +138,7 @@ public sealed class AddIpsas24TaxAllocationControls : Migration
                 table.CheckConstraint("CK_SettlementComponentAllocations_Component",
                     "((\"ComponentKind\" = 0 AND \"InvoiceLineId\" IS NOT NULL AND \"TaxComponentId\" IS NULL) OR (\"ComponentKind\" = 1 AND \"InvoiceLineId\" IS NULL AND \"TaxComponentId\" IS NOT NULL))");
                 table.CheckConstraint("CK_SettlementComponentAllocations_Amount", "\"AmountApplied\" > 0");
-                table.CheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP')");
+                table.CheckConstraint("CK_SettlementComponentAllocations_Kind", "\"SettlementKind\" IN ('AR','AP','TX')");
                             table.CheckConstraint("CK_SettlementComponentAllocations_TaxRemittance", "\"SettlementKind\" <> 'TX' OR \"ComponentKind\" = 1");
             });
 
