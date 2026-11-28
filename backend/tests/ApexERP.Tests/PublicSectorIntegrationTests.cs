@@ -1463,6 +1463,47 @@ namespace ApexERP.Tests
             Assert.Equal(70m, comparison.Lines.Single(x => x.AccountCode == "4200").ActualOnComparableBasis);
             Assert.Equal(120m, comparison.Lines.Single(x => x.AccountCode == "5100").ActualOnComparableBasis);
             Assert.Equal(140m, comparison.Lines.Single(x => x.AccountCode == "5101").ActualOnComparableBasis);
+
+            // A complete-looking set of certified actuals must not conceal additional posted
+            // AR/AP settlements that have not been captured in the IPSAS 24 source ledger.
+            var omittedArJournalId = Guid.NewGuid();
+            var omittedApJournalId = Guid.NewGuid();
+            await using (var omittedSources = db.NewContext(companyId))
+            {
+                omittedSources.JournalEntries.AddRange(
+                    new JournalEntry
+                    {
+                        Id = omittedArJournalId, CompanyId = companyId, EntryNo = "JE-AR-OMITTED",
+                        Description = "Omitted AR cash receipt", EntryDate = effectiveDate,
+                        PeriodId = periodId, Source = JournalSource.AR, Status = JournalStatus.Posted
+                    },
+                    new JournalEntry
+                    {
+                        Id = omittedApJournalId, CompanyId = companyId, EntryNo = "JE-AP-OMITTED",
+                        Description = "Omitted AP cash payment", EntryDate = effectiveDate,
+                        PeriodId = periodId, Source = JournalSource.AP, Status = JournalStatus.Posted
+                    });
+                omittedSources.ArReceipts.Add(new ArReceipt
+                {
+                    Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customerId,
+                    ReceiptNo = "RCT-OMITTED-001", ReceiptDate = effectiveDate,
+                    Currency = "USD", Amount = 15m, JournalEntryId = omittedArJournalId
+                });
+                omittedSources.ApPayments.Add(new ApPayment
+                {
+                    Id = Guid.NewGuid(), CompanyId = companyId, SupplierId = supplierId,
+                    PaymentNo = "PAY-OMITTED-001", PaymentDate = effectiveDate,
+                    Currency = "USD", Amount = 20m, JournalEntryId = omittedApJournalId
+                });
+                await omittedSources.SaveChangesAsync();
+            }
+
+            var incompleteComparison = await service.GetBudgetComparisonAsync(companyId, 2026);
+            Assert.False(incompleteComparison.ComparableActualsAvailable);
+            Assert.Contains("posted AR receipts", incompleteComparison.ComparabilityMessage,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("posted AP payments", incompleteComparison.ComparabilityMessage,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         [PostgresFact]
