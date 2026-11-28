@@ -61,6 +61,13 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                 if (version.AccountingBasis != AccountingBasis.Cash ||
                     req.ReportingPeriodStart < version.PeriodStart || req.ReportingPeriodEnd > version.PeriodEnd)
                     throw new InvalidOperationException("Modified-cash policy must apply to an approved cash-basis budget and a reporting period contained within that budget period.");
+                if (await _db.ModifiedCashRecognitionPolicies.AnyAsync(x =>
+                    x.CompanyId == CompanyId && x.BudgetVersionId == version.Id &&
+                    x.Status != ModifiedCashRecognitionPolicyStatus.Rejected &&
+                    x.Status != ModifiedCashRecognitionPolicyStatus.Superseded &&
+                    x.EffectiveFrom < (req.EffectiveTo ?? DateTime.MaxValue) &&
+                    (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > req.EffectiveFrom), token))
+                    throw new InvalidOperationException("Modified-cash policy effective periods cannot overlap another active or pending policy version for the same approved budget.");
                 var lineIds = req.Mappings.Select(x => x.BudgetVersionLineId).Distinct().ToArray();
                 var lines = version.Lines.Where(x => lineIds.Contains(x.Id)).ToList();
                 if (lines.Count != lineIds.Length)
