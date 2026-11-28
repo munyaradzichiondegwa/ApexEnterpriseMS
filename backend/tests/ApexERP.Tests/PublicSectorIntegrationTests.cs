@@ -1298,12 +1298,12 @@ namespace ApexERP.Tests
                 seed.JournalLines.AddRange(
                     new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = revenueGlId, FundCentreId = fundCentreId, Credit = 60m, Debit = 0m, BaseCredit = 60m, BaseDebit = 0m },
                     new JournalLine { JournalEntryId = arInvoiceJournalId, GlAccountId = revenueGl2Id, FundCentreId = fundCentreId, Credit = 40m, Debit = 0m, BaseCredit = 40m, BaseDebit = 0m },
-                    new JournalLine { JournalEntryId = arInvoice2JournalId, GlAccountId = revenueGl2Id, FundCentreId = fundCentreId, Credit = 30m, Debit = 0m, BaseCredit = 30m, BaseDebit = 0m },
+                    new JournalLine { JournalEntryId = arInvoice2JournalId, GlAccountId = revenueGl2Id, FundCentreId = fundCentreId, Credit = 60m, Debit = 0m, BaseCredit = 60m, BaseDebit = 0m },
                     new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = bankGlId, Debit = 130m, Credit = 0m, BaseDebit = 130m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = arReceiptJournalId, GlAccountId = arControlGlId, Debit = 0m, Credit = 130m, BaseDebit = 0m, BaseCredit = 130m },
                     new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = expenseGlId, FundCentreId = fundCentreId, Debit = 120m, Credit = 0m, BaseDebit = 120m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apInvoiceJournalId, GlAccountId = expenseGl2Id, FundCentreId = fundCentreId, Debit = 80m, Credit = 0m, BaseDebit = 80m, BaseCredit = 0m },
-                    new JournalLine { JournalEntryId = apInvoice2JournalId, GlAccountId = expenseGl2Id, FundCentreId = fundCentreId, Debit = 60m, Credit = 0m, BaseDebit = 60m, BaseCredit = 0m },
+                    new JournalLine { JournalEntryId = apInvoice2JournalId, GlAccountId = expenseGl2Id, FundCentreId = fundCentreId, Debit = 120m, Credit = 0m, BaseDebit = 120m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = apControlGlId, Debit = 260m, Credit = 0m, BaseDebit = 260m, BaseCredit = 0m },
                     new JournalLine { JournalEntryId = apPaymentJournalId, GlAccountId = bankGlId, Debit = 0m, Credit = 260m, BaseDebit = 0m, BaseCredit = 260m });
                 seed.Customers.Add(new Customer { Id = customerId, CompanyId = companyId, Code = "C-SETTLE", Name = "Settlement Customer", Currency = "USD" });
@@ -1324,11 +1324,11 @@ namespace ApexERP.Tests
                 {
                     Id = arInvoice2Id, CompanyId = companyId, InvoiceNo = "AR-SETTLE-002",
                     CustomerId = customerId, InvoiceDate = effectiveDate, DueDate = effectiveDate,
-                    Currency = "USD", Subtotal = 30m, Total = 30m, Outstanding = 0m,
-                    Status = InvoiceStatus.Paid, JournalEntryId = arInvoice2JournalId, FundCentreId = fundCentreId,
+                    Currency = "USD", Subtotal = 60m, Total = 60m, Outstanding = 30m,
+                    Status = InvoiceStatus.Partial, JournalEntryId = arInvoice2JournalId, FundCentreId = fundCentreId,
                     Lines = new List<ArInvoiceLine>
                     {
-                        new() { ArInvoiceId = arInvoice2Id, Description = "Additional service", Quantity = 1m, UnitPrice = 30m, LineSubtotal = 30m, LineVat = 0m, LineTotal = 30m, GlAccountId = revenueGl2Id }
+                        new() { ArInvoiceId = arInvoice2Id, Description = "Additional service", Quantity = 1m, UnitPrice = 60m, LineSubtotal = 60m, LineVat = 0m, LineTotal = 60m, GlAccountId = revenueGl2Id }
                     }
                 });
                 seed.ArReceipts.Add(new ArReceipt
@@ -1358,11 +1358,11 @@ namespace ApexERP.Tests
                 {
                     Id = apInvoice2Id, CompanyId = companyId, InvoiceNo = "AP-SETTLE-002",
                     SupplierId = supplierId, InvoiceDate = effectiveDate, DueDate = effectiveDate,
-                    Currency = "USD", Subtotal = 60m, Total = 60m, Outstanding = 0m,
-                    Status = InvoiceStatus.Paid, JournalEntryId = apInvoice2JournalId, FundCentreId = fundCentreId,
+                    Currency = "USD", Subtotal = 120m, Total = 120m, Outstanding = 60m,
+                    Status = InvoiceStatus.Partial, JournalEntryId = apInvoice2JournalId, FundCentreId = fundCentreId,
                     Lines = new List<ApInvoiceLine>
                     {
-                        new() { ApInvoiceId = apInvoice2Id, Description = "Other supplies", Quantity = 1m, UnitCost = 60m, LineSubtotal = 60m, LineVat = 0m, LineTotal = 60m, GlAccountId = expenseGl2Id }
+                        new() { ApInvoiceId = apInvoice2Id, Description = "Other supplies", Quantity = 1m, UnitCost = 120m, LineSubtotal = 120m, LineVat = 0m, LineTotal = 120m, GlAccountId = expenseGl2Id }
                     }
                 });
                 seed.ApPayments.Add(new ApPayment
