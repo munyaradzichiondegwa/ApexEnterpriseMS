@@ -3254,9 +3254,9 @@ namespace ApexERP.Application.Services
                 x.CompanyId == companyId && x.TaxType == component.TaxType && x.TaxCodeId == component.TaxCodeId &&
                 x.Status == TaxConfigurationStatus.Approved && x.EffectiveFrom <= settlementDate &&
                 (!x.EffectiveTo.HasValue || x.EffectiveTo.Value > settlementDate)).ToListAsync(ct);
-            if (policies.Count != 1)
-                throw new InvalidOperationException("Exactly one approved, effective IPSAS 24 budget-treatment policy is required for each settled tax component.");
-            var policy = policies[0];
+            if (policies.Count == 0)
+                throw new InvalidOperationException("An approved, effective IPSAS 24 budget-treatment policy is required for each settled tax component.");
+            var policy = policies.OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.VersionNumber).First();
             if (policy.Treatment == TaxBudgetTreatment.SeparateClassification &&
                 (!policy.BudgetGlAccountId.HasValue || !policy.FundCentreId.HasValue ||
                  !await _db.GlAccounts.AnyAsync(x => x.Id == policy.BudgetGlAccountId.Value && x.CompanyId == companyId && x.IsActive && x.IsPostable, ct) ||
