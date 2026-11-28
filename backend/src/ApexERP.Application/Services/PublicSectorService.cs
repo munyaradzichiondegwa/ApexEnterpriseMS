@@ -486,6 +486,7 @@ namespace ApexERP.Application.Services
         {
             var invoices = await _db.ArInvoices.Where(x =>
                 x.CompanyId == companyId && x.Currency == currency && x.InvoiceDate < asOf &&
+                x.Status != InvoiceStatus.Draft && x.Status != InvoiceStatus.Cancelled &&
                 x.JournalEntryId.HasValue &&
                 _db.Customers.Any(customer => customer.Id == x.CustomerId &&
                     customer.CompanyId == companyId && customer.ArAccountId == controlAccountId) &&
