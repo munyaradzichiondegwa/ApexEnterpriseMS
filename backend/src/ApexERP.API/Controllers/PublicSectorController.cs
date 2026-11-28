@@ -628,18 +628,8 @@ namespace ApexERP.API.Controllers
                 .Select(x => x.SourceRecordId).Distinct().ToArray();
             var apPaymentIds = actuals.Where(x => x.SourceKind == PublicSectorBudgetActualSourceKind.ApPayment)
                 .Select(x => x.SourceRecordId).Distinct().ToArray();
-            var reviewedExclusions = await (
-                from line in _db.PublicSectorCashSourceReconciliationLines
-                join submission in _db.PublicSectorCashSourceSubmissions
-                    on line.CashSourceSubmissionId equals submission.Id
-                join expected in _db.PublicSectorExpectedCashSources
-                    on submission.ExpectedCashSourceId equals expected.Id
-                where line.CompanyId == CompanyId && submission.CompanyId == CompanyId &&
-                    expected.CompanyId == CompanyId && submission.BudgetVersionId == version.Id &&
-                    submission.Status == "Reviewed" && submission.RecordLevelStatus == "Reviewed" &&
-                    line.IsExcluded
-                select new { line.SourceRecordId, expected.SourceKind }
-            ).ToListAsync(ct);
+            var reviewedExclusions = await _publicSector.GetReviewedCashSourceExclusionsAsync(
+                CompanyId, version.Id, ct);
             var excludedBankSourceIds = reviewedExclusions.Where(x => x.SourceKind == "BankAccount")
                 .Select(x => x.SourceRecordId).Distinct().ToArray();
             var excludedArReceiptIds = reviewedExclusions.Where(x => x.SourceKind == "ReceivablesControl")
