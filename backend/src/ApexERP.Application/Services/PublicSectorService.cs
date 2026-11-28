@@ -369,6 +369,19 @@ namespace ApexERP.Application.Services
                 if (final.EntityScope != original.EntityScope)
                     comparabilityIssues.Add("Original and final budgets use different entity scopes.");
             }
+            if (original.AccountingBasis == AccountingBasis.Cash && final != null)
+            {
+                var omittedOriginalDimensions = original.Lines.Count(originalLine =>
+                    !final.Lines.Any(finalLine =>
+                        finalLine.FundCentreId == originalLine.FundCentreId &&
+                        finalLine.GlAccountId == originalLine.GlAccountId &&
+                        finalLine.CostCentreId == originalLine.CostCentreId &&
+                        string.Equals(finalLine.ClassificationCode, originalLine.ClassificationCode,
+                            StringComparison.OrdinalIgnoreCase)));
+                if (omittedOriginalDimensions > 0)
+                    comparabilityIssues.Add($"The final cash budget omits {omittedOriginalDimensions} original budget dimensions. Retain zero-value lines for removed classifications so execution actuals can still be captured and compared without misreporting them as zero.");
+            }
+
             var comparable = comparabilityIssues.Count == 0;
             var comparabilityMessage = comparable
                 ? original.AccountingBasis == AccountingBasis.Cash
