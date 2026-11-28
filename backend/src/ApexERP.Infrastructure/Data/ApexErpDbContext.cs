@@ -80,6 +80,7 @@ namespace ApexERP.Infrastructure.Data
         public DbSet<ApInvoice> ApInvoices => Set<ApInvoice>();
         public DbSet<ApInvoiceLine> ApInvoiceLines => Set<ApInvoiceLine>();
         public DbSet<ApPayment> ApPayments => Set<ApPayment>();
+        public DbSet<ZimbabweDswtWithholdingRecord> ZimbabweDswtWithholdingRecords => Set<ZimbabweDswtWithholdingRecord>();
         public DbSet<ApPaymentAllocation> ApPaymentAllocations => Set<ApPaymentAllocation>();
         public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
         public DbSet<BankTransaction> BankTransactions => Set<BankTransaction>();
@@ -372,6 +373,8 @@ namespace ApexERP.Infrastructure.Data
             }
 
             // ---- Unique/business indexes ----
+            modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.PaymentReference }).IsUnique();
+            modelBuilder.Entity<ZimbabweDswtWithholdingRecord>().HasIndex(x => new { x.CompanyId, x.TaxPeriodYear, x.TaxPeriodMonth, x.Status });
             modelBuilder.Entity<User>().HasIndex(u => new { u.CompanyId, u.Email }).IsUnique();
             modelBuilder.Entity<GlAccount>().HasIndex(a => new { a.CompanyId, a.Code }).IsUnique();
             modelBuilder.Entity<Customer>().HasIndex(c => new { c.CompanyId, c.Code }).IsUnique();
@@ -589,6 +592,7 @@ namespace ApexERP.Infrastructure.Data
             ApplyTenantFilter<Supplier>(modelBuilder);
             ApplyTenantFilter<ApInvoice>(modelBuilder);
             ApplyTenantFilter<ApPayment>(modelBuilder);
+            ApplyTenantFilter<ZimbabweDswtWithholdingRecord>(modelBuilder);
             ApplyTenantFilter<BankAccount>(modelBuilder);
             ApplyTenantFilter<BankTransaction>(modelBuilder);
             ApplyTenantFilter<Warehouse>(modelBuilder);
