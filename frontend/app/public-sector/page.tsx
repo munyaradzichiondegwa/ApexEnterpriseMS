@@ -83,6 +83,14 @@ export default function PublicSectorPage() {
   function exportBudgetComparison() {
     if (!budgetComparison) return;
     downloadCsv(`apexerp-ipsas24-budget-comparison-${year}`, budgetComparison.lines, [
+      // Reporting metadata required to interpret the separate statement.
+      { header: "Financial Year", value: () => budgetComparison.financialYear },
+      { header: "Reporting Period Start", value: () => new Date(budgetComparison.periodStart).toISOString().slice(0, 10) },
+      { header: "Reporting Period End", value: () => new Date(new Date(budgetComparison.periodEnd).getTime() - 86400000).toISOString().slice(0, 10) },
+      { header: "Currency", value: () => budgetComparison.currency },
+      { header: "Budget Basis", value: () => budgetComparison.accountingBasis },
+      { header: "Classification Basis", value: () => budgetComparison.classificationBasis },
+      { header: "Entity Scope", value: () => budgetComparison.entityScope },
       // Core Appendix 5 statement columns, in the prescribed order.
       { header: "Budget Line", value: (row: any) => row.description },
       { header: "Notes", value: (row: any) => row.noteReference ?? "" },
@@ -530,7 +538,7 @@ export default function PublicSectorPage() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <h2 className="font-semibold text-lg">Statement of Comparison of Budget and Actual Amounts</h2>
-              <p className="text-xs text-slate-500">IPSAS 24 · Financial year {year}</p>
+              <p className="text-xs text-slate-500">IPSAS 24 · {budgetComparison ? `Period ${new Date(budgetComparison.periodStart).toLocaleDateString()} to ${new Date(new Date(budgetComparison.periodEnd).getTime() - 86400000).toLocaleDateString()} · ${budgetComparison.currency}` : `Financial year ${year}`}</p>
             </div>
             <button className="btn-secondary" onClick={loadBudgetComparison} disabled={budgetComparisonLoading}>
               {budgetComparisonLoading ? "Loading…" : "Refresh statement"}
