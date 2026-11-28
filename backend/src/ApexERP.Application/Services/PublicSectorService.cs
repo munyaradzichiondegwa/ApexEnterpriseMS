@@ -191,16 +191,25 @@ namespace ApexERP.Application.Services
                 .OrderByDescending(x => x.VersionNumber).FirstOrDefaultAsync(ct);
 
             var comparable = original.AccountingBasis == AccountingBasis.Accrual &&
-                original.PeriodStart == (final?.PeriodStart ?? original.PeriodStart) &&
-                original.PeriodEnd == (final?.PeriodEnd ?? original.PeriodEnd);
+                (final == null || (final.AccountingBasis == original.AccountingBasis &&
+                    final.PeriodStart == original.PeriodStart && final.PeriodEnd == original.PeriodEnd &&
+                    final.Currency == original.Currency && final.ClassificationBasis == original.ClassificationBasis &&
+                    final.EntityScope == original.EntityScope));
             var rows = new List<BudgetComparisonLine>();
-            foreach (var line in original.Lines.OrderBy(x => x.LineNumber))
+            var dimensions = original.Lines.Concat(final?.Lines ?? Array.Empty<PublicSectorBudgetVersionLine>())
+                .GroupBy(x => $"{x.FundCentreId:N}|{x.GlAccountId:N}|{x.CostCentreId?.ToString("N") ?? "none"}|{x.ClassificationCode}")
+                .Select(g => new
+                {
+                    OriginalLine = g.FirstOrDefault(x => original.Lines.Any(o => o.Id == x.Id)),
+                    FinalLine = final?.Lines.FirstOrDefault(x => x.FundCentreId == g.First().FundCentreId &&
+                        x.GlAccountId == g.First().GlAccountId && x.CostCentreId == g.First().CostCentreId &&
+                        x.ClassificationCode == g.First().ClassificationCode)
+                }).ToList();
+            foreach (var dimension in dimensions)
             {
+                var line = dimension.OriginalLine ?? dimension.FinalLine!;
                 var account = await _db.GlAccounts.FirstAsync(x => x.Id == line.GlAccountId && x.CompanyId == companyId, ct);
                 var fund = await _db.FundCentres.FirstAsync(x => x.Id == line.FundCentreId && x.CompanyId == companyId, ct);
-                var finalLine = final?.Lines.FirstOrDefault(x => x.FundCentreId == line.FundCentreId &&
-                    x.GlAccountId == line.GlAccountId && x.CostCentreId == line.CostCentreId &&
-                    x.ClassificationCode == line.ClassificationCode);
                 decimal? actual = null;
                 if (comparable)
                 {
@@ -212,18 +221,20 @@ namespace ApexERP.Application.Services
                         .SumAsync(l => account.Type == GlAccountType.Income ? l.BaseCredit - l.BaseDebit : l.BaseDebit - l.BaseCredit, ct);
                     actual = raw;
                 }
-                var finalAmount = finalLine?.Amount;
+                var originalAmount = dimension.OriginalLine?.Amount ?? 0m;
+                var finalAmount = dimension.FinalLine?.Amount;
                 var variance = finalAmount.HasValue && actual.HasValue ? finalAmount.Value - actual.Value : (decimal?)null;
-                rows.Add(new BudgetComparisonLine(line.LineNumber, line.Description, fund.Code, fund.Name,
-                    account.Code, account.Name, line.ClassificationCode, line.Amount, finalAmount, actual,
-                    variance, finalAmount.HasValue && actual.HasValue && finalAmount.Value != 0m
+                rows.Add(new BudgetComparisonLine(dimension.OriginalLine?.LineNumber ?? dimension.FinalLine!.LineNumber,
+                    line.Description, fund.Code, fund.Name, account.Code, account.Name, line.ClassificationCode,
+                    originalAmount, finalAmount, actual, variance,
+                    finalAmount.HasValue && actual.HasValue && finalAmount.Value != 0m
                         ? Math.Round(variance!.Value / finalAmount.Value * 100m, 2) : null,
-                    finalLine == null ? "No corresponding line in the final approved budget." :
-                        final?.AmendmentReason));
+                    dimension.OriginalLine == null ? "Line introduced in the final approved budget." :
+                    dimension.FinalLine == null ? "Line removed from the final approved budget." : final?.AmendmentReason));
             }
 
             var reconciliations = await _db.PublicSectorBudgetReconciliations
-                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear)
+                .Where(x => x.CompanyId == companyId && x.FinancialYear == financialYear && x.ApprovedAt != null)
                 .OrderBy(x => x.Type).ThenBy(x => x.Description).ToListAsync(ct);
             return new BudgetComparisonReport(original.Id, final?.Id, financialYear, original.Currency,
                 original.AccountingBasis.ToString(), original.ClassificationBasis, original.EntityScope,
