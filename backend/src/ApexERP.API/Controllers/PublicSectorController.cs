@@ -1274,6 +1274,8 @@ namespace ApexERP.API.Controllers
                 (!capturedBankSourceIds.Contains(x.Id) && !excludedBankSourceIds.Contains(x.Id) &&
                  !capturedSettlementJournalIds.Contains(x.JournalEntryId.Value)), ct);
             var pendingActuals = actuals.Count(x => x.Status != PublicSectorBudgetActualStatus.Certified);
+            var unclassifiedCashActuals = actuals.Count(x => x.Status == PublicSectorBudgetActualStatus.Certified &&
+                x.CashFlowSection is not (CashFlowCategory.Operating or CashFlowCategory.Investing or CashFlowCategory.Financing));
             var certifiedActualsForValidation = actuals.Where(x => x.Status == PublicSectorBudgetActualStatus.Certified).ToList();
             var invalidCertifiedActuals = 0;
             foreach (var actual in certifiedActualsForValidation)
@@ -1411,7 +1413,7 @@ namespace ApexERP.API.Controllers
                     : true) &&
                 uncapturedPostedMovements == 0 && missingArSettlementCoverage == 0 &&
                 missingApSettlementCoverage == 0 && pendingActuals == 0 && invalidCertifiedActuals == 0 &&
-                registeredSourceSubmissionCoverageComplete &&
+                unclassifiedCashActuals == 0 && registeredSourceSubmissionCoverageComplete &&
                 recordLevelSourceReconciliationComplete &&
                 expectedSourceRegisterCompletenessCertified && liveSourceRegisterComplete;
             var operatingBridgeDifference = operatingDifference - operatingAdjustment;
@@ -1452,6 +1454,7 @@ namespace ApexERP.API.Controllers
                 MissingPostedApSettlementCoverage = missingApSettlementCoverage,
                 PendingOrDraftActuals = pendingActuals,
                 InvalidCertifiedActuals = invalidCertifiedActuals,
+                UnclassifiedCashActuals = unclassifiedCashActuals,
                 CashFlowStatementReconciled = cashFlowStatementReconciled,
                 CashFlowStatementReconciliationDifference = cashFlow.ReconciliationDifference,
                 InvalidApprovedAdjustments = invalidApprovedAdjustments,
