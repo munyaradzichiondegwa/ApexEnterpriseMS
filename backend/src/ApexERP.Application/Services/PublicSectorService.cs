@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ApexERP.Domain.Common;
 using ApexERP.Domain.Entities;
 using ApexERP.Infrastructure.Data;
@@ -1847,6 +1849,108 @@ namespace ApexERP.Application.Services
             var comparableExpenseActual = comparable
                 ? rows.Where(x => x.AccountType == GlAccountType.Expense.ToString()).Sum(x => x.ActualOnComparableBasis ?? 0m)
                 : (decimal?)null;
+
+            var automaticReconciliationCandidates = new List<BudgetAutomaticReconciliationCandidate>();
+            decimal statementRevenueActual = 0m;
+            decimal statementExpenseActual = 0m;
+            if (comparable && comparableRevenueActual.HasValue && comparableExpenseActual.HasValue)
+            {
+                var accountTypes = await _db.GlAccounts.Where(x => x.CompanyId == companyId &&
+                    (x.Type == GlAccountType.Income || x.Type == GlAccountType.Expense))
+                    .ToDictionaryAsync(x => x.Id, x => x.Type, ct);
+                var accountIds = accountTypes.Keys.ToArray();
+                var queryStart = statementPeriodStart < original.PeriodStart ? statementPeriodStart : original.PeriodStart;
+                var queryEnd = statementPeriodEnd > original.PeriodEnd ? statementPeriodEnd : original.PeriodEnd;
+                var rawGlRows = await _db.JournalLines.Where(x => accountIds.Contains(x.GlAccountId) &&
+                    x.JournalEntry!.CompanyId == companyId &&
+                    x.JournalEntry.EntryDate >= queryStart && x.JournalEntry.EntryDate < queryEnd &&
+                    (x.JournalEntry.Status == JournalStatus.Posted || x.JournalEntry.Status == JournalStatus.Reversed))
+                    .Select(x => new
+                    {
+                        x.Id, x.GlAccountId, x.FundCentreId, x.CostCentreId,
+                        x.BaseDebit, x.BaseCredit, EntryDate = x.JournalEntry!.EntryDate
+                    }).ToListAsync(ct);
+                var glRows = rawGlRows.Select(x => (x.Id, x.GlAccountId, x.FundCentreId, x.CostCentreId,
+                    x.BaseDebit, x.BaseCredit, x.EntryDate, AccountType: accountTypes[x.GlAccountId])).ToList();
+                var budgetScopeKeys = final!.Lines.Select(x => (x.FundCentreId, x.CostCentreId)).ToHashSet();
+                var budgetLineKeys = final.Lines.Select(x => (x.FundCentreId, x.GlAccountId, x.CostCentreId)).ToHashSet();
+                var budgetPeriodRows = glRows.Where(x => x.EntryDate >= original.PeriodStart && x.EntryDate < original.PeriodEnd).ToList();
+                var statementPeriodRows = glRows.Where(x => x.EntryDate >= statementPeriodStart && x.EntryDate < statementPeriodEnd).ToList();
+                var budgetedRows = budgetPeriodRows.Where(x => x.FundCentreId.HasValue &&
+                    budgetLineKeys.Contains((x.FundCentreId.Value, x.GlAccountId, x.CostCentreId))).ToList();
+                var budgetScopeRows = budgetPeriodRows.Where(x => x.FundCentreId.HasValue &&
+                    budgetScopeKeys.Contains((x.FundCentreId.Value, x.CostCentreId))).ToList();
+
+                decimal Revenue(IEnumerable<(Guid Id, Guid GlAccountId, Guid? FundCentreId, Guid? CostCentreId,
+                    decimal BaseDebit, decimal BaseCredit, DateTime EntryDate, GlAccountType AccountType)> source) =>
+                    source.Where(x => x.AccountType == GlAccountType.Income).Sum(x => x.BaseCredit - x.BaseDebit);
+                decimal Expense(IEnumerable<(Guid Id, Guid GlAccountId, Guid? FundCentreId, Guid? CostCentreId,
+                    decimal BaseDebit, decimal BaseCredit, DateTime EntryDate, GlAccountType AccountType)> source) =>
+                    source.Where(x => x.AccountType == GlAccountType.Expense).Sum(x => x.BaseDebit - x.BaseCredit);
+
+                var budgetedRevenue = Revenue(budgetedRows);
+                var budgetedExpense = Expense(budgetedRows);
+                var budgetScopeRevenue = Revenue(budgetScopeRows);
+                var budgetScopeExpense = Expense(budgetScopeRows);
+                var budgetPeriodRevenue = Revenue(budgetPeriodRows);
+                var budgetPeriodExpense = Expense(budgetPeriodRows);
+                statementRevenueActual = Revenue(statementPeriodRows);
+                statementExpenseActual = Expense(statementPeriodRows);
+
+                var basisRevenue = budgetedRevenue - comparableRevenueActual.Value;
+                var basisExpense = budgetedExpense - comparableExpenseActual.Value;
+                var presentationRevenue = budgetScopeRevenue - budgetedRevenue;
+                var presentationExpense = budgetScopeExpense - budgetedExpense;
+                var entityRevenue = budgetPeriodRevenue - budgetScopeRevenue;
+                var entityExpense = budgetPeriodExpense - budgetScopeExpense;
+                var timingRevenue = statementRevenueActual - budgetPeriodRevenue;
+                var timingExpense = statementExpenseActual - budgetPeriodExpense;
+
+                var fingerprintMaterial = new StringBuilder()
+                    .Append(final.Id.ToString("N")).Append('|')
+                    .Append(original.PeriodStart.ToString("O")).Append('|').Append(original.PeriodEnd.ToString("O")).Append('|')
+                    .Append(statementPeriodStart.ToString("O")).Append('|').Append(statementPeriodEnd.ToString("O")).Append('|')
+                    .Append(statementEntityScope).Append('|')
+                    .AppendJoin(';', final.Lines.OrderBy(x => x.Id).Select(x =>
+                        $"{x.Id:N}:{x.FundCentreId:N}:{x.GlAccountId:N}:{x.CostCentreId?.ToString("N") ?? "none"}:{x.Amount}")).Append('|')
+                    .AppendJoin(';', glRows.OrderBy(x => x.Id).Select(x =>
+                        $"{x.Id:N}:{x.GlAccountId:N}:{x.FundCentreId?.ToString("N") ?? "none"}:{x.CostCentreId?.ToString("N") ?? "none"}:{x.EntryDate:O}:{x.BaseDebit}:{x.BaseCredit}")).Append('|')
+                    .AppendJoin(';', cashActualsByBudgetLine.OrderBy(x => x.Key).Select(x => $"{x.Key:N}:{x.Value}"))
+                    .ToString();
+                var sourceFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintMaterial)));
+                var calculatedAt = DateTime.UtcNow;
+                foreach (var section in new[]
+                {
+                    (Name: "Revenue", Basis: basisRevenue, Timing: timingRevenue, Entity: entityRevenue, Presentation: presentationRevenue),
+                    (Name: "Expense", Basis: basisExpense, Timing: timingExpense, Entity: entityExpense, Presentation: presentationExpense)
+                })
+                {
+                    automaticReconciliationCandidates.Add(new BudgetAutomaticReconciliationCandidate(
+                        PublicSectorBudgetReconciliationType.Basis, section.Name, section.Basis,
+                        "Accrual financial-statement actuals for budgeted dimensions less comparable budget actuals.", sourceFingerprint, calculatedAt));
+                    automaticReconciliationCandidates.Add(new BudgetAutomaticReconciliationCandidate(
+                        PublicSectorBudgetReconciliationType.Timing, section.Name, section.Timing,
+                        "Financial-statement period actuals less actuals for the approved budget period.", sourceFingerprint, calculatedAt));
+                    automaticReconciliationCandidates.Add(new BudgetAutomaticReconciliationCandidate(
+                        PublicSectorBudgetReconciliationType.Entity, section.Name, section.Entity,
+                        "Full registered-entity actuals for the budget period less actuals within the approved budget Fund Centre/Cost Centre scope.", sourceFingerprint, calculatedAt));
+                    automaticReconciliationCandidates.Add(new BudgetAutomaticReconciliationCandidate(
+                        PublicSectorBudgetReconciliationType.Presentation, section.Name, section.Presentation,
+                        "Actuals within the approved budget scope but on GL accounts not presented as budget lines.", sourceFingerprint, calculatedAt));
+                }
+
+                var reconstructedRevenue = comparableRevenueActual.Value + basisRevenue + presentationRevenue + entityRevenue + timingRevenue;
+                var reconstructedExpense = comparableExpenseActual.Value + basisExpense + presentationExpense + entityExpense + timingExpense;
+                if (Math.Abs(reconstructedRevenue - statementRevenueActual) > 0.01m ||
+                    Math.Abs(reconstructedExpense - statementExpenseActual) > 0.01m)
+                {
+                    comparabilityIssues.Add("The automated basis, timing, entity and presentation reconciliation does not arithmetically reproduce the registered financial-statement totals.");
+                    comparable = false;
+                    comparabilityMessage = string.Join(" ", comparabilityIssues);
+                    automaticReconciliationCandidates.Clear();
+                }
+            }
+
             var revenueReconciliationRows = reconciliations.Where(x =>
                 string.Equals(x.StatementSection, "Revenue", StringComparison.OrdinalIgnoreCase)).ToList();
             var expenseReconciliationRows = reconciliations.Where(x =>
