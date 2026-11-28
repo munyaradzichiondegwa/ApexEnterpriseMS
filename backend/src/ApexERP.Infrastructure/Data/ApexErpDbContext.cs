@@ -401,6 +401,7 @@ namespace ApexERP.Infrastructure.Data
             modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.VersionNumber }).IsUnique();
             modelBuilder.Entity<PublicSectorTaxBudgetPolicy>().HasIndex(x => new { x.CompanyId, x.TaxType, x.TaxCodeId, x.EffectiveFrom, x.EffectiveTo }).HasDatabaseName("IX_PublicSectorTaxBudgetPolicies_Effective");
             modelBuilder.Entity<SettlementComponentAllocation>().HasIndex(x => new { x.CompanyId, x.SettlementKind, x.SettlementAllocationId, x.InvoiceLineId, x.TaxComponentId }).IsUnique().HasDatabaseName("IX_SettlementComponentAllocations_Allocation");
+            modelBuilder.Entity<SettlementComponentAllocation>().HasIndex(x => x.TaxComponentId).HasDatabaseName("IX_SettlementComponentAllocations_TaxComponentId");
             modelBuilder.Entity<SettlementComponentAllocation>().ToTable(t =>
             {
                 t.HasCheckConstraint("CK_SettlementComponentAllocations_Component",
