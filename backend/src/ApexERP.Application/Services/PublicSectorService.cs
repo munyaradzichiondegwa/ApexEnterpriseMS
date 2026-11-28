@@ -70,6 +70,10 @@ namespace ApexERP.Application.Services
                 Status = PublicSectorBudgetAllocationStatus.Draft, CreatedBy = actorId
             };
             _db.PublicSectorBudgetAllocations.Add(allocation);
+            _audit.Record(companyId, actorId, "PublicSectorBudgetAllocation.Created", "PublicSector",
+                nameof(PublicSectorBudgetAllocation), allocation.Id, null,
+                new { allocation.FundCentreId, allocation.GlAccountId, allocation.CostCentreId,
+                    allocation.FinancialYear, allocation.Amount, allocation.Status });
             await _db.SaveChangesAsync(ct);
             return allocation;
         }
@@ -119,9 +123,14 @@ namespace ApexERP.Application.Services
                     .SumAsync(x => (decimal?)x.Amount, token) ?? 0m;
                 if (approvedTotal + allocation.Amount > fundCentre.AppropriationAmount + fundCentre.CarriedForwardAmount)
                     throw new InvalidOperationException("Approved allocations cannot exceed the fund centre's appropriation plus carried-forward balance.");
+                var beforeApproval = new { allocation.Status, allocation.ApprovedBy, allocation.ApprovedAt };
                 allocation.Status = PublicSectorBudgetAllocationStatus.Approved;
                 allocation.ApprovedBy = actorId;
                 allocation.ApprovedAt = DateTime.UtcNow;
+                _audit.Record(companyId, actorId, "PublicSectorBudgetAllocation.Approved", "PublicSector",
+                    nameof(PublicSectorBudgetAllocation), allocation.Id, beforeApproval,
+                    new { allocation.Status, allocation.ApprovedBy, allocation.ApprovedAt,
+                        allocation.ApprovalWorkflowId, allocation.Amount });
                 await _db.SaveChangesAsync(token);
                 return allocation;
             }, ct);
