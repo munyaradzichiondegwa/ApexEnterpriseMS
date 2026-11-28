@@ -18,6 +18,13 @@ export default function PublicSectorPage() {
   const [approvedBudgetVersions, setApprovedBudgetVersions] = useState<any[]>([]);
   const [budgetExecutionActuals, setBudgetExecutionActuals] = useState<any[]>([]);
   const [cashPeriodAttestations, setCashPeriodAttestations] = useState<any[]>([]);
+  const [expectedCashSources, setExpectedCashSources] = useState<any[]>([]);
+  const [cashSourceSubmissions, setCashSourceSubmissions] = useState<any[]>([]);
+  const [registerAttestation, setRegisterAttestation] = useState<any | null>(null);
+  const [registerAttestationEvidence, setRegisterAttestationEvidence] = useState("");
+  const [expectedSourceDraft, setExpectedSourceDraft] = useState({ sourceKind: "BankAccount", sourceCode: "", sourceName: "", sourceIdentifier: "", isRequired: true });
+  const [sourceSubmissionDraft, setSourceSubmissionDraft] = useState({ expectedCashSourceId: "", recordCount: 0, controlTotal: 0, openingBalance: 0, closingBalance: 0, currency: "USD", evidenceReference: "" });
+  const [recordLineDraft, setRecordLineDraft] = useState({ sourceRecordId: "", sourceReference: "", budgetExecutionActualId: "", isExcluded: false, exclusionReason: "" });
   const [zeroActivityEvidence, setZeroActivityEvidence] = useState("");
   const [cashActualReconciliation, setCashActualReconciliation] = useState<any | null>(null);
   const [cashBankTransactions, setCashBankTransactions] = useState<any[]>([]);
@@ -120,9 +127,25 @@ export default function PublicSectorPage() {
         api.get(`/ap/payments?year=${year}`),
         api.get(`/public-sector/cash-period-attestations?year=${year}`),
       ]);
-      setApprovedBudgetVersions(versions.data.filter((v: any) => v.accountingBasis === "Cash"));
+      const cashVersions = versions.data.filter((v: any) => v.accountingBasis === "Cash");
+      setApprovedBudgetVersions(cashVersions);
       setBudgetExecutionActuals(actuals.data);
       setCashPeriodAttestations(attestations.data);
+      if (cashVersions.length) {
+        const budgetVersionId = cashVersions[0].id;
+        const [sources, submissions, register] = await Promise.all([
+          api.get(`/public-sector/expected-cash-sources?budgetVersionId=${budgetVersionId}`),
+          api.get(`/public-sector/cash-source-submissions?budgetVersionId=${budgetVersionId}`),
+          api.get(`/public-sector/expected-cash-sources/completeness-attestation?budgetVersionId=${budgetVersionId}`),
+        ]);
+        setExpectedCashSources(sources.data);
+        setCashSourceSubmissions(submissions.data);
+        setRegisterAttestation(register.data);
+      } else {
+        setExpectedCashSources([]);
+        setCashSourceSubmissions([]);
+        setRegisterAttestation(null);
+      }
       const reconciliation = await api.get(`/public-sector/budget-execution-actuals/reconciliation?year=${year}`);
       setCashActualReconciliation(reconciliation.data);
       const accountTransactions = await Promise.all(accounts.data.map((account: any) =>
@@ -199,6 +222,114 @@ export default function PublicSectorPage() {
     try {
       await api.post(`/public-sector/budget-execution-actuals/${id}/certify`);
       setMsg("Cash actual certified.");
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+
+  async function createExpectedCashSource(e: React.FormEvent) {
+    e.preventDefault();
+    const version = approvedBudgetVersions[0];
+    if (!version) return setError("An approved cash-basis budget is required.");
+    try {
+      await api.post("/public-sector/expected-cash-sources", {
+        budgetVersionId: version.id, ...expectedSourceDraft,
+        effectiveFrom: version.periodStart, effectiveTo: version.periodEnd,
+      });
+      setExpectedSourceDraft({ ...expectedSourceDraft, sourceCode: "", sourceName: "", sourceIdentifier: "" });
+      setMsg("Expected source created. Submit it for independent approval.");
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function expectedSourceAction(id: string, action: "submit" | "approve") {
+    try {
+      await api.post(`/public-sector/expected-cash-sources/${id}/${action}`);
+      setMsg(action === "submit" ? "Expected source submitted for independent approval." : "Expected source approved.");
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function createSourceSubmission(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      await api.post("/public-sector/cash-source-submissions", {
+        ...sourceSubmissionDraft,
+        recordCount: Number(sourceSubmissionDraft.recordCount),
+        controlTotal: Number(sourceSubmissionDraft.controlTotal),
+        openingBalance: Number(sourceSubmissionDraft.openingBalance),
+        closingBalance: Number(sourceSubmissionDraft.closingBalance),
+      });
+      setMsg("Source control submission created. Submit it for independent review.");
+      setSourceSubmissionDraft({ ...sourceSubmissionDraft, expectedCashSourceId: "", recordCount: 0, controlTotal: 0, evidenceReference: "" });
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function sourceSubmissionAction(id: string, action: "submit" | "review") {
+    try {
+      if (action === "submit") await api.post(`/public-sector/cash-source-submissions/${id}/submit`);
+      else await api.post(`/public-sector/cash-source-submissions/${id}/review`, { accepted: true, reviewNote: "Source control totals and evidence reviewed." });
+      setMsg(action === "submit" ? "Source control submission sent for review." : "Source control submission reviewed.");
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  const selectedExpectedSource = expectedCashSources.find((x: any) => x.id === sourceSubmissionDraft.expectedCashSourceId);
+  const selectedReconciliationSubmission = cashSourceSubmissions.find((x: any) => x.id === recordLineDraft.submissionId);
+  const selectedSourceKind = expectedCashSources.find((x: any) =>
+    x.id === cashSourceSubmissions.find((s: any) => s.id === recordLineDraft.submissionId)?.expectedCashSourceId
+  )?.sourceKind;
+  const sourceRecordsForReconciliation = selectedSourceKind === "BankAccount" ? cashBankTransactions
+    : selectedSourceKind === "ReceivablesControl" ? cashArReceipts
+    : selectedSourceKind === "PayablesControl" ? cashApPayments : [];
+
+  async function addSourceReconciliationLine(e: React.FormEvent) {
+    e.preventDefault();
+    if (!recordLineDraft.submissionId) return setError("Select a reviewed source submission.");
+    try {
+      await api.post(`/public-sector/cash-source-submissions/${recordLineDraft.submissionId}/reconciliation-lines`, {
+        sourceRecordId: recordLineDraft.sourceRecordId,
+        sourceReference: recordLineDraft.sourceReference,
+        budgetExecutionActualId: recordLineDraft.isExcluded ? null : recordLineDraft.budgetExecutionActualId,
+        isExcluded: recordLineDraft.isExcluded,
+        exclusionReason: recordLineDraft.isExcluded ? recordLineDraft.exclusionReason : null,
+      });
+      setMsg("Source transaction mapping recorded.");
+      setRecordLineDraft({ ...recordLineDraft, sourceRecordId: "", sourceReference: "", budgetExecutionActualId: "", exclusionReason: "" });
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function sourceRecordReconciliationAction(id: string, action: "submit" | "review") {
+    try {
+      if (action === "submit") await api.post(`/public-sector/cash-source-submissions/${id}/record-reconciliation/submit`);
+      else await api.post(`/public-sector/cash-source-submissions/${id}/record-reconciliation/review`, {
+        accepted: true, reviewNote: "Transaction-level population reconciled to source evidence and certified actual allocations.",
+      });
+      setMsg(action === "submit" ? "Transaction-level reconciliation submitted for independent review." : "Transaction-level reconciliation independently reviewed.");
+      await loadCashActuals();
+    } catch (err) { setError(extractErrorMessage(err)); }
+  }
+
+  async function registerAttestationAction(action: "create" | "submit" | "review") {
+    const version = approvedBudgetVersions[0];
+    if (!version) return setError("An approved cash budget is required.");
+    try {
+      if (action === "create") {
+        await api.post("/public-sector/expected-cash-sources/completeness-attestation", {
+          budgetVersionId: version.id, expectedSourceCount: expectedCashSources.length,
+          entityScope: version.entityScope, evidenceReference: registerAttestationEvidence.trim(),
+        });
+        setRegisterAttestationEvidence("");
+      } else if (action === "submit") {
+        await api.post(`/public-sector/expected-cash-sources/completeness-attestation/${registerAttestation.id}/submit`);
+      } else {
+        await api.post(`/public-sector/expected-cash-sources/completeness-attestation/${registerAttestation.id}/review`, {
+          accepted: true, reviewNote: "Expected-source population completeness independently verified against the supporting inventory.",
+        });
+      }
+      setMsg(action === "create" ? "Source-register completeness attestation created." : action === "submit" ? "Source-register completeness submitted for certification." : "Source-register completeness independently certified.");
       await loadCashActuals();
     } catch (err) { setError(extractErrorMessage(err)); }
   }
