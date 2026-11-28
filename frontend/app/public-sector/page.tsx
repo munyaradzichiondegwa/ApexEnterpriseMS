@@ -133,16 +133,38 @@ export default function PublicSectorPage() {
           .map((x: any) => x.supportingReference).join("; ") ?? "",
       },
     ] : [];
+    const automaticReconciliationRows = (budgetComparison.automaticReconciliationCandidates ?? []).map((candidate: any) => {
+      const approved = budgetComparison.reconciliations?.find((item: any) =>
+        item.type === candidate.type && item.statementSection === candidate.statementSection &&
+        item.sourceFingerprint === candidate.sourceFingerprint);
+      return {
+        description: `AUTOMATIC ${candidate.type.toUpperCase()} RECONCILIATION — ${candidate.statementSection.toUpperCase()}`,
+        accountType: "Reconciliation",
+        statementSection: candidate.statementSection,
+        reconciliationType: candidate.type,
+        originalBudget: null, finalBudget: null, actualOnComparableBasis: null,
+        reconciliationAdjustment: candidate.expectedAdjustment,
+        financialStatementActual: null, variance: null, variancePercent: null,
+        commentReference: approved?.supportingReference ?? "",
+        sourceFingerprint: candidate.sourceFingerprint,
+        calculatedAt: candidate.calculatedAt,
+        calculationExplanation: candidate.explanation,
+      };
+    });
     const exportRows = [
       ...lines,
       ...(canCalculateSurplusDeficit ? [summaryRow] : []),
       ...reconciliationRows,
+      ...automaticReconciliationRows,
     ];
     downloadCsv(`apexerp-ipsas24-budget-comparison-${year}`, exportRows, [
       // Reporting metadata required to interpret the separate statement.
       { header: "Financial Year", value: () => budgetComparison.financialYear },
       { header: "Reporting Period Start", value: () => new Date(budgetComparison.periodStart).toISOString().slice(0, 10) },
       { header: "Reporting Period End", value: () => new Date(new Date(budgetComparison.periodEnd).getTime() - 86400000).toISOString().slice(0, 10) },
+      { header: "Financial Statement Period Start", value: () => new Date(budgetComparison.statementPeriodStart).toISOString().slice(0, 10) },
+      { header: "Financial Statement Period End", value: () => new Date(new Date(budgetComparison.statementPeriodEnd).getTime() - 86400000).toISOString().slice(0, 10) },
+      { header: "Financial Statement Entity Scope", value: () => budgetComparison.financialStatementEntityScope },
       { header: "Currency", value: () => budgetComparison.currency },
       { header: "Budget Basis", value: () => budgetComparison.accountingBasis },
       { header: "Classification Basis", value: () => budgetComparison.classificationBasis },
@@ -155,6 +177,11 @@ export default function PublicSectorPage() {
       { header: "Actual Amounts on Comparable Basis", value: (row: any) => row.actualOnComparableBasis },
       { header: "Difference between final budget and actual", value: (row: any) => row.variance },
       { header: "Reconciliation Adjustment", value: (row: any) => row.reconciliationAdjustment ?? "" },
+      { header: "Reconciliation Type", value: (row: any) => row.reconciliationType ?? "" },
+      { header: "Statement Section", value: (row: any) => row.statementSection ?? "" },
+      { header: "Calculation Explanation", value: (row: any) => row.calculationExplanation ?? "" },
+      { header: "Source Fingerprint", value: (row: any) => row.sourceFingerprint ?? "" },
+      { header: "Calculated At", value: (row: any) => row.calculatedAt ?? "" },
       { header: "Actual Amount in Financial Statements", value: (row: any) => row.financialStatementActual ?? "" },
       { header: "Comment Ref", value: (row: any) => row.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.commentReference ?? budgetComparison.varianceExplanations?.find((x: any) => x.budgetVersionLineId === row.budgetVersionLineId && x.varianceAmount === row.variance && x.status === "Approved")?.evidenceReference ?? "" },
       // Supporting dimensions and audit references.
