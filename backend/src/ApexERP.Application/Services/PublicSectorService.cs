@@ -3288,17 +3288,22 @@ namespace ApexERP.Application.Services
             }
             if (!allocation.TaxComponentId.HasValue || allocation.InvoiceLineId.HasValue)
                 throw new InvalidOperationException("Malformed tax-component settlement allocation.");
+            var invoiceKind = settlementKind == "TX" ? "AP" : settlementKind;
             var component = await _db.InvoiceTaxComponents.SingleOrDefaultAsync(x =>
                 x.Id == allocation.TaxComponentId.Value && x.CompanyId == companyId &&
-                x.InvoiceId == invoiceId && x.InvoiceKind == settlementKind, ct)
+                x.InvoiceId == invoiceId && x.InvoiceKind == invoiceKind, ct)
                 ?? throw new InvalidOperationException("Settlement references a tax component outside its invoice.");
             if (settlementKind == "AP" && component.TaxType == TaxType.WHT)
                 throw new InvalidOperationException("WHT is not supplier cash and must be settled using separate tax-authority payment evidence.");
+            if (settlementKind == "TX" && component.TaxType != TaxType.WHT)
+                throw new InvalidOperationException("Tax-authority remittance allocations must reference WHT components.");
             var policy = await GetApprovedTaxBudgetPolicyAsync(companyId, component, settlementDate, ct);
             if (policy.Treatment == TaxBudgetTreatment.ExcludeFromBudgetActual)
                 return (Guid.Empty, Guid.Empty, null, false);
             if (policy.Treatment == TaxBudgetTreatment.SeparateClassification)
                 return (policy.BudgetGlAccountId!.Value, policy.FundCentreId!.Value, policy.CostCentreId, true);
+            if (settlementKind == "TX")
+                return (component.GlAccountId, invoiceFundCentreId, null, true);
             if (!component.InvoiceLineId.HasValue)
                 throw new InvalidOperationException("An included VAT component must retain its originating invoice line.");
             if (settlementKind == "AR")
