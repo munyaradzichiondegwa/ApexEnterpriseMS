@@ -258,6 +258,80 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
     }
 
+    [HttpPost("ledger-events/{id:guid}/liquidations")]
+    [HasPermission(Permissions.PublicSectorBudgetOverride)]
+    public async Task<IActionResult> CreateLiquidation(Guid id, CreateModifiedCashReversalRequest req, CancellationToken ct)
+    {
+        try
+        {
+            var liquidation = await _db.InTransactionAsync(async token =>
+            {
+                await _db.AcquireTransactionLockAsync($"ipsas24-modified-cash-liquidation:{CompanyId:N}:{id:N}", token);
+                var original = await _db.ModifiedCashRecognitionLedgerEvents.SingleOrDefaultAsync(x =>
+                    x.Id == id && x.CompanyId == CompanyId &&
+                    x.Status == ModifiedCashLedgerEventStatus.Certified &&
+                    x.EventKind == ModifiedCashLedgerEventKind.Recognition &&
+                    !x.OriginalEventId.HasValue, token)
+                    ?? throw new InvalidOperationException("Only an original certified recognition event can be liquidated.");
+                var policy = await _db.ModifiedCashRecognitionPolicies.SingleOrDefaultAsync(x =>
+                    x.Id == original.PolicyId && x.CompanyId == CompanyId &&
+                    x.Status == ModifiedCashRecognitionPolicyStatus.Approved, token)
+                    ?? throw new InvalidOperationException("The original recognition policy is no longer approved.");
+                if (string.IsNullOrWhiteSpace(req.EvidenceReference) || req.EvidenceReference.Trim().Length > 1000)
+                    throw new InvalidOperationException("A liquidation evidence reference of up to 1,000 characters is required.");
+                if (await _db.ModifiedCashRecognitionLedgerEvents.AnyAsync(x =>
+                    x.CompanyId == CompanyId && x.OriginalEventId == original.Id &&
+                    x.EventKind == ModifiedCashLedgerEventKind.Reversal &&
+                    x.Status != ModifiedCashLedgerEventStatus.Rejected, token))
+                    throw new InvalidOperationException("A reversed recognition event cannot be liquidated.");
+                var apAllocations = await _db.ApPaymentAllocations.Where(x =>
+                    _db.ApInvoices.Any(i => i.Id == x.ApInvoiceId && i.CompanyId == CompanyId &&
+                        i.CommitmentId == original.CommitmentId))
+                    .Select(x => x.Id).ToListAsync(token);
+                ModifiedCashApSettlementEvidence? settlement = null;
+                foreach (var allocationId in apAllocations)
+                {
+                    settlement = await ModifiedCashApSettlementEvidenceValidator.ValidateAsync(
+                        _db, CompanyId, allocationId, original.CommitmentId, token);
+                    if (settlement != null) break;
+                }
+                if (settlement == null)
+                    throw new InvalidOperationException("A reconciled bank-funded AP payment allocation linked to the original commitment is required to liquidate the recognition.");
+                if (settlement.PaymentDate < policy.ReportingPeriodStart ||
+                    settlement.PaymentDate >= policy.ReportingPeriodEnd ||
+                    settlement.PaymentDate < policy.EffectiveFrom ||
+                    (policy.EffectiveTo.HasValue && settlement.PaymentDate >= policy.EffectiveTo.Value) ||
+                    DateTime.UtcNow > policy.ReportingPeriodEnd.AddDays(policy.PostPeriodRecognitionWindowDays))
+                    throw new InvalidOperationException("The AP settlement or evidence acceptance date falls outside the policy reporting/effective period.");
+                var priorLiquidations = await _db.ModifiedCashRecognitionLedgerEvents.Where(x =>
+                    x.CompanyId == CompanyId && x.OriginalEventId == original.Id &&
+                    x.EventKind == ModifiedCashLedgerEventKind.Liquidation &&
+                    x.Status != ModifiedCashLedgerEventStatus.Rejected).SumAsync(x => (decimal?)x.Amount, token) ?? 0m;
+                var outstanding = original.Amount - priorLiquidations;
+                if (settlement.AllocatedAmount > outstanding)
+                    throw new InvalidOperationException("The AP payment allocation exceeds the remaining unliquidated recognition balance.");
+                var item = new ModifiedCashRecognitionLedgerEvent
+                {
+                    CompanyId = CompanyId, PolicyId = policy.Id, CommitmentId = original.CommitmentId,
+                    SourceEventId = settlement.AllocationId, SourceEventKind = original.SourceEventKind,
+                    EventKind = ModifiedCashLedgerEventKind.Liquidation, OriginalEventId = original.Id,
+                    Amount = settlement.AllocatedAmount, EventDate = settlement.PaymentDate,
+                    EvidenceAcceptedAt = DateTime.UtcNow, EvidenceReference = req.EvidenceReference.Trim(),
+                    Status = ModifiedCashLedgerEventStatus.Draft, PreparedBy = UserId, CreatedBy = UserId
+                };
+                _db.ModifiedCashRecognitionLedgerEvents.Add(item);
+                _audit.Record(CompanyId, UserId, "ModifiedCashRecognitionLedgerEvent.LiquidationCreated",
+                    "PublicSector", nameof(ModifiedCashRecognitionLedgerEvent), item.Id, null,
+                    new { OriginalEventId = original.Id, item.SourceEventId, item.Amount,
+                        settlement.PaymentId, settlement.InvoiceId, settlement.BankTransactionId });
+                await _db.SaveChangesAsync(token);
+                return item;
+            }, ct);
+            return Ok(liquidation);
+        }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
     [HttpPost("ledger-events/{id:guid}/reverse")]
     [HasPermission(Permissions.PublicSectorBudgetOverride)]
     public async Task<IActionResult> CreateReversal(Guid id, CreateModifiedCashReversalRequest req, CancellationToken ct)
@@ -400,6 +474,49 @@ public sealed class ModifiedCashRecognitionController : ApiControllerBase
                         x.EventKind == ModifiedCashLedgerEventKind.Recognition ? x.Amount : -x.Amount);
                     if (ledger.Amount > commitment.Amount - recognisedBalance)
                         throw new InvalidOperationException("The live commitment balance no longer supports this recognition.");
+                }
+                else if (ledger.EventKind == ModifiedCashLedgerEventKind.Liquidation)
+                {
+                    if (!ledger.OriginalEventId.HasValue)
+                        throw new InvalidOperationException("A liquidation must identify its original recognition event.");
+                    var original = await _db.ModifiedCashRecognitionLedgerEvents.SingleOrDefaultAsync(x =>
+                        x.Id == ledger.OriginalEventId.Value && x.CompanyId == CompanyId &&
+                        x.Status == ModifiedCashLedgerEventStatus.Certified &&
+                        x.EventKind == ModifiedCashLedgerEventKind.Recognition &&
+                        !x.OriginalEventId.HasValue, token);
+                    var settlement = await ModifiedCashApSettlementEvidenceValidator.ValidateAsync(
+                        _db, CompanyId, ledger.SourceEventId, ledger.CommitmentId, token);
+                    if (original == null || settlement == null ||
+                        original.PolicyId != ledger.PolicyId ||
+                        original.CommitmentId != ledger.CommitmentId ||
+                        original.SourceEventKind != ledger.SourceEventKind ||
+                        settlement.AllocatedAmount != ledger.Amount ||
+                        settlement.PaymentDate != ledger.EventDate ||
+                        original.EventDate < policy.ReportingPeriodStart ||
+                        original.EventDate >= policy.ReportingPeriodEnd ||
+                        await _db.ModifiedCashRecognitionLedgerEvents.AnyAsync(x =>
+                            x.CompanyId == CompanyId && x.OriginalEventId == original.Id &&
+                            x.EventKind == ModifiedCashLedgerEventKind.Reversal &&
+                            x.Status != ModifiedCashLedgerEventStatus.Rejected, token))
+                        throw new InvalidOperationException("The AP payment no longer validates against an eligible, unreversed modified-cash recognition event.");
+                    var allocatedTotal = await _db.ModifiedCashRecognitionLedgerEvents.Where(x =>
+                        x.CompanyId == CompanyId && x.OriginalEventId == original.Id &&
+                        x.EventKind == ModifiedCashLedgerEventKind.Liquidation &&
+                        x.Status != ModifiedCashLedgerEventStatus.Rejected)
+                        .SumAsync(x => (decimal?)x.Amount, token) ?? 0m;
+                    if (allocatedTotal > original.Amount)
+                        throw new InvalidOperationException("Certified and pending liquidations exceed the original recognition amount.");
+                    var mapping = await _db.ModifiedCashRecognitionMappings.SingleOrDefaultAsync(x =>
+                        x.CompanyId == CompanyId && x.PolicyId == policy.Id &&
+                        x.SourceEventKind == ledger.SourceEventKind, token);
+                    var commitment = await _db.Commitments.SingleOrDefaultAsync(x =>
+                        x.Id == ledger.CommitmentId && x.CompanyId == CompanyId, token);
+                    if (mapping == null || commitment == null ||
+                        !await _db.PublicSectorBudgetVersionLines.AnyAsync(x =>
+                            x.Id == mapping.BudgetVersionLineId && x.CompanyId == CompanyId &&
+                            x.BudgetVersionId == policy.BudgetVersionId &&
+                            x.FundCentreId == commitment.FundCentreId, token))
+                        throw new InvalidOperationException("The liquidation budget classification mapping is no longer valid.");
                 }
                 else if (ledger.EventKind == ModifiedCashLedgerEventKind.Reversal)
                 {
