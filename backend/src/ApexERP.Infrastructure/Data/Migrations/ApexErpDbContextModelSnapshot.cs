@@ -3804,6 +3804,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                     b.Property<Guid?>("UpdatedBy").HasColumnType("uuid");
                     b.HasKey("Id");
                     b.HasIndex("CashSourceSubmissionId").HasDatabaseName("IX_CashSourceReconciliationLines_Submission");
+                    b.HasIndex("BudgetExecutionActualId").HasDatabaseName("IX_CashSourceReconciliationLines_ActualId");
                     b.HasIndex("CompanyId", "CashSourceSubmissionId", "BudgetExecutionActualId").IsUnique()
                         .HasFilter("\"BudgetExecutionActualId\" IS NOT NULL")
                         .HasDatabaseName("UX_CashSourceReconciliationLine_Actual");
