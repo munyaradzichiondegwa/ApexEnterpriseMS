@@ -1029,6 +1029,78 @@ namespace ApexERP.Tests
         }
 
         [PostgresFact]
+        public async Task Approved_tax_mappings_policies_and_posted_tax_settlement_evidence_are_immutable()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var company = Guid.NewGuid();
+            var taxCodeId = Guid.NewGuid();
+            var mappingId = Guid.NewGuid();
+            var policyId = Guid.NewGuid();
+            var componentId = Guid.NewGuid();
+            var settlementId = Guid.NewGuid();
+            await using (var seed = db.NewContext(company))
+            {
+                seed.TaxAccountMappings.Add(new TaxAccountMapping
+                {
+                    Id = mappingId, CompanyId = company, TaxType = TaxType.VAT,
+                    Purpose = "AR-VAT-OUTPUT", TaxCodeId = taxCodeId, GlAccountId = Guid.NewGuid(),
+                    VersionNumber = 1, EffectiveFrom = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Status = TaxConfigurationStatus.Approved, SubmittedBy = Guid.NewGuid(),
+                    SubmittedAt = Oct15, ApprovedBy = Guid.NewGuid(), ApprovedAt = Oct15
+                });
+                seed.PublicSectorTaxBudgetPolicies.Add(new PublicSectorTaxBudgetPolicy
+                {
+                    Id = policyId, CompanyId = company, TaxType = TaxType.VAT, TaxCodeId = taxCodeId,
+                    Treatment = TaxBudgetTreatment.IncludeInBudgetActual, VersionNumber = 1,
+                    EffectiveFrom = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Status = TaxConfigurationStatus.Approved, SubmittedBy = Guid.NewGuid(),
+                    SubmittedAt = Oct15, ApprovedBy = Guid.NewGuid(), ApprovedAt = Oct15
+                });
+                seed.InvoiceTaxComponents.Add(new InvoiceTaxComponent
+                {
+                    Id = componentId, CompanyId = company, InvoiceKind = "AR", InvoiceId = Guid.NewGuid(),
+                    InvoiceLineId = Guid.NewGuid(), TaxCodeId = taxCodeId, TaxType = TaxType.VAT,
+                    TaxableBase = 100m, Rate = 0.15m, Amount = 15m, GlAccountId = Guid.NewGuid(),
+                    TaxAccountMappingId = mappingId, MappingVersionNumber = 1,
+                    JournalEntryId = Guid.NewGuid(), JournalLineId = Guid.NewGuid()
+                });
+                seed.SettlementComponentAllocations.Add(new SettlementComponentAllocation
+                {
+                    Id = settlementId, CompanyId = company, SettlementKind = "AR",
+                    SettlementAllocationId = Guid.NewGuid(), InvoiceId = Guid.NewGuid(),
+                    ComponentKind = SettlementComponentKind.InvoiceLine, InvoiceLineId = Guid.NewGuid(),
+                    AmountApplied = 10m
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using (var ctx = db.NewContext(company))
+            {
+                var mapping = await ctx.TaxAccountMappings.SingleAsync(x => x.Id == mappingId);
+                mapping.GlAccountId = Guid.NewGuid();
+                await Assert.ThrowsAsync<InvalidOperationException>(() => ctx.SaveChangesAsync());
+            }
+            await using (var ctx = db.NewContext(company))
+            {
+                var policy = await ctx.PublicSectorTaxBudgetPolicies.SingleAsync(x => x.Id == policyId);
+                policy.Treatment = TaxBudgetTreatment.ExcludeFromBudgetActual;
+                await Assert.ThrowsAsync<InvalidOperationException>(() => ctx.SaveChangesAsync());
+            }
+            await using (var ctx = db.NewContext(company))
+            {
+                var component = await ctx.InvoiceTaxComponents.SingleAsync(x => x.Id == componentId);
+                component.Amount = 16m;
+                await Assert.ThrowsAsync<InvalidOperationException>(() => ctx.SaveChangesAsync());
+            }
+            await using (var ctx = db.NewContext(company))
+            {
+                var allocation = await ctx.SettlementComponentAllocations.SingleAsync(x => x.Id == settlementId);
+                allocation.AmountApplied = 11m;
+                await Assert.ThrowsAsync<InvalidOperationException>(() => ctx.SaveChangesAsync());
+            }
+        }
+
+        [PostgresFact]
         public async Task AR_VAT_posting_rejects_wrong_type_or_foreign_company_tax_accounts()
         {
             await using var db = await TestDb.CreateAsync();
