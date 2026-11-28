@@ -2405,5 +2405,194 @@ namespace ApexERP.Tests
             await ctx.SaveChangesAsync();
             Assert.False(await service.IsCertifiedCashActualSourceValidAsync(companyId, actual, default));
         }
+
+        [PostgresFact]
+        public async Task Ipsas24_ar_ap_opening_and_closing_balances_must_reconcile_to_gl_control_accounts()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
+            var arControlId = Guid.NewGuid();
+            var apControlId = Guid.NewGuid();
+            var revenueId = Guid.NewGuid();
+            var expenseId = Guid.NewGuid();
+            var customerId = Guid.NewGuid();
+            var supplierId = Guid.NewGuid();
+            var arOpeningJournalId = Guid.NewGuid();
+            var arClosingJournalId = Guid.NewGuid();
+            var apOpeningJournalId = Guid.NewGuid();
+            var apClosingJournalId = Guid.NewGuid();
+            var budgetVersionId = Guid.NewGuid();
+            var preparerId = Guid.NewGuid();
+            var sourceReviewerId = Guid.NewGuid();
+            var periodStart = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+            var periodEnd = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "IPSAS AR AP Control MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.AccountingPeriods.Add(new AccountingPeriod
+                {
+                    Id = periodId, CompanyId = companyId, Year = 2026, PeriodNo = 6,
+                    StartDate = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+                    EndDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Status = PeriodStatus.Open
+                });
+                seed.GlAccounts.AddRange(
+                    new GlAccount
+                    {
+                        Id = arControlId, CompanyId = companyId, Code = "1200",
+                        Name = "Trade Receivables Control", Type = GlAccountType.Asset,
+                        Currency = "USD", SubType = "AR-CONTROL"
+                    },
+                    new GlAccount
+                    {
+                        Id = apControlId, CompanyId = companyId, Code = "2100",
+                        Name = "Trade Payables Control", Type = GlAccountType.Liability,
+                        Currency = "USD", SubType = "AP-CONTROL"
+                    },
+                    new GlAccount
+                    {
+                        Id = revenueId, CompanyId = companyId, Code = "4100",
+                        Name = "Service Revenue", Type = GlAccountType.Income,
+                        Currency = "USD", SubType = "REV"
+                    },
+                    new GlAccount
+                    {
+                        Id = expenseId, CompanyId = companyId, Code = "5100",
+                        Name = "Operating Expense", Type = GlAccountType.Expense,
+                        Currency = "USD", SubType = "EXP"
+                    });
+                seed.Customers.Add(new Customer
+                {
+                    Id = customerId, CompanyId = companyId, Code = "C-AR-01",
+                    Name = "AR Control Customer", Currency = "USD", ArAccountId = arControlId
+                });
+                seed.Suppliers.Add(new Supplier
+                {
+                    Id = supplierId, CompanyId = companyId, Code = "S-AP-01",
+                    Name = "AP Control Supplier", Currency = "USD", ApAccountId = apControlId
+                });
+                seed.JournalEntries.AddRange(
+                    new JournalEntry
+                    {
+                        Id = arOpeningJournalId, CompanyId = companyId, EntryNo = "JE-AR-OPEN",
+                        Description = "Opening AR invoice", EntryDate = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc),
+                        PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                    },
+                    new JournalEntry
+                    {
+                        Id = arClosingJournalId, CompanyId = companyId, EntryNo = "JE-AR-CLOSE",
+                        Description = "In-period AR invoice", EntryDate = new DateTime(2026, 6, 15, 0, 0, 0, DateTimeKind.Utc),
+                        PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                    },
+                    new JournalEntry
+                    {
+                        Id = apOpeningJournalId, CompanyId = companyId, EntryNo = "JE-AP-OPEN",
+                        Description = "Opening AP invoice", EntryDate = new DateTime(2026, 1, 12, 0, 0, 0, DateTimeKind.Utc),
+                        PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                    },
+                    new JournalEntry
+                    {
+                        Id = apClosingJournalId, CompanyId = companyId, EntryNo = "JE-AP-CLOSE",
+                        Description = "In-period AP invoice", EntryDate = new DateTime(2026, 6, 20, 0, 0, 0, DateTimeKind.Utc),
+                        PeriodId = periodId, Source = JournalSource.Manual, Status = JournalStatus.Posted
+                    });
+                seed.JournalLines.AddRange(
+                    new JournalLine { JournalEntryId = arOpeningJournalId, GlAccountId = arControlId, Debit = 100m, Credit = 0m, Currency = "USD" },
+                    new JournalLine { JournalEntryId = arOpeningJournalId, GlAccountId = revenueId, Debit = 0m, Credit = 100m, Currency = "USD" },
+                    new JournalLine { JournalEntryId = arClosingJournalId, GlAccountId = arControlId, Debit = 50m, Credit = 0m, Currency = "USD" },
+                    new JournalLine { JournalEntryId = arClosingJournalId, GlAccountId = revenueId, Debit = 0m, Credit = 50m, Currency = "USD" },
+                    new JournalLine { JournalEntryId = apOpeningJournalId, GlAccountId = expenseId, Debit = 60m, Credit = 0m, Currency = "USD" },
+                    new JournalLine { JournalEntryId = apOpeningJournalId, GlAccountId = apControlId, Debit = 0m, Credit = 60m, Currency = "USD" },
+                    new JournalLine { JournalEntryId = apClosingJournalId, GlAccountId = expenseId, Debit = 30m, Credit = 0m, Currency = "USD" },
+                    new JournalLine { JournalEntryId = apClosingJournalId, GlAccountId = apControlId, Debit = 0m, Credit = 30m, Currency = "USD" });
+                seed.ArInvoices.AddRange(
+                    new ArInvoice
+                    {
+                        CompanyId = companyId, CustomerId = customerId, InvoiceNo = "AR-OPEN",
+                        InvoiceDate = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc),
+                        DueDate = new DateTime(2026, 2, 9, 0, 0, 0, DateTimeKind.Utc),
+                        Currency = "USD", Total = 100m, Outstanding = 100m,
+                        Status = InvoiceStatus.Posted, JournalEntryId = arOpeningJournalId
+                    },
+                    new ArInvoice
+                    {
+                        CompanyId = companyId, CustomerId = customerId, InvoiceNo = "AR-CLOSE",
+                        InvoiceDate = new DateTime(2026, 6, 15, 0, 0, 0, DateTimeKind.Utc),
+                        DueDate = new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc),
+                        Currency = "USD", Total = 50m, Outstanding = 50m,
+                        Status = InvoiceStatus.Posted, JournalEntryId = arClosingJournalId
+                    });
+                seed.ApInvoices.AddRange(
+                    new ApInvoice
+                    {
+                        CompanyId = companyId, SupplierId = supplierId, InvoiceNo = "AP-OPEN",
+                        InvoiceDate = new DateTime(2026, 1, 12, 0, 0, 0, DateTimeKind.Utc),
+                        DueDate = new DateTime(2026, 2, 11, 0, 0, 0, DateTimeKind.Utc),
+                        Currency = "USD", Total = 60m, Outstanding = 60m,
+                        Status = InvoiceStatus.Posted, JournalEntryId = apOpeningJournalId
+                    },
+                    new ApInvoice
+                    {
+                        CompanyId = companyId, SupplierId = supplierId, InvoiceNo = "AP-CLOSE",
+                        InvoiceDate = new DateTime(2026, 6, 20, 0, 0, 0, DateTimeKind.Utc),
+                        DueDate = new DateTime(2026, 7, 20, 0, 0, 0, DateTimeKind.Utc),
+                        Currency = "USD", Total = 30m, Outstanding = 30m,
+                        Status = InvoiceStatus.Posted, JournalEntryId = apClosingJournalId
+                    });
+                seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
+                {
+                    Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
+                    VersionNumber = 1, Kind = PublicSectorBudgetVersionKind.Original,
+                    Status = PublicSectorBudgetVersionStatus.Approved, Currency = "USD",
+                    AccountingBasis = AccountingBasis.Cash, ClassificationBasis = "MDA cash classification",
+                    EntityScope = "IPSAS AR AP Control MDA", PeriodStart = periodStart, PeriodEnd = periodEnd,
+                    AuthorityReference = "Appropriation Act 2026", ApprovedBy = Guid.NewGuid(),
+                    ApprovedAt = DateTime.UtcNow, CreatedBy = preparerId
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var arExpected = await service.CreateExpectedCashSourceAsync(companyId, budgetVersionId,
+                "ReceivablesControl", "AR-CONTROL", "Trade receivables control account",
+                arControlId.ToString(), true, periodStart, periodEnd, preparerId);
+            var apExpected = await service.CreateExpectedCashSourceAsync(companyId, budgetVersionId,
+                "PayablesControl", "AP-CONTROL", "Trade payables control account",
+                apControlId.ToString(), true, periodStart, periodEnd, preparerId);
+            foreach (var expected in new[] { arExpected, apExpected })
+            {
+                await service.SubmitExpectedCashSourceAsync(companyId, expected.Id, preparerId);
+                await service.ApproveExpectedCashSourceAsync(companyId, expected.Id, sourceReviewerId);
+            }
+
+            var arSubmission = await service.CreateCashSourceSubmissionAsync(companyId, arExpected.Id,
+                0, 0m, 100m, 150m, "USD", "AR control account opening and closing trial-balance workpaper", preparerId);
+            var apSubmission = await service.CreateCashSourceSubmissionAsync(companyId, apExpected.Id,
+                0, 0m, 60m, 90m, "USD", "AP control account opening and closing trial-balance workpaper", preparerId);
+            await service.SubmitCashSourceSubmissionAsync(companyId, arSubmission.Id, preparerId);
+            await service.SubmitCashSourceSubmissionAsync(companyId, apSubmission.Id, preparerId);
+
+            var changedArLine = await ctx.JournalLines.SingleAsync(x =>
+                x.JournalEntryId == arClosingJournalId && x.GlAccountId == arControlId);
+            changedArLine.Debit = 55m;
+            var changedApLine = await ctx.JournalLines.SingleAsync(x =>
+                x.JournalEntryId == apClosingJournalId && x.GlAccountId == apControlId);
+            changedApLine.Credit = 35m;
+            await ctx.SaveChangesAsync();
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ReviewCashSourceSubmissionAsync(companyId, arSubmission.Id, sourceReviewerId,
+                    true, "AR control balances independently reviewed."));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ReviewCashSourceSubmissionAsync(companyId, apSubmission.Id, sourceReviewerId,
+                    true, "AP control balances independently reviewed."));
+        }
     }
 }
