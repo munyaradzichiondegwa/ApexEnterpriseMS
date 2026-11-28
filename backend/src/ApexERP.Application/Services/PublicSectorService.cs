@@ -104,7 +104,7 @@ namespace ApexERP.Application.Services
                 var workflow = await _db.WorkflowRequests.Include(x => x.Approvals).FirstOrDefaultAsync(x =>
                     x.Id == allocation.ApprovalWorkflowId.Value && x.CompanyId == companyId &&
                     x.RequestType == "PublicSectorBudgetAllocation" && x.ReferenceId == allocation.Id &&
-                    x.Status == WorkflowStatus.Approved && x.Approvals.Any(a => a.Approved), token)
+                    x.Status == WorkflowStatus.Approved && x.Approvals.Any(a => a.Approved && a.ApproverId == actorId), token)
                     ?? throw new InvalidOperationException("The independent approval workflow has not been approved.");
                 if (workflow.SubmittedBy == actorId)
                     throw new InvalidOperationException("The allocation submitter cannot finalise their own approval.");
