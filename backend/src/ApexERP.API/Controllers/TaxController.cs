@@ -17,12 +17,15 @@ namespace ApexERP.API.Controllers
         private readonly ApexErpDbContext _db;
         private readonly TaxComplianceService _tax;
         private readonly ZimbabweDswtWithholdingRegisterService _dswt;
+        private readonly ZimbabweDswtFilingWorkflowService _dswtFilings;
 
-        public TaxController(ApexErpDbContext db, TaxComplianceService tax, ZimbabweDswtWithholdingRegisterService dswt)
+        public TaxController(ApexErpDbContext db, TaxComplianceService tax,
+            ZimbabweDswtWithholdingRegisterService dswt, ZimbabweDswtFilingWorkflowService dswtFilings)
         {
             _db = db;
             _tax = tax;
             _dswt = dswt;
+            _dswtFilings = dswtFilings;
         }
 
         [HttpGet("codes")]
@@ -125,6 +128,51 @@ namespace ApexERP.API.Controllers
         public async Task<IActionResult> MarkDswtRemitted(Guid id, [FromBody] ZimbabweDswtRemittanceRequest request)
         {
             return Ok(await _dswt.MarkRemittedToZimraAsync(CompanyId, id, request.RemittedAt, request.EvidenceReference));
+        }
+
+        /// <summary>Creates an immutable DSWT return snapshot for subsequent manual TaRMS filing.</summary>
+        [HttpPost("dswt/filings/prepare")]
+        public async Task<IActionResult> PrepareDswtFiling(
+            [FromBody] ZimbabweDswtFilingPreparationRequest request, CancellationToken ct)
+        {
+            try { return Ok(await _dswtFilings.PrepareAsync(CompanyId, request, ct)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpGet("dswt/filings/{id:guid}")]
+        public async Task<IActionResult> GetDswtFiling(Guid id, CancellationToken ct)
+        {
+            var filing = await _dswtFilings.GetAsync(CompanyId, id, ct);
+            return filing is null ? NotFound() : Ok(filing);
+        }
+
+        /// <summary>Records a human-confirmed TaRMS submission and its evidence; no API transmission occurs.</summary>
+        [HttpPut("dswt/filings/{id:guid}/submission")]
+        public async Task<IActionResult> MarkDswtFilingSubmitted(
+            Guid id, [FromBody] ZimbabweDswtFilingSubmissionRequest request, CancellationToken ct)
+        {
+            try { return Ok(await _dswtFilings.MarkSubmittedAsync(CompanyId, id, request, ct)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPut("dswt/filings/{id:guid}/acknowledgement")]
+        public async Task<IActionResult> RecordDswtFilingAcknowledgement(
+            Guid id, [FromBody] ZimbabweDswtFilingAcknowledgementRequest request, CancellationToken ct)
+        {
+            try { return Ok(await _dswtFilings.RecordAcknowledgementAsync(CompanyId, id, request, ct)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPut("dswt/filings/{id:guid}/payment")]
+        public async Task<IActionResult> ConfirmDswtFilingPayment(
+            Guid id, [FromBody] ZimbabweDswtFilingPaymentRequest request, CancellationToken ct)
+        {
+            try { return Ok(await _dswtFilings.ConfirmPaymentAsync(CompanyId, id, request, ct)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { return BadRequest(new { error = ex.Message }); }
         }
     }
 }
