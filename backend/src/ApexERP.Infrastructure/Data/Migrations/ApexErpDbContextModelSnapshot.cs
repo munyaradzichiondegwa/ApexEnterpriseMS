@@ -3779,6 +3779,7 @@ namespace ApexERP.Infrastructure.Data.Migrations
                         .IsUnique().HasDatabaseName("UX_PublicSectorCashSourceSubmission_Revision");
                     b.ToTable("PublicSectorCashSourceSubmissions", t =>
                         {
+                            t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Revision", "\"SubmissionRevision\" >= 1");
                             t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Period", "\"PeriodEnd\" > \"PeriodStart\"");
                             t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_RecordCount", "\"RecordCount\" >= 0");
                             t.HasCheckConstraint("CK_PublicSectorCashSourceSubmission_Currency", "char_length(\"Currency\") = 3");
