@@ -2758,7 +2758,7 @@ namespace ApexERP.Application.Services
                 var directRates = await _db.ExchangeRates.Where(x =>
                     x.CompanyId == companyId && x.FromCurrency.ToUpper() == sourceCurrency &&
                     x.ToCurrency.ToUpper() == budgetCurrency && x.RateDate <= sourceDate && x.Rate > 0m &&
-                    x.ApprovedBy.HasValue && x.ApprovedAt.HasValue)
+                    x.ApprovedBy.HasValue && x.ApprovedAt.HasValue && x.CreatedBy != x.ApprovedBy)
                     .ToListAsync(ct);
                 var inverseRates = await _db.ExchangeRates.Where(x =>
                     x.CompanyId == companyId && x.FromCurrency.ToUpper() == budgetCurrency &&
@@ -3019,6 +3019,7 @@ namespace ApexERP.Application.Services
                 x.RateSource == actual.ExchangeRateSource &&
                 x.SourceReference == actual.ExchangeRateSourceReference &&
                 x.ApprovedBy.HasValue && x.ApprovedAt.HasValue &&
+                x.CreatedBy != x.ApprovedBy &&
                 x.ApprovedBy == actual.ExchangeRateApprovedBy &&
                 x.ApprovedAt == actual.ExchangeRateApprovedAt &&
                 x.Rate > 0m, ct);
