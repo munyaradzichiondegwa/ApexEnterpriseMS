@@ -52,8 +52,13 @@ public sealed class ZimbabweDswtWithholdingRegisterService
             throw new ArgumentException("Supplier country must be a two-letter ISO country code.", nameof(request));
         if (request.Currency?.Length != 3 || request.Currency.Any(c => !char.IsAsciiLetter(c)))
             throw new ArgumentException("Currency must be a three-letter ISO currency code.", nameof(request));
-        if (request.WithheldAt == default)
-            throw new ArgumentException("The actual withholding date is required.", nameof(request));
+        if (request.WithheldAt == default || request.WithheldAt.Date < new DateTime(2026, 1, 1))
+            throw new ArgumentException("The actual withholding date must be on or after 1 January 2026.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.EvidenceReference))
+            throw new ArgumentException("Intermediary/bank evidence is required before recording a withholding.", nameof(request));
+        if (request.ApPaymentId.HasValue && !await _db.ApPayments.AnyAsync(x =>
+            x.CompanyId == companyId && x.Id == request.ApPaymentId.Value, ct))
+            throw new InvalidOperationException("The linked AP payment does not exist in this company.");
         if (request.TaxRequest.PaymentRoute != ZimbabweDigitalPaymentRoute.ZimbabweIntermediary)
             throw new InvalidOperationException("The DSWT register accepts only withholding confirmed by a Zimbabwe intermediary.");
 
