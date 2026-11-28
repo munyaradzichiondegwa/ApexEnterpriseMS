@@ -1436,5 +1436,66 @@ namespace ApexERP.Tests
             var comparison = await service.GetBudgetComparisonAsync(companyId, 2026);
             Assert.True(comparison.ComparableActualsAvailable, comparison.ComparabilityMessage);
         }
+
+        [PostgresFact]
+        public async Task Cash_period_attestation_is_rejected_when_source_activity_appears_after_submission()
+        {
+            await using var db = await TestDb.CreateAsync();
+            var companyId = Guid.NewGuid();
+            var preparerId = Guid.NewGuid();
+            var certifierId = Guid.NewGuid();
+            var customerId = Guid.NewGuid();
+            var budgetVersionId = Guid.NewGuid();
+            var periodStart = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var periodEnd = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            await using (var seed = db.NewContext(companyId))
+            {
+                seed.Companies.Add(new Company
+                {
+                    Id = companyId, Name = "Late Activity MDA",
+                    BaseCurrency = "USD", FunctionalCurrency = "USD"
+                });
+                seed.PublicSectorBudgetVersions.Add(new PublicSectorBudgetVersion
+                {
+                    Id = budgetVersionId, CompanyId = companyId, FinancialYear = 2026,
+                    VersionNumber = 1, Kind = PublicSectorBudgetVersionKind.Original,
+                    Status = PublicSectorBudgetVersionStatus.Approved, Currency = "USD",
+                    AccountingBasis = AccountingBasis.Cash, ClassificationBasis = "Cash",
+                    EntityScope = "Late Activity MDA", PeriodStart = periodStart, PeriodEnd = periodEnd,
+                    AuthorityReference = "Appropriation Act 2026", ApprovedBy = certifierId,
+                    ApprovedAt = DateTime.UtcNow, CreatedBy = preparerId
+                });
+                seed.Customers.Add(new Customer
+                {
+                    Id = customerId, CompanyId = companyId, Code = "NIL-TEST-CUST",
+                    Name = "Nil Test Customer", Currency = "USD"
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = db.NewContext(companyId);
+            var service = new PublicSectorService(ctx, new AuditService(ctx));
+            var attestation = await service.CreateCashPeriodAttestationAsync(companyId,
+                budgetVersionId, "Nil return evidence", preparerId);
+            await service.SubmitCashPeriodAttestationAsync(companyId, attestation.Id, preparerId);
+
+            await using (var activity = db.NewContext(companyId))
+            {
+                activity.ArReceipts.Add(new ArReceipt
+                {
+                    Id = Guid.NewGuid(), CompanyId = companyId, CustomerId = customerId,
+                    ReceiptNo = "LATE-RECEIPT-001", ReceiptDate = new DateTime(2026, 8, 10, 0, 0, 0, DateTimeKind.Utc),
+                    Currency = "USD", Amount = 25m
+                });
+                await activity.SaveChangesAsync();
+            }
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CertifyCashPeriodAttestationAsync(companyId, attestation.Id, certifierId));
+            var rejected = await ctx.PublicSectorCashPeriodAttestations.SingleAsync(x => x.Id == attestation.Id);
+            Assert.Equal("Rejected", rejected.Status);
+            Assert.Contains("Source activity detected", rejected.RejectionReason);
+        }
     }
 }
