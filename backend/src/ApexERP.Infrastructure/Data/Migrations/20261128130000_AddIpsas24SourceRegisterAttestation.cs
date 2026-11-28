@@ -46,7 +46,7 @@ public sealed class AddIpsas24SourceRegisterAttestation : Migration
         migrationBuilder.CreateIndex("IX_ExpectedCashSourceRegisterAttestation_BudgetVersion",
             "PublicSectorExpectedCashSourceRegisterAttestations",
             new[] { "CompanyId", "BudgetVersionId" });
-        migrationBuilder.CreateIndex("IX_ExpectedCashSourceRegisterAttestations_BudgetVersionId",
+        migrationBuilder.CreateIndex("IX_PublicSectorExpectedCashSourceRegisterAttestations_BudgetVersionId",
             "PublicSectorExpectedCashSourceRegisterAttestations", "BudgetVersionId");
 
         migrationBuilder.Sql("""
