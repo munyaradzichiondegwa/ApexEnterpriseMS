@@ -388,7 +388,7 @@ namespace ApexERP.Application.Services
             {
                 if (invoice.VatAmount != 0m || invoice.WhtAmount != 0m)
                     throw new InvalidOperationException("VAT/WHT-bearing AP payments require explicit settlement allocations. WHT is a separate liability and must not be treated as supplier cash.");
-                if (appliedAmount < invoice.Total && invoiceLines.Select(x => (x.GlAccountId, x.CostCentreId)).Distinct().Count() > 1)
+                if (appliedAmount < invoice.Total && invoiceLines.Count > 1)
                     throw new InvalidOperationException("A partial AP settlement across multiple dimensions requires explicit settlement component allocations.");
                 if (invoiceLines.Count == 0 || invoiceLines.Sum(x => x.LineSubtotal) != invoice.Total)
                     throw new InvalidOperationException("Tax-free AP invoice lines must reconcile to the invoice total before automatic settlement allocation.");
