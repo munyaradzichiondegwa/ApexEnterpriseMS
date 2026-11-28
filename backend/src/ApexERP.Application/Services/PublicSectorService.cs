@@ -56,7 +56,7 @@ namespace ApexERP.Application.Services
             IReadOnlyList<BudgetComparisonLine> Lines,
             IReadOnlyList<PublicSectorBudgetReconciliation> Reconciliations,
             IReadOnlyList<PublicSectorBudgetVarianceExplanation> VarianceExplanations,
-            bool VarianceExplanationsComplete);
+            bool VarianceExplanationsComplete, bool OriginalToFinalExplanationsComplete);
 
         public async Task<PublicSectorBudgetVersion> CreateBudgetVersionAsync(Guid companyId, int financialYear,
             PublicSectorBudgetVersionKind kind, string currency, AccountingBasis accountingBasis,
@@ -1406,16 +1406,18 @@ namespace ApexERP.Application.Services
                     }
                 }
                 var originalAmount = dimension.OriginalLine?.Amount ?? 0m;
-                var amendmentExplanation = final?.AmendmentNature switch
-                {
-                    PublicSectorBudgetAmendmentNature.ReallocationWithinBudget =>
-                        $"Reallocation within the approved budget: {final.AmendmentReason}",
-                    PublicSectorBudgetAmendmentNature.OtherAuthorisedFactors =>
-                        $"Other authorised factors: {final.AmendmentReason}",
-                    PublicSectorBudgetAmendmentNature.Mixed =>
-                        $"Reallocation and other authorised factors: {final.AmendmentReason}",
-                    _ => final?.AmendmentReason
-                };
+                var amendmentExplanation = final?.Kind != PublicSectorBudgetVersionKind.Revised
+                    ? null
+                    : final.AmendmentNature switch
+                    {
+                        PublicSectorBudgetAmendmentNature.ReallocationWithinBudget =>
+                            $"Reallocation within the approved budget: {final.AmendmentReason}",
+                        PublicSectorBudgetAmendmentNature.OtherAuthorisedFactors =>
+                            $"Other authorised factors: {final.AmendmentReason}",
+                        PublicSectorBudgetAmendmentNature.Mixed =>
+                            $"Reallocation and other authorised factors: {final.AmendmentReason}",
+                        _ => $"Amendment nature not recorded. {final.AmendmentReason}"
+                    };
                 // A dimension absent from the final approved budget has a final amount of zero,
                 // not an unknown/null amount. The same applies to a line introduced after the
                 // original budget: its original amount is zero.
@@ -1445,10 +1447,13 @@ namespace ApexERP.Application.Services
                 .All(line => varianceExplanations.Any(explanation =>
                     explanation.BudgetVersionLineId == line.BudgetVersionLineId &&
                     explanation.Status == "Approved" && explanation.VarianceAmount == line.Variance!.Value));
-            return new BudgetComparisonReport(original.Id, final?.Id, financialYear, original.Currency,
+            var originalToFinalExplanationsComplete = final!.Kind != PublicSectorBudgetVersionKind.Revised ||
+                (final.AmendmentNature.HasValue && !string.IsNullOrWhiteSpace(final.AmendmentReason));
+            return new BudgetComparisonReport(original.Id, final.Id, financialYear, original.Currency,
                 original.AccountingBasis.ToString(), original.ClassificationBasis, original.EntityScope,
-                original.PeriodStart, original.PeriodEnd, final != null, comparable,
-                comparabilityMessage, rows, reconciliations, varianceExplanations, explanationComplete);
+                original.PeriodStart, original.PeriodEnd, true, comparable,
+                comparabilityMessage, rows, reconciliations, varianceExplanations, explanationComplete,
+                originalToFinalExplanationsComplete);
         }
 
 
